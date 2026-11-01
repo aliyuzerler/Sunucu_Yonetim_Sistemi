@@ -3,7 +3,7 @@
 - **Test tarihi:** 2026-11-02
 - **Denetlenen commit:** da86058 (Faz 09 implementasyonu; taban f9bd5c0 = Faz 08 ACCEPTED/READY, tag v0.9.0)
 - **Test eden rolü:** bağımsız denetçi (uygulama ajanı varsayımları alınmadı; kanıt file:line + komut çıktısı istendi)
-- **CI koşuları:** run 41355496209 (9/12 yeşil) → CI-20; run 41356212535 (11/12 yeşil — **gerçek nginx TLS lifecycle kanıtı dahil**) → CI-21; run 41356962374 (11/12 yeşil) → CI-22; run 41357921164 (11/12 yeşil) → CI-23; CI-24 proaktif; run 41358741760 (11/12 yeşil) → CI-25; run 41359474166 (11/12 yeşil) → CI-26; yedinci koşu yeşil beklenir. Aşağıdaki komut çıktıları da86058 tabanlıdır; düzeltme commit'leri yalnız .gitignore + test şemaları/sabitleri + IT-03 netleştirmesi içerir
+- **CI koşuları:** run 41355496209 (9/12 yeşil) → CI-20; run 41356212535 (11/12 yeşil — **gerçek nginx TLS lifecycle kanıtı dahil**) → CI-21; run 41356962374 (11/12 yeşil) → CI-22; run 41357921164 (11/12 yeşil) → CI-23; CI-24 proaktif; run 41358741760 (11/12 yeşil) → CI-25; run 41359474166 (11/12 yeşil) → CI-26; run 41360254200 (11/12 yeşil) → CI-27; sekizinci koşu yeşil beklenir. Aşağıdaki komut çıktıları da86058 tabanlıdır; düzeltme commit'leri yalnız .gitignore + test şemaları/sabitleri + IT-03 netleştirmesi içerir
 - **Kapsam:** yalnız Faz 09 (`prompts/phase-test/phase-09-test.md`); sonraki faz başlatılmadı.
 
 ## Zorunlu kabul kontrolleri

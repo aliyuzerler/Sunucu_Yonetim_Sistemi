@@ -154,11 +154,17 @@ func (s *Store) MarkFailed(ctx context.Context, id, state string, class string, 
 	if state != StatePending && state != StateRenewalFail {
 		return errors.New("certmgmt: izin verilmeyen başarısızlık durumu")
 	}
+	// Mevcut-durum koruması (CI-27): revoked/expired kayıtlar başarısızlık
+	// durumuna DÜŞÜRÜLEMEZ (denetim bütünlüğü).
+	allowed := []string{StatePending, StateIssuing}
+	if state == StateRenewalFail {
+		allowed = []string{StateIssued, StateRenewing, StateRenewalFail, StateExpired}
+	}
 	tag, err := s.pool.Exec(ctx, `
 		UPDATE certificates SET state = $2, last_error = $3, last_error_class = $4,
 		       retry_after_secs = $5, updated_at = now()
-		WHERE id = $1`,
-		id, state, msg, class, retryAfterSecs)
+		WHERE id = $1 AND state = ANY($6)`,
+		id, state, msg, class, retryAfterSecs, allowed)
 	if err != nil {
 		return fmtWrap("failed", err)
 	}
