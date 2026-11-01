@@ -1,7 +1,7 @@
 # Project Status
 
-- **Status:** Phase 03 executed — agent protocol (proto v1 + buf gates), enrollment (single-use scoped tokens), mTLS identity (CA + revocation-checked streams), heartbeat/capability reporting and node-targeted task dispatch, plus agent binary and UI; CI verification in progress. Phase 02 was CI-verified (run 41298676383, commit 832584e).
-- **Current phase:** 03 — Agent protocol, enrollment, mTLS, capability (COMPLETE pending CI + owner approval) → next: 04 — Linux agent and basic OS management.
+- **Status:** Phase 03 executed and CI-verified — agent protocol (proto v1 + buf gates), enrollment (single-use scoped tokens), mTLS identity (CA + revocation-checked streams), heartbeat/capability reporting and node-targeted task dispatch, plus agent binary and UI. CI run for commit eb3ca6a: **success (6/6 jobs: backend, frontend, agent, e2e, proto, secret-scan)**. Phase 02 was CI-verified earlier (run 41298676383).
+- **Current phase:** 03 — Agent protocol, enrollment, mTLS, capability (COMPLETE; CI-verified) → next: 04 — Linux agent and basic OS management (owner approval pending).
 - **Phase 03 evidence:**
   - `proto/servercontrol/agent/v1/agent.proto`: EnrollService + AgentService.Connect (bidi stream; envelopes with request_id/node_id/correlation_id/issued_at/expires_at/idempotency_key); `buf.yaml` (lint STANDARD + two justified exceptions, breaking FILE); generated code in `gen/proto` (own module); `make proto-tools/proto/proto-check` (CI breakage gate).
   - Migrations `0006_agent_protocol` (enrollment_tokens, node_certificates, nodes.protocol_version), `0007_task_execution_target` (control_plane|node).
