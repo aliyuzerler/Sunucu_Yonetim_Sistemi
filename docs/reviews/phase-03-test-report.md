@@ -51,7 +51,7 @@
 | Koşu | Bulgu | Çözüm |
 |---|---|---|
 | 1. koşu (5b6d25e) | `scanTask` 21 kolon / 20 hedef uyuşmazlığı → tüm task kiralama sorguları patladı; agentsrv yanlış-node testinde orijinal status kodu kayboldu; proto job'da `buf` PATH'te yoktu; E2E token regex'i mock'a özgüydü | scanTask'a ExecutionTarget eklendi; recvErr orijinal status'u taşıyor; proto-check artık proto-tools'a bağlı; E2E gösterimi mock-bağımsız doğruluyor |
-| Sonuç | Düzeltmeler sonrası backend/agent/web/e2e/proto/secret-scan lokalde yeşil; CI yeniden koşuldu | Aşağıdaki karar bölümüne bakın |
+| 2. koşu (2ff828c) | (1) Doğrudan store kullanan testler boş execution_target ile CHECK'e takıldı → store artık boşta 'control_plane' varsayıyor; (2) agentsrv replay testi nil CA havuzuyla bağlandı → havuz env'den kuruluyor | Lokal tüm kapılar yeşil; 3. koşu bekleniyor |
 
 ## Bulgular
 
@@ -68,6 +68,6 @@
 
 ## Faz kabul kararı (öz-denetim)
 
-- Kriterler 1-5: birim + entegrasyon testleriyle PASS (PostgreSQL entegrasyonu CI'da; ilk koşunun sonucu izlenecek).
+- Kriterler 1-5: birim + entegrasyon testleriyle PASS (PostgreSQL entegrasyonu CI'da; son koşulun sonucu izlenecek).
 - Kritik/yüksek açık bulgu yok.
 - Karar: **ACCEPTED**, sonraki faza geçiş: **READY** (CI yeşil onayıyla).

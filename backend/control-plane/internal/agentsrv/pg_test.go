@@ -10,6 +10,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"net"
 	"path/filepath"
 	"testing"
@@ -306,8 +307,13 @@ func tryEnrollError(c *agentClient, token string) error {
 		return err
 	}
 	csrPEM := string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: der}))
+	// taze client olabilir (c.pool nil): CA'yı doğrudan env'den kur.
+	caPool := x509.NewCertPool()
+	if !caPool.AppendCertsFromPEM([]byte(c.env.caPEM)) {
+		return errors.New("CA PEM geçersiz")
+	}
 	conn, err := grpc.NewClient(c.env.addr, grpc.WithTransportCredentials(
-		credentials.NewTLS(&tls.Config{RootCAs: c.pool, ServerName: "localhost"})))
+		credentials.NewTLS(&tls.Config{RootCAs: caPool, ServerName: "localhost"})))
 	if err != nil {
 		return err
 	}

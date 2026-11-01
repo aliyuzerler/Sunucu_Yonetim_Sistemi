@@ -46,6 +46,10 @@ func scanTask(row pgx.Row) (*Task, error) {
 // transaction. A concurrent duplicate idempotency key maps to
 // ErrIdempotencyConflict via the partial unique index.
 func (s *PGStore) CreateTaskWithOutbox(ctx context.Context, t *Task, ev OutboxEvent) error {
+	if t.ExecutionTarget == "" {
+		// Doğrudan store kullanan testler/dahili çağrılar için güvenli varsayılan.
+		t.ExecutionTarget = TargetControlPlane
+	}
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("task transaction: %w", err)
