@@ -211,11 +211,33 @@ func TestRegistryValidation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("varsayılan kayıt defteri: %v", err)
 	}
-	if len(reg.Names()) != 3 {
-		t.Fatalf("iki operasyon bekleniyordu: %v", reg.Names())
+	// Faz 04: echo/noop/tag + 5 systemd servis operasyonu = 8.
+	if len(reg.Names()) != 8 {
+		t.Fatalf("8 operasyon bekleniyordu: %v", reg.Names())
 	}
 	if _, ok := reg.Spec("noop.echo"); !ok {
 		t.Fatal("noop.echo kayıtlı olmalı")
+	}
+	for _, name := range []string{
+		"linux.systemd.service.list", "linux.systemd.service.status",
+		"linux.systemd.service.start", "linux.systemd.service.stop",
+		"linux.systemd.service.restart",
+	} {
+		spec, ok := reg.Spec(name)
+		if !ok {
+			t.Fatalf("%s kayıtlı olmalı", name)
+		}
+		if spec.Target != TargetNode {
+			t.Fatalf("%s node hedefli olmalı", name)
+		}
+		if spec.RequiredPerm != "service:read" && spec.RequiredPerm != "service:control" {
+			t.Fatalf("%s ek RBAC izni taşımalı", name)
+		}
+	}
+	// Yeniden başlatma non-idempotent ve retry-güvenli DEĞİL.
+	restart, _ := reg.Spec("linux.systemd.service.restart")
+	if restart.Class != ClassNonIdem || restart.RetrySafe {
+		t.Fatalf("restart non_idempotent ve retry-güvensiz olmalı: %+v", restart)
 	}
 }
 

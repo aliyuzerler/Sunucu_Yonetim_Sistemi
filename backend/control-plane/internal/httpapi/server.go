@@ -15,6 +15,7 @@ import (
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/inventory"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/rbac"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/tasks"
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/telemetry"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -45,6 +46,7 @@ type Options struct {
 	Authz     *rbac.Service
 	Inventory *inventory.Service
 	Tasks     *tasks.Service
+	Telemetry *telemetry.Service
 	Audit     audit.Recorder
 	AuditList AuditLister
 	Enroll    EnrollmentManager
@@ -60,6 +62,7 @@ type api struct {
 	inventory *inventory.Service
 	enroll    EnrollmentManager
 	tasks     *tasks.Service
+	telemetry *telemetry.Service
 	audit     audit.Recorder
 	auditList AuditLister
 }
@@ -86,6 +89,7 @@ func New(opts Options) http.Handler {
 		authz:     opts.Authz,
 		inventory: opts.Inventory,
 		tasks:     opts.Tasks,
+		telemetry: opts.Telemetry,
 		audit:     opts.Audit,
 		auditList: opts.AuditList,
 		enroll:    opts.Enroll,
@@ -144,6 +148,11 @@ func New(opts Options) http.Handler {
 			r.With(a.requirePermission(rbac.PermNodesRead)).Get("/agent-enrollments", a.handleListEnrollments)
 			r.With(a.requirePermission(rbac.PermNodesWrite)).Post("/agent-enrollments", a.handleIssueEnrollment)
 			r.With(a.requirePermission(rbac.PermNodesWrite)).Post("/agent-enrollments/{tokenID}/revoke", a.handleRevokeEnrollment)
+
+			// Node telemetri (Faz 04).
+			r.With(a.requirePermission(rbac.PermNodesRead)).Get("/nodes/{nodeID}/facts/system", a.handleGetNodeSystemFacts)
+			r.With(a.requirePermission(rbac.PermNodesRead)).Get("/nodes/{nodeID}/metrics/latest", a.handleGetNodeMetricsLatest)
+			r.With(a.requirePermission(rbac.PermNodesRead)).Get("/nodes/{nodeID}/metrics", a.handleListNodeMetrics)
 
 			// Görevler.
 			r.With(a.requirePermission(rbac.PermTasksRead)).Get("/tasks", a.handleListTasks)

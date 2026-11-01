@@ -48,7 +48,67 @@ function logAudit(actor, action, targetType, targetId, result) {
 const OPERATIONS = [
   { name: "noop.echo", version: "1.0.0", class: "read_only", retry_safe: true, timeout_seconds: 30 },
   { name: "inventory.node.tag.set", version: "1.0.0", class: "idempotent_desired_state", retry_safe: true, timeout_seconds: 30 },
+  // Faz 04: linux systemd servis operasyonları (node hedefli).
+  { name: "linux.systemd.service.list", version: "1.0.0", class: "read_only", retry_safe: true, timeout_seconds: 60 },
+  { name: "linux.systemd.service.status", version: "1.0.0", class: "read_only", retry_safe: true, timeout_seconds: 60 },
+  { name: "linux.systemd.service.start", version: "1.0.0", class: "idempotent_desired_state", retry_safe: true, timeout_seconds: 120 },
+  { name: "linux.systemd.service.stop", version: "1.0.0", class: "idempotent_desired_state", retry_safe: true, timeout_seconds: 120 },
+  { name: "linux.systemd.service.restart", version: "1.0.0", class: "non_idempotent", retry_safe: false, timeout_seconds: 120 },
 ];
+
+// Faz 04 telemetri mock verisi: her node'a agent telemetrisi eklenir.
+const nodeFacts = new Map(); // node_id -> facts
+const nodeMetrics = new Map(); // node_id -> snapshot
+const nodeCapabilities = new Map(); // node_id -> capability[]
+
+function attachMockTelemetry(node) {
+  const now = new Date().toISOString();
+  nodeFacts.set(node.id, {
+    node_id: node.id,
+    os_id: "ubuntu",
+    os_version_id: "24.04",
+    os_pretty_name: "Ubuntu 24.04.3 LTS",
+    os_home_url: "https://www.ubuntu.com/",
+    kernel_release: "6.8.0-49-generic",
+    arch: "amd64",
+    systemd_version: "255",
+    package_manager: "apt",
+    systemd_available: true,
+    source: "os-release+procfs+systemctl",
+    collected_at: now,
+  });
+  nodeMetrics.set(node.id, {
+    collected_at: now,
+    source: "procfs+statfs",
+    cpu: { percent: 12.5, logical_cores: 4, load_1m: 0.4, load_5m: 0.3, load_15m: 0.2 },
+    memory: {
+      total_bytes: 16 * 1024 ** 3,
+      available_bytes: 8 * 1024 ** 3,
+      used_bytes: 8 * 1024 ** 3,
+      used_percent: 50,
+    },
+    disks: [
+      {
+        device: "/dev/vda1",
+        mount_point: "/",
+        fs_type: "ext4",
+        total_bytes: 40 * 1024 ** 3,
+        used_bytes: 10 * 1024 ** 3,
+        available_bytes: 30 * 1024 ** 3,
+      },
+    ],
+    networks: [{ interface: "ens160", rx_bytes: 987654321, tx_bytes: 123456789 }],
+    uptime_seconds: 90061,
+  });
+  nodeCapabilities.set(node.id, [
+    { node_id: node.id, capability_id: "agent.echo", version: "1.0.0", available: true, adapter_id: "builtin" },
+    { node_id: node.id, capability_id: "linux.systemd.service.list", version: "1.0.0", available: true, adapter_id: "systemd-broker" },
+    { node_id: node.id, capability_id: "linux.systemd.service.status", version: "1.0.0", available: true, adapter_id: "systemd-broker" },
+    { node_id: node.id, capability_id: "linux.systemd.service.start", version: "1.0.0", available: true, adapter_id: "systemd-broker" },
+    { node_id: node.id, capability_id: "linux.systemd.service.stop", version: "1.0.0", available: true, adapter_id: "systemd-broker" },
+    { node_id: node.id, capability_id: "linux.systemd.service.restart", version: "1.0.0", available: true, adapter_id: "systemd-broker" },
+  ]);
+}
 
 function json(res, status, body) {
   const data = JSON.stringify(body);
@@ -223,8 +283,36 @@ const server = createServer(async (req, res) => {
       last_seen_at: null,
     };
     nodes.push(node);
+    attachMockTelemetry(node);
     logAudit(actor, "node.create", "node", node.id, "success");
     json(res, 201, node);
+    return;
+  }
+
+  // ---- node telemetri (Faz 04) ----
+  const factsMatch = /^\/api\/v1\/nodes\/([^/]+)\/facts\/system$/.exec(path);
+  if (method === "GET" && factsMatch) {
+    const f = nodeFacts.get(factsMatch[1]);
+    if (!f) {
+      json(res, 404, errorBody("not_found", "Telemetri kaydı bulunamadı.", 404));
+      return;
+    }
+    json(res, 200, f);
+    return;
+  }
+  const latestMatch = /^\/api\/v1\/nodes\/([^/]+)\/metrics\/latest$/.exec(path);
+  if (method === "GET" && latestMatch) {
+    const m = nodeMetrics.get(latestMatch[1]);
+    if (!m) {
+      json(res, 404, errorBody("not_found", "Telemetri kaydı bulunamadı.", 404));
+      return;
+    }
+    json(res, 200, m);
+    return;
+  }
+  const capsMatch = /^\/api\/v1\/nodes\/([^/]+)\/capabilities$/.exec(path);
+  if (method === "GET" && capsMatch) {
+    json(res, 200, { capabilities: nodeCapabilities.get(capsMatch[1]) ?? [] });
     return;
   }
 

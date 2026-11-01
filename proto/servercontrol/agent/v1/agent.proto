@@ -69,6 +69,8 @@ message AgentEnvelope {
     Heartbeat heartbeat = 11;
     CapabilityReport capability_report = 12;
     OperationResult operation_result = 13;
+    SystemFactsReport system_facts_report = 14; // Faz 04: OS/distro/systemd/pkg facts
+    MetricsReport metrics_report = 15;          // Faz 04: periodic metric snapshot
   }
 }
 
@@ -98,6 +100,7 @@ message Hello {
 message HelloAck {
   ProtocolVersion protocol_version = 1;
   int64 heartbeat_interval_seconds = 2; // server-advised heartbeat cadence
+  int64 metrics_interval_seconds = 3;   // Faz 04: server-advised metrics cadence (0 = agent default)
 }
 
 // Heartbeat proves liveness; server refreshes nodes.last_seen_at.
@@ -119,6 +122,66 @@ message Capability {
   string reason_unavailable = 4; // set when available == false
   string adapter_id = 5;
   string adapter_version = 6;
+}
+
+// SystemFactsReport carries the detected OS platform data (Faz 04). Sent once
+// after Hello and re-sent when the agent detects a change. Facts are advisory
+// inventory data; capability remains the runtime contract.
+message SystemFactsReport {
+  reserved 1; // was request_id; the envelope carries it (never reused)
+  string os_id = 2;            // /etc/os-release ID (ubuntu, debian)
+  string os_version_id = 3;    // VERSION_ID (24.04, 13)
+  string os_pretty_name = 4;   // PRETTY_NAME
+  string os_home_url = 5;      // HOME_URL
+  string kernel_release = 6;   // uname -r equivalent (procfs)
+  string arch = 7;
+  string systemd_version = 8;  // "255" when systemd present, else empty
+  string package_manager = 9;  // apt | dpkg | dnf | unknown
+  bool systemd_available = 10;
+  google.protobuf.Timestamp collected_at = 11; // when the agent collected this
+  string source = 12;          // e.g. "os-release+procfs+systemctl"
+}
+
+// MetricsReport is one periodic snapshot. Every value carries its source and
+// the collection timestamp; the server rate-limits ingestion.
+message MetricsReport {
+  google.protobuf.Timestamp collected_at = 1;
+  string source = 2;           // e.g. "procfs", "statfs"
+  CpuMetrics cpu = 3;
+  MemoryMetrics memory = 4;
+  repeated DiskMetrics disks = 5;
+  repeated NetworkMetrics networks = 6;
+  double uptime_seconds = 7;
+}
+
+message CpuMetrics {
+  double percent = 1;     // busy percentage since previous sample window
+  uint32 logical_cores = 2;
+  double load_1m = 3;
+  double load_5m = 4;
+  double load_15m = 5;
+}
+
+message MemoryMetrics {
+  uint64 total_bytes = 1;
+  uint64 available_bytes = 2;
+  uint64 used_bytes = 3;
+  double used_percent = 4;
+}
+
+message DiskMetrics {
+  string device = 1;
+  string mount_point = 2;
+  string fs_type = 3;
+  uint64 total_bytes = 4;
+  uint64 used_bytes = 5;
+  uint64 available_bytes = 6;
+}
+
+message NetworkMetrics {
+  string interface = 1;
+  uint64 rx_bytes = 2;
+  uint64 tx_bytes = 3;
 }
 
 // OperationRequest is a typed operation delivered to the node. It NEVER

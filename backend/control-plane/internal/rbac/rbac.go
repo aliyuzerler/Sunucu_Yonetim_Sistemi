@@ -22,6 +22,10 @@ const (
 	PermTasksRead  = "tasks:read"
 	PermTasksWrite = "tasks:write"
 	PermAuditRead  = "audit:read"
+
+	// Faz 04: servis işlemleri — okuma ve KONTROLLÜ yürütme ayrı izinlerdir.
+	PermServiceRead    = "service:read"
+	PermServiceControl = "service:control"
 )
 
 // AllPermissions lists the seeded catalog in one place.
@@ -30,6 +34,7 @@ var AllPermissions = []string{
 	PermNodesRead, PermNodesWrite,
 	PermTasksRead, PermTasksWrite,
 	PermAuditRead,
+	PermServiceRead, PermServiceControl,
 }
 
 // Scope types.

@@ -29,6 +29,7 @@ import (
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/platform"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/rbac"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/tasks"
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/telemetry"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 )
@@ -274,10 +275,13 @@ func run() error {
 		}
 		enrollSvc := enroll.NewService(p, ca)
 
+		telemetrySvc := telemetry.NewService(telemetry.NewPGStore(p))
+
 		opts.Identity = identitySvc
 		opts.Authz = authzSvc
 		opts.Inventory = inventorySvc
 		opts.Tasks = tasksSvc
+		opts.Telemetry = telemetrySvc
 		opts.Audit = auditRec
 		opts.AuditList = audit.NewService(p)
 		opts.Enroll = enrollSvc
@@ -303,6 +307,7 @@ func run() error {
 				Inventory: inventorySvc,
 				Tasks:     tasksSvc,
 				TaskStore: taskStore,
+				Telemetry: telemetrySvc,
 				Audit:     auditRec,
 				Logger:    logger,
 			}, logger)

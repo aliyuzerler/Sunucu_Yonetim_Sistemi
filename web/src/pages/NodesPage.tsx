@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { apiFetch, isApiError } from "../api/client";
 import type { GroupRecord, NodePage, NodeRecord } from "../api/client";
+import { NodeDetail } from "./NodeDetail";
 import { EmptyState } from "../components/EmptyState";
 import { StatusBadge } from "../components/StatusBadge";
 import type { BadgeVariant } from "../components/StatusBadge";
@@ -20,6 +21,7 @@ export function NodesPage() {
   const [groups, setGroups] = useState<GroupRecord[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
+  const [selectedNodeID, setSelectedNodeID] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
 
   const reload = useCallback(() => setReloadKey((k) => k + 1), []);
@@ -80,6 +82,8 @@ export function NodesPage() {
     }
   }
 
+  const selectedNode = page?.nodes.find((n) => n.id === selectedNodeID) ?? null;
+
   return (
     <div className="flex flex-col gap-4 p-6">
       <div className="flex items-center justify-between">
@@ -103,7 +107,9 @@ export function NodesPage() {
         </p>
       )}
 
-      {showForm && (
+      {selectedNode && <NodeDetail node={selectedNode} onBack={() => setSelectedNodeID(null)} />}
+
+      {!selectedNode && showForm && (
         <NodeCreateForm
           groups={groups}
           onCreateNode={createNode}
@@ -115,7 +121,7 @@ export function NodesPage() {
         />
       )}
 
-      <section aria-label={t("nav.item.nodes")} className="rounded-xl border border-border bg-panel shadow-sm">
+      <section aria-label={t("nav.item.nodes")} className="rounded-xl border border-border bg-panel shadow-sm" hidden={selectedNode !== null}>
         {loading ? (
           <p className="p-6 text-sm text-ink-soft">{t("common.loading")}</p>
         ) : !page || page.nodes.length === 0 ? (
@@ -132,6 +138,7 @@ export function NodesPage() {
                 <th scope="col" className="px-4 py-2 font-medium">{t("nodes.col.os")}</th>
                 <th scope="col" className="px-4 py-2 font-medium">{t("nodes.col.status")}</th>
                 <th scope="col" className="px-4 py-2 font-medium">{t("nodes.col.tags")}</th>
+                <th scope="col" className="px-4 py-2 font-medium"><span className="sr-only">{t("nodes.detail")}</span></th>
               </tr>
             </thead>
             <tbody>
@@ -160,6 +167,15 @@ export function NodesPage() {
                         ))
                       )}
                     </div>
+                  </td>
+                  <td className="px-4 py-2.5">
+                    <button
+                      type="button"
+                      onClick={() => setSelectedNodeID(n.id)}
+                      className="rounded-lg border border-border px-2.5 py-1 text-[11px] text-ink hover:bg-neutral-soft focus-visible:outline-2 focus-visible:outline-accent"
+                    >
+                      {t("nodes.detail")}
+                    </button>
                   </td>
                 </tr>
               ))}

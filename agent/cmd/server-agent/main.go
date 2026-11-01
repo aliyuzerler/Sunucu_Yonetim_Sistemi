@@ -31,8 +31,10 @@ func usage() {
       CA sertifikası daha önce --ca-file ile dizine konmalıdır:
       cp ca.crt <dizin>/ca.crt
 
-  server-agent run --server <host:9090> [--dir <dizin>]
-      Outbound mTLS stream: hello/heartbeat/capability + tipli operasyonlar.
+  server-agent run --server <host:9090> [--dir <dizin>] [--broker-socket <yol>]
+      Outbound mTLS stream: hello/heartbeat/capability/facts/metrics +
+      tipli operasyonlar. Servis işlemleri yerel broker (server-privd)
+      Unix socket'i üzerinden çalışır.
 
   server-agent version
 `)
@@ -60,14 +62,15 @@ func dispatch(cmd string, args []string) error {
 	case "run":
 		opts := parseFlags(args)
 		store := &agent.Store{Dir: opts.dir}
-		executors, err := agent.DefaultRegistry()
+		executors, err := agent.DefaultRegistry(opts.brokerSocket)
 		if err != nil {
 			return err
 		}
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer stop()
 		fmt.Println("server-agent çalışıyor (outbound mTLS):", opts.server)
-		return agent.Run(ctx, store, opts.server, executors)
+		fmt.Println("  broker socket:", opts.brokerSocket)
+		return agent.Run(ctx, store, opts.server, executors, agent.RunOptions{FactsRoot: ""})
 	default:
 		usage()
 		return fmt.Errorf("bilinmeyen komut: %s", cmd)
@@ -75,14 +78,15 @@ func dispatch(cmd string, args []string) error {
 }
 
 type options struct {
-	server string
-	token  string
-	dir    string
-	name   string
+	server       string
+	token        string
+	dir          string
+	name         string
+	brokerSocket string
 }
 
 func parseFlags(args []string) options {
-	o := options{dir: "/var/lib/server-control-agent"}
+	o := options{dir: "/var/lib/server-control-agent", brokerSocket: "/run/server-control/privd.sock"}
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "--server":
@@ -104,6 +108,11 @@ func parseFlags(args []string) options {
 			i++
 			if i < len(args) {
 				o.name = args[i]
+			}
+		case "--broker-socket":
+			i++
+			if i < len(args) {
+				o.brokerSocket = args[i]
 			}
 		}
 	}

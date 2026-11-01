@@ -1,0 +1,7 @@
+sysfs /sys sysfs rw,nosuid,nodev,noexec,relatime 0 0
+proc /proc proc rw,nosuid,nodev,noexec,relatime 0 0
+/dev/nvme0n1p2 / ext4 rw,relatime,errors=remount-ro 0 0
+/dev/nvme0n1p1 /boot/efi vfat rw,relatime,fmask=0077,dmask=0077 0 0
+tmpfs /run tmpfs rw,nosuid,nodev,noexec,relatime,size=1632148k 0 0
+/dev/sda1 /data xfs rw,relatime,attr2 0 0
+/dev/sda1 /data-dup xfs rw,relatime,attr2 0 0

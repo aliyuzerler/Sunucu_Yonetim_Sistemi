@@ -1,0 +1,44 @@
+# systemd unit — server-privd (YEREL AYRICALIKLI broker, root olarak çalışır).
+# Faz 04: yalnızca Unix socket (0660) dinler; SO_PEERCRED ile UID allowlist;
+# tipli operasyonlar; systemctl argv (shell yok); JSONL audit.
+#
+# Kurulum: cp server-privd /usr/local/bin/
+#          groupadd -r server-control-broker
+#          usermod -aG server-control-broker server-agent
+#          mkdir -p /var/log/server-control && chmod 0750 /var/log/server-control
+#          systemctl daemon-reload && systemctl enable --now server-privd
+#
+# UID'i öğrenmek için: id -u server-agent
+
+[Unit]
+Description=Server Control Privileged Broker (local Unix socket only)
+Documentation=https://github.com/aliyuzerler/Sunucu_Yonetim_Sistemi
+
+[Service]
+Type=simple
+User=root
+# ZORUNLU: agent kullanıcısının UID'i ile değiştirin (ör. 982).
+ExecStart=/usr/local/bin/server-privd \
+    --socket /run/server-control/privd.sock \
+    --group server-control-broker \
+    --allow-uid 982 \
+    --audit-file /var/log/server-control/privd-audit.jsonl
+Restart=always
+RestartSec=5
+RuntimeDirectory=server-control
+RuntimeDirectoryMode=0750
+
+# Sertleştirme: yalnızca systemctl çalıştırabilmek için geniş yetki gerekir;
+# file system korumaları log ve socket dizinlerini kapsamaz.
+NoNewPrivileges=yes
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+RestrictAddressFamilies=AF_UNIX
+RestrictSUIDSGID=yes
+LockPersonality=yes
+ReadWritePaths=/var/log/server-control
+
+[Install]
+WantedBy=multi-user.target

@@ -108,6 +108,14 @@ func (a *api) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		a.writeError(w, r, http.StatusBadRequest, "invalid_request", "İstek gövdesi geçersiz.", false)
 		return
 	}
+	// Faz 04: operasyon bazlı ek RBAC izni (tasks:write üstüne).
+	if spec, ok := a.tasks.OperationSpec(req.Operation); ok && spec.RequiredPerm != "" {
+		if !a.checkPermission(r, spec.RequiredPerm, req.NodeID) {
+			a.writeError(w, r, http.StatusForbidden, "forbidden", "Bu operasyon için ek yetki gerekli.", false)
+			return
+		}
+	}
+
 	var deadlineIn time.Duration
 	if req.DeadlineInS > 0 {
 		deadlineIn = time.Duration(req.DeadlineInS) * time.Second

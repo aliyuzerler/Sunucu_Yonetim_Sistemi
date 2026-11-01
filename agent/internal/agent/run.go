@@ -10,6 +10,8 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/metrics"
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/osdetect"
 	agentv1 "github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/gen/proto/servercontrol/agent/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -98,15 +100,22 @@ func dialMTLS(store *Store, serverAddr string) (*grpc.ClientConn, error) {
 		})))
 }
 
+// RunOptions configures a Run session.
+type RunOptions struct {
+	// FactsRoot is the filesystem root for fact/metric detection ("" or "/"
+	// = real host; testdata fixtures in tests).
+	FactsRoot string
+}
+
 // Run opens the outbound stream and serves until ctx is cancelled. Reconnects
 // use exponential backoff with jitter (agent-architecture.md).
-func Run(ctx context.Context, store *Store, serverAddr string, executors *ExecutorRegistry) error {
+func Run(ctx context.Context, store *Store, serverAddr string, executors *ExecutorRegistry, opts RunOptions) error {
 	if !store.HasIdentity() {
 		return ErrNotEnrolled
 	}
 	backoff := time.Second
 	for {
-		err := runOnce(ctx, store, serverAddr, executors)
+		err := runOnce(ctx, store, serverAddr, executors, opts)
 		if ctx.Err() != nil {
 			return nil
 		}
@@ -122,7 +131,7 @@ func Run(ctx context.Context, store *Store, serverAddr string, executors *Execut
 	}
 }
 
-func runOnce(ctx context.Context, store *Store, serverAddr string, executors *ExecutorRegistry) error {
+func runOnce(ctx context.Context, store *Store, serverAddr string, executors *ExecutorRegistry, opts RunOptions) error {
 	conn, err := dialMTLS(store, serverAddr)
 	if err != nil {
 		return err
@@ -161,6 +170,7 @@ func runOnce(ctx context.Context, store *Store, serverAddr string, executors *Ex
 	}
 
 	var heartbeatInterval = 30 * time.Second
+	var metricsInterval = 60 * time.Second // HelloAck ile sunucu ayarlar
 	seq := uint64(0)
 
 	// Alım döngüsü: OperationRequest'leri yürüt, sonuçları gönder.
@@ -191,8 +201,13 @@ func runOnce(ctx context.Context, store *Store, serverAddr string, executors *Ex
 					return
 				}
 			}
-			if ack := in.GetHelloAck(); ack != nil && ack.GetHeartbeatIntervalSeconds() > 0 {
-				heartbeatInterval = time.Duration(ack.GetHeartbeatIntervalSeconds()) * time.Second
+			if ack := in.GetHelloAck(); ack != nil {
+				if ack.GetHeartbeatIntervalSeconds() > 0 {
+					heartbeatInterval = time.Duration(ack.GetHeartbeatIntervalSeconds()) * time.Second
+				}
+				if ack.GetMetricsIntervalSeconds() > 0 {
+					metricsInterval = clampInterval(time.Duration(ack.GetMetricsIntervalSeconds()) * time.Second)
+				}
 			}
 		}
 	}()
@@ -220,10 +235,18 @@ func runOnce(ctx context.Context, store *Store, serverAddr string, executors *Ex
 	if err := sendHeartbeat(); err != nil {
 		return err
 	}
-	if err := stream.Send(capabilityEnvelope(nodeID, executors)); err != nil {
+	if err := stream.Send(capabilityEnvelope(ctx, nodeID, executors)); err != nil {
 		return err
 	}
+	// Faz 04: sistem bilgileri Hello sonrası bir kez gönderilir.
+	if factsEnv := factsEnvelope(nodeID, opts.FactsRoot); factsEnv != nil {
+		if err := stream.Send(factsEnv); err != nil {
+			return err
+		}
+	}
 
+	metricsTicker := time.NewTicker(metricsInterval)
+	defer metricsTicker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
@@ -234,26 +257,130 @@ func runOnce(ctx context.Context, store *Store, serverAddr string, executors *Ex
 			if err := sendHeartbeat(); err != nil {
 				return err
 			}
+		case <-metricsTicker.C:
+			if env := metricsEnvelope(nodeID, opts.FactsRoot); env != nil {
+				if err := stream.Send(env); err != nil {
+					return err
+				}
+			}
 		case <-capabilityTicker.C:
-			if err := stream.Send(capabilityEnvelope(nodeID, executors)); err != nil {
+			if err := stream.Send(capabilityEnvelope(ctx, nodeID, executors)); err != nil {
 				return err
 			}
 		}
 	}
 }
 
-// capabilityEnvelope reports what this agent can do (Faz 03: yalnızca echo).
-func capabilityEnvelope(nodeID string, executors *ExecutorRegistry) *agentv1.AgentEnvelope {
+// capabilityEnvelope reports what this agent can do. Availability of
+// broker-backed service capabilities is probed at report time so the server
+// sees the CURRENT runtime contract (capability-system.md).
+func capabilityEnvelope(ctx context.Context, nodeID string, executors *ExecutorRegistry) *agentv1.AgentEnvelope {
+	caps := make([]*agentv1.Capability, 0, len(executors.Capabilities()))
+	probeCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
+	defer cancel()
+	for _, info := range executors.Capabilities() {
+		if exec, ok := executors.Lookup(info.GetCapabilityId()); ok {
+			if p, ok2 := exec.(Prober); ok2 {
+				available, reason := p.ProbeAvailable(probeCtx)
+				info.Available = available
+				info.ReasonUnavailable = reason
+			}
+		}
+		caps = append(caps, info)
+	}
 	return &agentv1.AgentEnvelope{
 		RequestId: newRequestID(),
 		NodeId:    nodeID,
 		IssuedAt:  now(),
 		Payload: &agentv1.AgentEnvelope_CapabilityReport{
 			CapabilityReport: &agentv1.CapabilityReport{
-				Capabilities: executors.Capabilities(),
+				Capabilities: caps,
 			},
 		},
 	}
+}
+
+// factsEnvelope collects and reports the platform facts. Returns nil when
+// detection completely fails (the server keeps the previous value).
+func factsEnvelope(nodeID, root string) *agentv1.AgentEnvelope {
+	facts, err := osdetect.Detect(root, nil)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "server-agent: sistem bilgileri alınamadı: %v\n", err)
+		return nil
+	}
+	return &agentv1.AgentEnvelope{
+		RequestId: newRequestID(),
+		NodeId:    nodeID,
+		IssuedAt:  now(),
+		Payload: &agentv1.AgentEnvelope_SystemFactsReport{
+			SystemFactsReport: &agentv1.SystemFactsReport{
+				OsId:             facts.OSID,
+				OsVersionId:      facts.OSVersionID,
+				OsPrettyName:     facts.OSPrettyName,
+				OsHomeUrl:        facts.OSHomeURL,
+				KernelRelease:    facts.KernelRelease,
+				Arch:             facts.Arch,
+				SystemdVersion:   facts.SystemdVersion,
+				PackageManager:   facts.PackageManager,
+				SystemdAvailable: facts.SystemdAvailable,
+				CollectedAt:      now(),
+				Source:           facts.Source,
+			},
+		},
+	}
+}
+
+// metricsEnvelope collects one metric snapshot; nil when collection fails.
+func metricsEnvelope(nodeID, root string) *agentv1.AgentEnvelope {
+	snap, err := metrics.NewCollector(root).Collect()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "server-agent: metrikler alınamadı: %v\n", err)
+		return nil
+	}
+	disks := make([]*agentv1.DiskMetrics, 0, len(snap.Disks))
+	for _, d := range snap.Disks {
+		disks = append(disks, &agentv1.DiskMetrics{
+			Device: d.Device, MountPoint: d.MountPoint, FsType: d.FSType,
+			TotalBytes: d.TotalBytes, UsedBytes: d.UsedBytes, AvailableBytes: d.AvailableBytes,
+		})
+	}
+	nets := make([]*agentv1.NetworkMetrics, 0, len(snap.Networks))
+	for _, n := range snap.Networks {
+		nets = append(nets, &agentv1.NetworkMetrics{Interface: n.Interface, RxBytes: n.RxBytes, TxBytes: n.TxBytes})
+	}
+	return &agentv1.AgentEnvelope{
+		RequestId: newRequestID(),
+		NodeId:    nodeID,
+		IssuedAt:  now(),
+		Payload: &agentv1.AgentEnvelope_MetricsReport{
+			MetricsReport: &agentv1.MetricsReport{
+				CollectedAt: now(),
+				Source:      snap.Source,
+				Cpu: &agentv1.CpuMetrics{
+					Percent: snap.CPU.Percent, LogicalCores: snap.CPU.LogicalCores,
+					Load_1M: snap.CPU.Load1m, Load_5M: snap.CPU.Load5m, Load_15M: snap.CPU.Load15m,
+				},
+				Memory: &agentv1.MemoryMetrics{
+					TotalBytes: snap.Memory.TotalBytes, AvailableBytes: snap.Memory.AvailableBytes,
+					UsedBytes: snap.Memory.UsedBytes, UsedPercent: snap.Memory.UsedPercent,
+				},
+				Disks:         disks,
+				Networks:      nets,
+				UptimeSeconds: snap.UptimeSeconds,
+			},
+		},
+	}
+}
+
+// clampInterval bounds the server-advised metrics cadence.
+func clampInterval(d time.Duration) time.Duration {
+	if d < 10*time.Second {
+		return 10 * time.Second
+	}
+	if d > 10*time.Minute {
+		return 10 * time.Minute
+	}
+	return d
 }
 
 func nodeIDFromCert(store *Store) (string, error) {

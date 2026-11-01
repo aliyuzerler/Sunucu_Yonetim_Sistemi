@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"net"
 	"path/filepath"
 	"testing"
@@ -21,6 +22,7 @@ import (
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/enroll"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/inventory"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/tasks"
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/telemetry"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/testdb"
 	agentv1 "github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/gen/proto/servercontrol/agent/v1"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -28,6 +30,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // testEnv is a full agent-server environment over real TLS + PostgreSQL.
@@ -100,6 +103,7 @@ func setupEnv(t *testing.T) *testEnv {
 		Inventory: inventorySvc,
 		Tasks:     tasksSvc,
 		TaskStore: taskStore,
+		Telemetry: telemetry.NewService(telemetry.NewPGStore(pool)),
 		Audit:     auditRec,
 	}, nil)
 
@@ -516,6 +520,98 @@ func TestConnectWrongNodeEnvelopeRejected(t *testing.T) {
 	} else if st, ok := status.FromError(err); ok && st.Code() != permissionDeniedCode {
 		t.Fatalf("PermissionDenied bekleniyordu: %v", err)
 	}
+}
+
+// TestConnectFactsAndMetricsTelemetry (Faz 04): hello sonrası gönderilen
+// SystemFactsReport upsert edilir; MetricsReport hız sınırı içinde kaydedilir
+// ve hız sınırı ötesi DÜŞÜRÜLÜR (rate limit).
+func TestConnectFactsAndMetricsTelemetry(t *testing.T) {
+	env := setupEnv(t)
+	ctx := context.Background()
+	g, _ := env.inventorySvc.CreateGroup(ctx, "admin", "c", "telemetry-group", "")
+	token, _ := env.issueToken(t, enroll.IssueInput{ScopeType: enroll.ScopeGroup, GroupID: g.ID})
+	client := &agentClient{env: env}
+	client.enroll(t, token, "agent-telemetry")
+
+	stream := client.dialStream(t, true)
+	if err := stream.Send(&agentv1.AgentEnvelope{
+		RequestId: "r-hello",
+		NodeId:    client.nodeID,
+		Payload: &agentv1.AgentEnvelope_Hello{Hello: &agentv1.Hello{
+			ProtocolVersion: agentv1.ProtocolVersion_PROTOCOL_VERSION_V1,
+			AgentVersion:    "test-1.0.0", OsFamily: "linux", Arch: "amd64",
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := stream.Recv(); err != nil {
+		t.Fatalf("HelloAck: %v", err)
+	}
+
+	// Sistem bilgileri.
+	if err := stream.Send(&agentv1.AgentEnvelope{
+		RequestId: "r-facts",
+		NodeId:    client.nodeID,
+		Payload: &agentv1.AgentEnvelope_SystemFactsReport{SystemFactsReport: &agentv1.SystemFactsReport{
+			OsId: "ubuntu", OsVersionId: "24.04", OsPrettyName: "Ubuntu 24.04.3 LTS",
+			KernelRelease: "6.8.0-49-generic", Arch: "amd64",
+			SystemdVersion: "255", SystemdAvailable: true,
+			PackageManager: "apt", Source: "os-release+procfs+systemctl",
+			CollectedAt: timestamppbNewForTest(time.Now()),
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 5*time.Second, "facts upsert", func() bool {
+		f, err := env.svcTelemetry().GetFacts(ctx, client.nodeID)
+		return err == nil && f != nil && f.OSID == "ubuntu" && f.PackageManager == "apt"
+	})
+
+	// Metrikler: ilk kabul edilir, 10sn içindeki ikincisi düşürülür.
+	sendMetrics := func(seq int, pct float64) error {
+		return stream.Send(&agentv1.AgentEnvelope{
+			RequestId: fmt.Sprintf("r-metrics-%d", seq),
+			NodeId:    client.nodeID,
+			Payload: &agentv1.AgentEnvelope_MetricsReport{MetricsReport: &agentv1.MetricsReport{
+				CollectedAt: timestamppbNewForTest(time.Now()),
+				Source:      "procfs+statfs",
+				Cpu:         &agentv1.CpuMetrics{Percent: pct, LogicalCores: 4},
+				Memory:      &agentv1.MemoryMetrics{TotalBytes: 16 << 30, UsedPercent: 42.5},
+				Disks: []*agentv1.DiskMetrics{{
+					Device: "/dev/vda1", MountPoint: "/", FsType: "ext4", TotalBytes: 40 << 30,
+				}},
+				Networks:      []*agentv1.NetworkMetrics{{Interface: "ens160", RxBytes: 1, TxBytes: 2}},
+				UptimeSeconds: 3600,
+			}},
+		})
+	}
+	if err := sendMetrics(1, 12.5); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 5*time.Second, "metrics insert", func() bool {
+		snap, err := env.svcTelemetry().LatestMetrics(ctx, client.nodeID)
+		return err == nil && snap != nil && snap.CPU.Percent == 12.5
+	})
+
+	// Hız sınırı: 10sn içinde gelen ikinci rapor düşürülmeli.
+	if err := sendMetrics(2, 99.0); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(300 * time.Millisecond)
+	snap, err := env.svcTelemetry().LatestMetrics(ctx, client.nodeID)
+	if err != nil || snap.CPU.Percent != 12.5 {
+		t.Fatalf("hız sınırı ikinci raporu düşürmeli: %+v %v", snap, err)
+	}
+}
+
+// svcTelemetry returns the wired telemetry service from the server struct.
+func (e *testEnv) svcTelemetry() *telemetry.Service {
+	return e.agentSrv.svc.Telemetry
+}
+
+// timestamppbNewForTest is a tiny helper for test timestamps.
+func timestamppbNewForTest(t time.Time) *timestamppb.Timestamp {
+	return timestamppb.New(t.UTC())
 }
 
 // waitFor polls until cond returns true or the deadline passes.

@@ -118,6 +118,64 @@ export interface GroupRecord {
   created_at: string;
 }
 
+// Faz 04: agent'ın raporladığı sistem bilgileri ve metrik anlık görüntüsü.
+export interface SystemFactsRecord {
+  node_id: string;
+  os_id: string;
+  os_version_id: string;
+  os_pretty_name: string;
+  os_home_url: string;
+  kernel_release: string;
+  arch: string;
+  systemd_version: string;
+  package_manager: string;
+  systemd_available: boolean;
+  source: string;
+  collected_at: string;
+}
+
+export interface MetricsSnapshot {
+  collected_at: string;
+  source: string;
+  cpu: {
+    percent: number;
+    logical_cores: number;
+    load_1m: number;
+    load_5m: number;
+    load_15m: number;
+  };
+  memory: {
+    total_bytes: number;
+    available_bytes: number;
+    used_bytes: number;
+    used_percent: number;
+  };
+  disks: Array<{
+    device: string;
+    mount_point: string;
+    fs_type: string;
+    total_bytes: number;
+    used_bytes: number;
+    available_bytes: number;
+  }>;
+  networks: Array<{
+    interface: string;
+    rx_bytes: number;
+    tx_bytes: number;
+  }>;
+  uptime_seconds: number;
+}
+
+export interface CapabilityRecord {
+  node_id?: string;
+  capability_id: string;
+  version: string;
+  available: boolean;
+  reason_unavailable?: string | null;
+  adapter_id?: string | null;
+  adapter_version?: string | null;
+}
+
 export interface TaskRecord {
   id: string;
   operation: string;

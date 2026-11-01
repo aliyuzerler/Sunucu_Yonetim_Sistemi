@@ -82,6 +82,41 @@ func (a *api) requireCSRF(next http.Handler) http.Handler {
 	})
 }
 
+// checkPermission runs one explicit RBAC check inside a handler (used for
+// per-operation permissions that a route middleware cannot know, e.g. Faz 04
+// service mutations). Denied checks are audited like requirePermission.
+func (a *api) checkPermission(r *http.Request, permission, nodeID string) bool {
+	info, ok := authFrom(r.Context())
+	if !ok {
+		return false
+	}
+	if a.authz == nil {
+		return false
+	}
+	res := rbac.Resource{}
+	if nodeID != "" {
+		resolved, ok := a.nodeResource(r.Context(), nodeID)
+		if !ok {
+			return false
+		}
+		res = resolved
+	}
+	decision, err := a.authz.Check(r.Context(), info.UserID, permission, res)
+	if err != nil {
+		a.logger.Error("rbac_check_failed",
+			slog.String("error", err.Error()),
+			slog.String("request_id", requestIDFrom(r.Context())))
+		return false
+	}
+	if !decision.Allowed {
+		_ = a.audit.Record(r.Context(), auditEvent(info, "auth.denied", "permission", permission,
+			audit.ResultDenied, requestIDFrom(r.Context()),
+			map[string]any{"reason": decision.Reason, "permission": permission}))
+		return false
+	}
+	return true
+}
+
 // nodeResource resolves a node-scoped RBAC resource; failures deny access.
 func (a *api) nodeResource(ctx context.Context, nodeID string) (rbac.Resource, bool) {
 	groups, err := a.inventory.Store().NodeGroupIDs(ctx, nodeID)

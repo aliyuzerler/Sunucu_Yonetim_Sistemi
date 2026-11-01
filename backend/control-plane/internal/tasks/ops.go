@@ -6,9 +6,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"time"
 
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/inventory"
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/rbac"
 )
 
 // NoopExecutor echoes the payload back; it proves the engine end-to-end
@@ -93,7 +95,64 @@ func ValidateSetTagsPayload(payload json.RawMessage) error {
 	return nil
 }
 
-// BuildDefaultRegistry returns the Faz 02 operation registry.
+// ---- Faz 04: linux systemd servis operasyonları (node hedefli) ----
+
+// unitNameRE mirrors agent/internal/svcops: first char alphanumeric (no flag
+// injection), template units allowed, no path separators or shell
+// metacharacters, mandatory .service suffix, UNIT_NAME_MAX=256 bounded.
+var unitNameRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9@._-]{0,246}\.service$`)
+
+// ValidateServiceUnit enforces the server-side unit allowlist (payloads are
+// validated on BOTH sides — proto contract).
+func ValidateServiceUnit(payload json.RawMessage) error {
+	var p serviceUnitPayload
+	if err := decodeStrict(payload, &p); err != nil {
+		return fmt.Errorf("şema uyumsuz: %w", err)
+	}
+	if !unitNameRE.MatchString(p.Unit) {
+		return errors.New("unit adı allowlist dışı: [A-Za-z0-9] ile başlamalı, .service ile bitmeli, boşluk/yol/shell karakteri içeremez")
+	}
+	return nil
+}
+
+// ValidateServiceListPayload enforces {} or {"limit": 1..500}.
+func ValidateServiceListPayload(payload json.RawMessage) error {
+	var p serviceListPayload
+	if len(payload) == 0 {
+		return nil
+	}
+	if err := decodeStrict(payload, &p); err != nil {
+		return fmt.Errorf("şema uyumsuz: %w", err)
+	}
+	if p.Limit < 0 || p.Limit > 500 {
+		return errors.New("limit 0..500 olmalı")
+	}
+	return nil
+}
+
+type serviceUnitPayload struct {
+	Unit string `json:"unit"`
+}
+
+type serviceListPayload struct {
+	Limit int `json:"limit,omitempty"`
+}
+
+// decodeStrict is the shared strict JSON decoder for payload validators.
+func decodeStrict(payload json.RawMessage, v any) error {
+	dec := json.NewDecoder(bytes.NewReader(payload))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(v); err != nil {
+		return err
+	}
+	if dec.More() {
+		return errors.New("sonrası veri")
+	}
+	return nil
+}
+
+// BuildDefaultRegistry returns the Faz 02 operation registry (Faz 04 ile
+// genişletildi: linux systemd servis operasyonları).
 func BuildDefaultRegistry(tagSetter TagSetter) (*Registry, error) {
 	return NewRegistry(
 		&OperationSpec{
@@ -127,6 +186,64 @@ func BuildDefaultRegistry(tagSetter TagSetter) (*Registry, error) {
 			Timeout:    30 * time.Second,
 			MaxPayload: 1 << 10,
 			Validate:   ValidateAgentEchoPayload,
+		},
+
+		// Faz 04: servis işlemleri. Broker + agent tarafında allowlist,
+		// control-plane'de RBAC katmanı (service:read / service:control).
+		&OperationSpec{
+			Name:         "linux.systemd.service.list",
+			Version:      "1.0.0",
+			Class:        ClassReadOnly,
+			Target:       TargetNode,
+			RetrySafe:    true,
+			Timeout:      60 * time.Second,
+			MaxPayload:   1 << 10,
+			Validate:     ValidateServiceListPayload,
+			RequiredPerm: rbac.PermServiceRead,
+		},
+		&OperationSpec{
+			Name:         "linux.systemd.service.status",
+			Version:      "1.0.0",
+			Class:        ClassReadOnly,
+			Target:       TargetNode,
+			RetrySafe:    true,
+			Timeout:      60 * time.Second,
+			MaxPayload:   1 << 10,
+			Validate:     ValidateServiceUnit,
+			RequiredPerm: rbac.PermServiceRead,
+		},
+		&OperationSpec{
+			Name:         "linux.systemd.service.start",
+			Version:      "1.0.0",
+			Class:        ClassIdempotent,
+			Target:       TargetNode,
+			RetrySafe:    true,
+			Timeout:      2 * time.Minute,
+			MaxPayload:   1 << 10,
+			Validate:     ValidateServiceUnit,
+			RequiredPerm: rbac.PermServiceControl,
+		},
+		&OperationSpec{
+			Name:         "linux.systemd.service.stop",
+			Version:      "1.0.0",
+			Class:        ClassIdempotent,
+			Target:       TargetNode,
+			RetrySafe:    true,
+			Timeout:      2 * time.Minute,
+			MaxPayload:   1 << 10,
+			Validate:     ValidateServiceUnit,
+			RequiredPerm: rbac.PermServiceControl,
+		},
+		&OperationSpec{
+			Name:         "linux.systemd.service.restart",
+			Version:      "1.0.0",
+			Class:        ClassNonIdem,
+			Target:       TargetNode,
+			RetrySafe:    false,
+			Timeout:      2 * time.Minute,
+			MaxPayload:   1 << 10,
+			Validate:     ValidateServiceUnit,
+			RequiredPerm: rbac.PermServiceControl,
 		},
 	)
 }

@@ -172,10 +172,26 @@ jobs:
         run: make proto-check
 
   agent:
-    name: Agent (Go)
+    name: Agent (Go, ${{ matrix.name }})
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 12
+    # Faz 04 iki distro test matrisi: Ubuntu 24.04 runner + Debian 13 container.
+    # osdetect/metrics fixture'ları her iki distro için ayrıca birim test edilir.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: ubuntu-24.04
+            container: ""
+          - name: debian-13
+            container: "debian:13"
+    container: ${{ matrix.container != '' && matrix.container || null }}
     steps:
+      - name: Git kurulumu (container)
+        if: matrix.container != ''
+        run: |
+          apt-get update -qq
+          apt-get install -y -qq git ca-certificates
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Setup Go
@@ -185,7 +201,7 @@ jobs:
           cache-dependency-path: agent/go.sum
       - name: go vet
         run: cd agent && go vet ./...
-      - name: go build
+      - name: go build (server-agent + server-privd)
         run: cd agent && go build ./...
       - name: go test -race
         run: cd agent && go test -race ./...

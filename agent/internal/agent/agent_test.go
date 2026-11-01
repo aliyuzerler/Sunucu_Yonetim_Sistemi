@@ -101,12 +101,19 @@ func TestEchoExecutor(t *testing.T) {
 }
 
 func TestRegistryDefaultDeny(t *testing.T) {
-	reg, err := DefaultRegistry()
+	reg, err := DefaultRegistry("")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(reg.Capabilities()) != 1 {
-		t.Fatalf("tek capability bekleniyordu: %d", len(reg.Capabilities()))
+	// Faz 04: echo + 5 systemd servis operasyonu = 6 capability.
+	if len(reg.Capabilities()) != 6 {
+		t.Fatalf("6 capability bekleniyordu: %d", len(reg.Capabilities()))
+	}
+	for _, name := range []string{"agent.echo", "linux.systemd.service.list", "linux.systemd.service.status",
+		"linux.systemd.service.start", "linux.systemd.service.stop", "linux.systemd.service.restart"} {
+		if _, ok := reg.Lookup(name); !ok {
+			t.Fatalf("registry %s içermeli", name)
+		}
 	}
 
 	// Bilinmeyen operasyon REJECTED döner, asla yürütülmez.

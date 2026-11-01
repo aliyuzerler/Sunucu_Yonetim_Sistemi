@@ -28,6 +28,7 @@ import (
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/enroll"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/inventory"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/tasks"
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/telemetry"
 	agentv1 "github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/gen/proto/servercontrol/agent/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -40,11 +41,17 @@ import (
 const (
 	// HeartbeatInterval is the server-advised heartbeat cadence.
 	HeartbeatInterval = 30 * time.Second
+	// MetricsInterval is the server-advised telemetry cadence (Faz 04).
+	MetricsInterval = 60 * time.Second
 	// dispatchLease bounds how long a claimed node task may ride the wire.
 	dispatchLease = 60 * time.Second
 	// maxMessagePayload bounds large fields (CSR, payloads, outputs).
 	maxMessagePayload = 64 << 10
 )
+
+// MetricsMinInterval is the fastest accepted metrics cadence per node.
+// Faster reports are silently dropped (rate-limit protects the database).
+const MetricsMinInterval = 10 * time.Second
 
 // Services bundles control-plane services the agent server needs.
 type Services struct {
@@ -53,6 +60,7 @@ type Services struct {
 	Inventory *inventory.Service
 	Tasks     *tasks.Service
 	TaskStore tasks.Store
+	Telemetry *telemetry.Service
 	Audit     audit.Recorder
 	Logger    *slog.Logger
 }
@@ -65,8 +73,9 @@ type Server struct {
 	svc    Services
 	logger *slog.Logger
 
-	mu  sync.Mutex
-	hub map[string]*nodeStream // nodeID → active stream
+	mu          sync.Mutex
+	hub         map[string]*nodeStream // nodeID → active stream
+	lastMetrics map[string]time.Time   // nodeID → son kabul edilen metrics zamanı
 }
 
 // nodeStream is one live mTLS stream for a node.
@@ -81,7 +90,12 @@ func New(svc Services, logger *slog.Logger) *Server {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Server{svc: svc, logger: logger, hub: map[string]*nodeStream{}}
+	return &Server{
+		svc:         svc,
+		logger:      logger,
+		hub:         map[string]*nodeStream{},
+		lastMetrics: map[string]time.Time{},
+	}
 }
 
 // RegisterGRPC attaches both services to a gRPC server.
@@ -241,6 +255,7 @@ func (s *Server) handleEnvelope(ctx context.Context, ns *nodeStream, env *agentv
 				HelloAck: &agentv1.HelloAck{
 					ProtocolVersion:          agentv1.ProtocolVersion_PROTOCOL_VERSION_V1,
 					HeartbeatIntervalSeconds: int64(HeartbeatInterval.Seconds()),
+					MetricsIntervalSeconds:   int64(MetricsInterval.Seconds()),
 				},
 			},
 		}
@@ -261,6 +276,16 @@ func (s *Server) handleEnvelope(ctx context.Context, ns *nodeStream, env *agentv
 			return status.Error(codes.FailedPrecondition, "önce hello bekleniyor")
 		}
 		s.handleOperationResult(ctx, ns, p.OperationResult)
+	case *agentv1.AgentEnvelope_SystemFactsReport:
+		if !*helloSeen {
+			return status.Error(codes.FailedPrecondition, "önce hello bekleniyor")
+		}
+		s.handleSystemFacts(ctx, ns.nodeID, env, p.SystemFactsReport)
+	case *agentv1.AgentEnvelope_MetricsReport:
+		if !*helloSeen {
+			return status.Error(codes.FailedPrecondition, "önce hello bekleniyor")
+		}
+		s.handleMetricsReport(ctx, ns.nodeID, env, p.MetricsReport)
 	default:
 		return status.Error(codes.InvalidArgument, "bilinmeyen zarf yükü")
 	}
@@ -295,6 +320,105 @@ func (s *Server) handleCapabilities(ctx context.Context, nodeID string, env *age
 				slog.String("capability_id", c.GetCapabilityId()),
 				slog.String("error", err.Error()))
 		}
+	}
+}
+
+// handleSystemFacts upserts the agent-reported platform facts (Faz 04).
+// Facts are low-frequency inventory data: each accepted report is audited.
+func (s *Server) handleSystemFacts(ctx context.Context, nodeID string, env *agentv1.AgentEnvelope, rep *agentv1.SystemFactsReport) {
+	if s.svc.Telemetry == nil {
+		return
+	}
+	collected := time.Now().UTC()
+	if rep.GetCollectedAt() != nil && !rep.GetCollectedAt().AsTime().IsZero() {
+		collected = rep.GetCollectedAt().AsTime()
+	}
+	f := &telemetry.SystemFacts{
+		NodeID:           nodeID,
+		OSID:             rep.GetOsId(),
+		OSVersionID:      rep.GetOsVersionId(),
+		OSPrettyName:     rep.GetOsPrettyName(),
+		OSHomeURL:        rep.GetOsHomeUrl(),
+		KernelRelease:    rep.GetKernelRelease(),
+		Arch:             rep.GetArch(),
+		SystemdVersion:   rep.GetSystemdVersion(),
+		PackageManager:   rep.GetPackageManager(),
+		SystemdAvailable: rep.GetSystemdAvailable(),
+		Source:           rep.GetSource(),
+		CollectedAt:      collected,
+	}
+	if err := s.svc.Telemetry.UpsertFacts(ctx, f); err != nil {
+		s.logger.Error("agent_facts_upsert_failed",
+			slog.String("node_id", nodeID), slog.String("error", err.Error()))
+		return
+	}
+	s.auditEvent(ctx, "agent.facts.report", "node", nodeID, audit.ResultSuccess,
+		map[string]any{"os_id": f.OSID, "os_version_id": f.OSVersionID,
+			"package_manager": f.PackageManager, "source": f.Source})
+}
+
+// handleMetricsReport persists one metric snapshot behind a per-node rate
+// limit. Metrics are data-plane telemetry: they are NOT individually audited
+// (the audit trail records control actions; log noise would bury them).
+func (s *Server) handleMetricsReport(ctx context.Context, nodeID string, env *agentv1.AgentEnvelope, rep *agentv1.MetricsReport) {
+	if s.svc.Telemetry == nil {
+		return
+	}
+	now := time.Now().UTC()
+	s.mu.Lock()
+	if last, ok := s.lastMetrics[nodeID]; ok && now.Sub(last) < MetricsMinInterval {
+		s.mu.Unlock()
+		s.logger.Warn("agent_metrics_rate_limited", slog.String("node_id", nodeID))
+		return
+	}
+	s.lastMetrics[nodeID] = now
+	s.mu.Unlock()
+
+	collected := now
+	if rep.GetCollectedAt() != nil && !rep.GetCollectedAt().AsTime().IsZero() {
+		collected = rep.GetCollectedAt().AsTime()
+	}
+	snap := &telemetry.Snapshot{
+		CollectedAt:   collected,
+		Source:        rep.GetSource(),
+		UptimeSeconds: rep.GetUptimeSeconds(),
+	}
+	if cpu := rep.GetCpu(); cpu != nil {
+		snap.CPU = telemetry.CPUSample{
+			Percent: cpu.GetPercent(), LogicalCores: cpu.GetLogicalCores(),
+			Load1m: cpu.GetLoad_1M(), Load5m: cpu.GetLoad_5M(), Load15m: cpu.GetLoad_15M(),
+		}
+	}
+	if mem := rep.GetMemory(); mem != nil {
+		snap.Memory = telemetry.MemorySample{
+			TotalBytes: mem.GetTotalBytes(), AvailableBytes: mem.GetAvailableBytes(),
+			UsedBytes: mem.GetUsedBytes(), UsedPercent: mem.GetUsedPercent(),
+		}
+	}
+	for i, d := range rep.GetDisks() {
+		if i >= telemetry.MaxDisks {
+			break
+		}
+		snap.Disks = append(snap.Disks, telemetry.DiskSample{
+			Device: d.GetDevice(), MountPoint: d.GetMountPoint(), FSType: d.GetFsType(),
+			TotalBytes: d.GetTotalBytes(), UsedBytes: d.GetUsedBytes(), AvailableBytes: d.GetAvailableBytes(),
+		})
+	}
+	for i, n := range rep.GetNetworks() {
+		if i >= telemetry.MaxNetworks {
+			break
+		}
+		snap.Networks = append(snap.Networks, telemetry.NetworkSample{
+			Interface: n.GetInterface(), RxBytes: n.GetRxBytes(), TxBytes: n.GetTxBytes(),
+		})
+	}
+	if err := s.svc.Telemetry.InsertMetrics(ctx, nodeID, snap); err != nil {
+		if errors.Is(err, telemetry.ErrInvalidSnapshot) {
+			s.logger.Warn("agent_metrics_invalid", slog.String("node_id", nodeID))
+			return
+		}
+		s.logger.Error("agent_metrics_insert_failed",
+			slog.String("node_id", nodeID), slog.String("error", err.Error()))
 	}
 }
 

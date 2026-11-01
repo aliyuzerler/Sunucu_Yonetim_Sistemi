@@ -2,6 +2,33 @@
 
 ## Unreleased
 
+## [0.5.0] — 2026-11-01 — Faz 04: Linux Agent ve temel OS yönetimi
+
+### Added
+- Ayrıcalık ayrımı: `server-agent` (yetkisiz) + `server-privd` (root broker) ikilileri; broker yalnızca Unix socket (`/run/server-control/privd.sock`, 0660, dizin 0750) dinler, TCP yok; SO_PEERCRED ile UID allowlist (default deny); tipli JSON istekler; her istek (reddedilenler dahil) JSONL audit'e yazılır (`deploy/agent/` systemd unitleri + sertleştirme).
+- OS tespiti (`agent/internal/osdetect`): /etc/os-release (ID/VERSION_ID/PRETTY_NAME/HOME_URL), çekirdek sürümü (procfs), systemd varlık+sürüm (procfs işaretleri + `systemctl --version` argv), paket yöneticisi (apt/dpkg/dnf/yum/unknown); kaynak provenance'ı ile raporlanır.
+- Metrikler (`agent/internal/metrics`): CPU (pencere bazlı %, çekirdek, load 1/5/15), bellek, disk (gerçek FS filtre + cihaz dedupe + statfs kullanım), ağ (lo hariç), uptime — procfs/statfs kaynağı ve collection timestamp'i ile; protokol v1'e geriye dönük `SystemFactsReport` + `MetricsReport` zarf yükleri (field 14/15) ve `HelloAck.metrics_interval_seconds` (sunucu önerisi 60s; agent 10s–10dk kıskacı) eklendi.
+- Servis işlemleri (`agent/internal/svcops`): systemd list/status/start/stop/restart — birim adı allowlist'i `^[A-Za-z0-9][A-Za-z0-9@._-]{0,246}\.service$`, exec.Command argv (shell string'i YOK), işlem başına timeout, sınırlı çıktı; broker üzerinden `linux.systemd.service.*` operasyonları.
+- Capability beyanı: broker erişilebilirliği rapor zamanında probe edilir; servis kabiliyetleri erişilemezse `reason_unavailable` ile bildirilir (runtime contract, capability-system.md).
+- Control plane: migration `0008_node_telemetry` (node_system_facts upsert + node_metrics zaman serisi + indeksler + retention 7g), `internal/telemetry` servisi (doğrulama+sınır+prune), agentsrv `SystemFactsReport`/`MetricsReport` işleyicileri (node başına 10s hız sınırı; metrics veri-düzlemi olduğu için tek tek audit'lenmez), REST `/nodes/{id}/facts/system`, `/nodes/{id}/metrics/latest`, `/nodes/{id}/metrics` (nodes:read).
+- Görev motoru: 5 yeni node-hedefli operasyon (`linux.systemd.service.list/status/start/stop/restart`) — payload validator'ları iki tarafta (sunucu + agent), `OperationSpec.RequiredPerm` ile RBAC katmanı: okuma `service:read`, start/stop/restart `service:control` (tasks:write üstüne); restart `non_idempotent` + retry-güvensiz.
+- RBAC: `service:read` ve `service:control` izinleri (migration 0008 seed; admin=hepsi, operator=yalnız okuma — least privilege).
+- UI: Node detay görünümü — sistem bilgileri kartı, metrik kartı (progressbar'lı disk kullanımı, kaynak+toplanma zamanı), kabiliyet rozetleri (nedeniyle), tipli servis eylem formları (istemci tarafı birim doğrulama; gerçek denetim sunucu+agent+broker'da); TR/EN sözlükler.
+- CI: `agent` job iki distro matrisi (ubuntu-24.04 runner + debian:13 container) — Faz 04 "iki distro test matrisi" teslimatı.
+- Testler: osdetect fixture matrisi (Ubuntu 24.04 + Debian 13), metrics parser testleri, svcops fake-systemctl argv/timeout/eksik-systemd testleri, broker socket entegrasyonu (UID reddi, allowlist, shell-meta birim reddi, audit zorunluluğu, hız sınırlı eşzamanlılık), agentsrv telemetry entegrasyon testi (facts upsert + metrics hız sınırı), tasks validator birim testleri, httpapi uç testleri, NodeDetail vitest (4 test), E2E telemetry spec (2 test) + 3 ekran görüntüsü.
+
+### Changed
+- `agent.DefaultRegistry(brokerSocket)` imzası; `Run(ctx, store, addr, executors, RunOptions{FactsRoot})`; `server-agent run --broker-socket` bayrağı (varsayılan `/run/server-control/privd.sock`).
+- `docs/technology/dependency-registry.md`: `golang.org/x/sys` v0.48.0 indirect→direct (BSD-3-Clause); yeni HARİCİ bağımlılık eklenmedi.
+- `agent/README.md` + `deploy/agent/README.md` kurulum ve güvenlik modeliyle güncellendi.
+
+### Security
+- İşlem girdileri asla shell string'ine birleştirilmez: broker tipli JSON, systemctl argv; birim adı regex allowlist'i iki uçta + broker'da üç kez doğrulanır (sunucu validator, agent executor, broker validateRequest).
+- Broker sadece root tarafından yazılabilir socket üzerinden erişilir; SO_PEERCRED allowlist dışındaki her UID `peer_denied` ile reddedilir ve auditlenir; allowlist boşsa tamamen kapalı.
+- Agent process'i systemd sertleştirmesiyle çalışır (NoNewPrivileges, ProtectSystem=strict, boş CapabilityBoundingSet); broker yalnız AF_UNIX'e kısıtlıdır.
+- Metrik yutumu node başına 10s hız sınırıyla korunur; snapshot alan sınırları (≤64 disk/ağ, kaynak adı ≤128) sunucu tarafında zorlanır.
+- `service:control` izni ayrı tutulur: görev oluşturma yetkisi olan operatör varsayılan olarak servis durduramaz/yeniden başlatamaz.
+
 ## [0.4.0] — 2026-11-01 — Faz 03: Agent protokolü, kayıt, mTLS ve capability
 
 ### Added

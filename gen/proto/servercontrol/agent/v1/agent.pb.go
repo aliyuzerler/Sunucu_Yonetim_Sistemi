@@ -128,7 +128,7 @@ func (x OperationResult_Status) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use OperationResult_Status.Descriptor instead.
 func (OperationResult_Status) EnumDescriptor() ([]byte, []int) {
-	return file_servercontrol_agent_v1_agent_proto_rawDescGZIP(), []int{10, 0}
+	return file_servercontrol_agent_v1_agent_proto_rawDescGZIP(), []int{16, 0}
 }
 
 // Enroll exchanges a single-use enrollment token plus a client-generated CSR
@@ -325,6 +325,8 @@ type AgentEnvelope struct {
 	//	*AgentEnvelope_Heartbeat
 	//	*AgentEnvelope_CapabilityReport
 	//	*AgentEnvelope_OperationResult
+	//	*AgentEnvelope_SystemFactsReport
+	//	*AgentEnvelope_MetricsReport
 	Payload       isAgentEnvelope_Payload `protobuf_oneof:"payload"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -445,6 +447,24 @@ func (x *AgentEnvelope) GetOperationResult() *OperationResult {
 	return nil
 }
 
+func (x *AgentEnvelope) GetSystemFactsReport() *SystemFactsReport {
+	if x != nil {
+		if x, ok := x.Payload.(*AgentEnvelope_SystemFactsReport); ok {
+			return x.SystemFactsReport
+		}
+	}
+	return nil
+}
+
+func (x *AgentEnvelope) GetMetricsReport() *MetricsReport {
+	if x != nil {
+		if x, ok := x.Payload.(*AgentEnvelope_MetricsReport); ok {
+			return x.MetricsReport
+		}
+	}
+	return nil
+}
+
 type isAgentEnvelope_Payload interface {
 	isAgentEnvelope_Payload()
 }
@@ -465,6 +485,14 @@ type AgentEnvelope_OperationResult struct {
 	OperationResult *OperationResult `protobuf:"bytes,13,opt,name=operation_result,json=operationResult,proto3,oneof"`
 }
 
+type AgentEnvelope_SystemFactsReport struct {
+	SystemFactsReport *SystemFactsReport `protobuf:"bytes,14,opt,name=system_facts_report,json=systemFactsReport,proto3,oneof"` // Faz 04: OS/distro/systemd/pkg facts
+}
+
+type AgentEnvelope_MetricsReport struct {
+	MetricsReport *MetricsReport `protobuf:"bytes,15,opt,name=metrics_report,json=metricsReport,proto3,oneof"` // Faz 04: periodic metric snapshot
+}
+
 func (*AgentEnvelope_Hello) isAgentEnvelope_Payload() {}
 
 func (*AgentEnvelope_Heartbeat) isAgentEnvelope_Payload() {}
@@ -472,6 +500,10 @@ func (*AgentEnvelope_Heartbeat) isAgentEnvelope_Payload() {}
 func (*AgentEnvelope_CapabilityReport) isAgentEnvelope_Payload() {}
 
 func (*AgentEnvelope_OperationResult) isAgentEnvelope_Payload() {}
+
+func (*AgentEnvelope_SystemFactsReport) isAgentEnvelope_Payload() {}
+
+func (*AgentEnvelope_MetricsReport) isAgentEnvelope_Payload() {}
 
 // ServerEnvelope: control plane → agent.
 type ServerEnvelope struct {
@@ -685,6 +717,7 @@ type HelloAck struct {
 	state                    protoimpl.MessageState `protogen:"open.v1"`
 	ProtocolVersion          ProtocolVersion        `protobuf:"varint,1,opt,name=protocol_version,json=protocolVersion,proto3,enum=servercontrol.agent.v1.ProtocolVersion" json:"protocol_version,omitempty"`
 	HeartbeatIntervalSeconds int64                  `protobuf:"varint,2,opt,name=heartbeat_interval_seconds,json=heartbeatIntervalSeconds,proto3" json:"heartbeat_interval_seconds,omitempty"` // server-advised heartbeat cadence
+	MetricsIntervalSeconds   int64                  `protobuf:"varint,3,opt,name=metrics_interval_seconds,json=metricsIntervalSeconds,proto3" json:"metrics_interval_seconds,omitempty"`       // Faz 04: server-advised metrics cadence (0 = agent default)
 	unknownFields            protoimpl.UnknownFields
 	sizeCache                protoimpl.SizeCache
 }
@@ -729,6 +762,13 @@ func (x *HelloAck) GetProtocolVersion() ProtocolVersion {
 func (x *HelloAck) GetHeartbeatIntervalSeconds() int64 {
 	if x != nil {
 		return x.HeartbeatIntervalSeconds
+	}
+	return 0
+}
+
+func (x *HelloAck) GetMetricsIntervalSeconds() int64 {
+	if x != nil {
+		return x.MetricsIntervalSeconds
 	}
 	return 0
 }
@@ -916,6 +956,515 @@ func (x *Capability) GetAdapterVersion() string {
 	return ""
 }
 
+// SystemFactsReport carries the detected OS platform data (Faz 04). Sent once
+// after Hello and re-sent when the agent detects a change. Facts are advisory
+// inventory data; capability remains the runtime contract.
+type SystemFactsReport struct {
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	OsId             string                 `protobuf:"bytes,2,opt,name=os_id,json=osId,proto3" json:"os_id,omitempty"`                            // /etc/os-release ID (ubuntu, debian)
+	OsVersionId      string                 `protobuf:"bytes,3,opt,name=os_version_id,json=osVersionId,proto3" json:"os_version_id,omitempty"`     // VERSION_ID (24.04, 13)
+	OsPrettyName     string                 `protobuf:"bytes,4,opt,name=os_pretty_name,json=osPrettyName,proto3" json:"os_pretty_name,omitempty"`  // PRETTY_NAME
+	OsHomeUrl        string                 `protobuf:"bytes,5,opt,name=os_home_url,json=osHomeUrl,proto3" json:"os_home_url,omitempty"`           // HOME_URL
+	KernelRelease    string                 `protobuf:"bytes,6,opt,name=kernel_release,json=kernelRelease,proto3" json:"kernel_release,omitempty"` // uname -r equivalent (procfs)
+	Arch             string                 `protobuf:"bytes,7,opt,name=arch,proto3" json:"arch,omitempty"`
+	SystemdVersion   string                 `protobuf:"bytes,8,opt,name=systemd_version,json=systemdVersion,proto3" json:"systemd_version,omitempty"` // "255" when systemd present, else empty
+	PackageManager   string                 `protobuf:"bytes,9,opt,name=package_manager,json=packageManager,proto3" json:"package_manager,omitempty"` // apt | dpkg | dnf | unknown
+	SystemdAvailable bool                   `protobuf:"varint,10,opt,name=systemd_available,json=systemdAvailable,proto3" json:"systemd_available,omitempty"`
+	CollectedAt      *timestamppb.Timestamp `protobuf:"bytes,11,opt,name=collected_at,json=collectedAt,proto3" json:"collected_at,omitempty"` // when the agent collected this
+	Source           string                 `protobuf:"bytes,12,opt,name=source,proto3" json:"source,omitempty"`                              // e.g. "os-release+procfs+systemctl"
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *SystemFactsReport) Reset() {
+	*x = SystemFactsReport{}
+	mi := &file_servercontrol_agent_v1_agent_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SystemFactsReport) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SystemFactsReport) ProtoMessage() {}
+
+func (x *SystemFactsReport) ProtoReflect() protoreflect.Message {
+	mi := &file_servercontrol_agent_v1_agent_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SystemFactsReport.ProtoReflect.Descriptor instead.
+func (*SystemFactsReport) Descriptor() ([]byte, []int) {
+	return file_servercontrol_agent_v1_agent_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *SystemFactsReport) GetOsId() string {
+	if x != nil {
+		return x.OsId
+	}
+	return ""
+}
+
+func (x *SystemFactsReport) GetOsVersionId() string {
+	if x != nil {
+		return x.OsVersionId
+	}
+	return ""
+}
+
+func (x *SystemFactsReport) GetOsPrettyName() string {
+	if x != nil {
+		return x.OsPrettyName
+	}
+	return ""
+}
+
+func (x *SystemFactsReport) GetOsHomeUrl() string {
+	if x != nil {
+		return x.OsHomeUrl
+	}
+	return ""
+}
+
+func (x *SystemFactsReport) GetKernelRelease() string {
+	if x != nil {
+		return x.KernelRelease
+	}
+	return ""
+}
+
+func (x *SystemFactsReport) GetArch() string {
+	if x != nil {
+		return x.Arch
+	}
+	return ""
+}
+
+func (x *SystemFactsReport) GetSystemdVersion() string {
+	if x != nil {
+		return x.SystemdVersion
+	}
+	return ""
+}
+
+func (x *SystemFactsReport) GetPackageManager() string {
+	if x != nil {
+		return x.PackageManager
+	}
+	return ""
+}
+
+func (x *SystemFactsReport) GetSystemdAvailable() bool {
+	if x != nil {
+		return x.SystemdAvailable
+	}
+	return false
+}
+
+func (x *SystemFactsReport) GetCollectedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.CollectedAt
+	}
+	return nil
+}
+
+func (x *SystemFactsReport) GetSource() string {
+	if x != nil {
+		return x.Source
+	}
+	return ""
+}
+
+// MetricsReport is one periodic snapshot. Every value carries its source and
+// the collection timestamp; the server rate-limits ingestion.
+type MetricsReport struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	CollectedAt   *timestamppb.Timestamp `protobuf:"bytes,1,opt,name=collected_at,json=collectedAt,proto3" json:"collected_at,omitempty"`
+	Source        string                 `protobuf:"bytes,2,opt,name=source,proto3" json:"source,omitempty"` // e.g. "procfs", "statfs"
+	Cpu           *CpuMetrics            `protobuf:"bytes,3,opt,name=cpu,proto3" json:"cpu,omitempty"`
+	Memory        *MemoryMetrics         `protobuf:"bytes,4,opt,name=memory,proto3" json:"memory,omitempty"`
+	Disks         []*DiskMetrics         `protobuf:"bytes,5,rep,name=disks,proto3" json:"disks,omitempty"`
+	Networks      []*NetworkMetrics      `protobuf:"bytes,6,rep,name=networks,proto3" json:"networks,omitempty"`
+	UptimeSeconds float64                `protobuf:"fixed64,7,opt,name=uptime_seconds,json=uptimeSeconds,proto3" json:"uptime_seconds,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MetricsReport) Reset() {
+	*x = MetricsReport{}
+	mi := &file_servercontrol_agent_v1_agent_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MetricsReport) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MetricsReport) ProtoMessage() {}
+
+func (x *MetricsReport) ProtoReflect() protoreflect.Message {
+	mi := &file_servercontrol_agent_v1_agent_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MetricsReport.ProtoReflect.Descriptor instead.
+func (*MetricsReport) Descriptor() ([]byte, []int) {
+	return file_servercontrol_agent_v1_agent_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *MetricsReport) GetCollectedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.CollectedAt
+	}
+	return nil
+}
+
+func (x *MetricsReport) GetSource() string {
+	if x != nil {
+		return x.Source
+	}
+	return ""
+}
+
+func (x *MetricsReport) GetCpu() *CpuMetrics {
+	if x != nil {
+		return x.Cpu
+	}
+	return nil
+}
+
+func (x *MetricsReport) GetMemory() *MemoryMetrics {
+	if x != nil {
+		return x.Memory
+	}
+	return nil
+}
+
+func (x *MetricsReport) GetDisks() []*DiskMetrics {
+	if x != nil {
+		return x.Disks
+	}
+	return nil
+}
+
+func (x *MetricsReport) GetNetworks() []*NetworkMetrics {
+	if x != nil {
+		return x.Networks
+	}
+	return nil
+}
+
+func (x *MetricsReport) GetUptimeSeconds() float64 {
+	if x != nil {
+		return x.UptimeSeconds
+	}
+	return 0
+}
+
+type CpuMetrics struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Percent       float64                `protobuf:"fixed64,1,opt,name=percent,proto3" json:"percent,omitempty"` // busy percentage since previous sample window
+	LogicalCores  uint32                 `protobuf:"varint,2,opt,name=logical_cores,json=logicalCores,proto3" json:"logical_cores,omitempty"`
+	Load_1M       float64                `protobuf:"fixed64,3,opt,name=load_1m,json=load1m,proto3" json:"load_1m,omitempty"`
+	Load_5M       float64                `protobuf:"fixed64,4,opt,name=load_5m,json=load5m,proto3" json:"load_5m,omitempty"`
+	Load_15M      float64                `protobuf:"fixed64,5,opt,name=load_15m,json=load15m,proto3" json:"load_15m,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CpuMetrics) Reset() {
+	*x = CpuMetrics{}
+	mi := &file_servercontrol_agent_v1_agent_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CpuMetrics) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CpuMetrics) ProtoMessage() {}
+
+func (x *CpuMetrics) ProtoReflect() protoreflect.Message {
+	mi := &file_servercontrol_agent_v1_agent_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CpuMetrics.ProtoReflect.Descriptor instead.
+func (*CpuMetrics) Descriptor() ([]byte, []int) {
+	return file_servercontrol_agent_v1_agent_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *CpuMetrics) GetPercent() float64 {
+	if x != nil {
+		return x.Percent
+	}
+	return 0
+}
+
+func (x *CpuMetrics) GetLogicalCores() uint32 {
+	if x != nil {
+		return x.LogicalCores
+	}
+	return 0
+}
+
+func (x *CpuMetrics) GetLoad_1M() float64 {
+	if x != nil {
+		return x.Load_1M
+	}
+	return 0
+}
+
+func (x *CpuMetrics) GetLoad_5M() float64 {
+	if x != nil {
+		return x.Load_5M
+	}
+	return 0
+}
+
+func (x *CpuMetrics) GetLoad_15M() float64 {
+	if x != nil {
+		return x.Load_15M
+	}
+	return 0
+}
+
+type MemoryMetrics struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	TotalBytes     uint64                 `protobuf:"varint,1,opt,name=total_bytes,json=totalBytes,proto3" json:"total_bytes,omitempty"`
+	AvailableBytes uint64                 `protobuf:"varint,2,opt,name=available_bytes,json=availableBytes,proto3" json:"available_bytes,omitempty"`
+	UsedBytes      uint64                 `protobuf:"varint,3,opt,name=used_bytes,json=usedBytes,proto3" json:"used_bytes,omitempty"`
+	UsedPercent    float64                `protobuf:"fixed64,4,opt,name=used_percent,json=usedPercent,proto3" json:"used_percent,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *MemoryMetrics) Reset() {
+	*x = MemoryMetrics{}
+	mi := &file_servercontrol_agent_v1_agent_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MemoryMetrics) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MemoryMetrics) ProtoMessage() {}
+
+func (x *MemoryMetrics) ProtoReflect() protoreflect.Message {
+	mi := &file_servercontrol_agent_v1_agent_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MemoryMetrics.ProtoReflect.Descriptor instead.
+func (*MemoryMetrics) Descriptor() ([]byte, []int) {
+	return file_servercontrol_agent_v1_agent_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *MemoryMetrics) GetTotalBytes() uint64 {
+	if x != nil {
+		return x.TotalBytes
+	}
+	return 0
+}
+
+func (x *MemoryMetrics) GetAvailableBytes() uint64 {
+	if x != nil {
+		return x.AvailableBytes
+	}
+	return 0
+}
+
+func (x *MemoryMetrics) GetUsedBytes() uint64 {
+	if x != nil {
+		return x.UsedBytes
+	}
+	return 0
+}
+
+func (x *MemoryMetrics) GetUsedPercent() float64 {
+	if x != nil {
+		return x.UsedPercent
+	}
+	return 0
+}
+
+type DiskMetrics struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	Device         string                 `protobuf:"bytes,1,opt,name=device,proto3" json:"device,omitempty"`
+	MountPoint     string                 `protobuf:"bytes,2,opt,name=mount_point,json=mountPoint,proto3" json:"mount_point,omitempty"`
+	FsType         string                 `protobuf:"bytes,3,opt,name=fs_type,json=fsType,proto3" json:"fs_type,omitempty"`
+	TotalBytes     uint64                 `protobuf:"varint,4,opt,name=total_bytes,json=totalBytes,proto3" json:"total_bytes,omitempty"`
+	UsedBytes      uint64                 `protobuf:"varint,5,opt,name=used_bytes,json=usedBytes,proto3" json:"used_bytes,omitempty"`
+	AvailableBytes uint64                 `protobuf:"varint,6,opt,name=available_bytes,json=availableBytes,proto3" json:"available_bytes,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *DiskMetrics) Reset() {
+	*x = DiskMetrics{}
+	mi := &file_servercontrol_agent_v1_agent_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DiskMetrics) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DiskMetrics) ProtoMessage() {}
+
+func (x *DiskMetrics) ProtoReflect() protoreflect.Message {
+	mi := &file_servercontrol_agent_v1_agent_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DiskMetrics.ProtoReflect.Descriptor instead.
+func (*DiskMetrics) Descriptor() ([]byte, []int) {
+	return file_servercontrol_agent_v1_agent_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *DiskMetrics) GetDevice() string {
+	if x != nil {
+		return x.Device
+	}
+	return ""
+}
+
+func (x *DiskMetrics) GetMountPoint() string {
+	if x != nil {
+		return x.MountPoint
+	}
+	return ""
+}
+
+func (x *DiskMetrics) GetFsType() string {
+	if x != nil {
+		return x.FsType
+	}
+	return ""
+}
+
+func (x *DiskMetrics) GetTotalBytes() uint64 {
+	if x != nil {
+		return x.TotalBytes
+	}
+	return 0
+}
+
+func (x *DiskMetrics) GetUsedBytes() uint64 {
+	if x != nil {
+		return x.UsedBytes
+	}
+	return 0
+}
+
+func (x *DiskMetrics) GetAvailableBytes() uint64 {
+	if x != nil {
+		return x.AvailableBytes
+	}
+	return 0
+}
+
+type NetworkMetrics struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Interface     string                 `protobuf:"bytes,1,opt,name=interface,proto3" json:"interface,omitempty"`
+	RxBytes       uint64                 `protobuf:"varint,2,opt,name=rx_bytes,json=rxBytes,proto3" json:"rx_bytes,omitempty"`
+	TxBytes       uint64                 `protobuf:"varint,3,opt,name=tx_bytes,json=txBytes,proto3" json:"tx_bytes,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *NetworkMetrics) Reset() {
+	*x = NetworkMetrics{}
+	mi := &file_servercontrol_agent_v1_agent_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *NetworkMetrics) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*NetworkMetrics) ProtoMessage() {}
+
+func (x *NetworkMetrics) ProtoReflect() protoreflect.Message {
+	mi := &file_servercontrol_agent_v1_agent_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use NetworkMetrics.ProtoReflect.Descriptor instead.
+func (*NetworkMetrics) Descriptor() ([]byte, []int) {
+	return file_servercontrol_agent_v1_agent_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *NetworkMetrics) GetInterface() string {
+	if x != nil {
+		return x.Interface
+	}
+	return ""
+}
+
+func (x *NetworkMetrics) GetRxBytes() uint64 {
+	if x != nil {
+		return x.RxBytes
+	}
+	return 0
+}
+
+func (x *NetworkMetrics) GetTxBytes() uint64 {
+	if x != nil {
+		return x.TxBytes
+	}
+	return 0
+}
+
 // OperationRequest is a typed operation delivered to the node. It NEVER
 // contains shell text; payloads are validated against the operation schema
 // on BOTH sides. Expiry/idempotency/correlation ride on the envelope.
@@ -931,7 +1480,7 @@ type OperationRequest struct {
 
 func (x *OperationRequest) Reset() {
 	*x = OperationRequest{}
-	mi := &file_servercontrol_agent_v1_agent_proto_msgTypes[9]
+	mi := &file_servercontrol_agent_v1_agent_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -943,7 +1492,7 @@ func (x *OperationRequest) String() string {
 func (*OperationRequest) ProtoMessage() {}
 
 func (x *OperationRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_servercontrol_agent_v1_agent_proto_msgTypes[9]
+	mi := &file_servercontrol_agent_v1_agent_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -956,7 +1505,7 @@ func (x *OperationRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OperationRequest.ProtoReflect.Descriptor instead.
 func (*OperationRequest) Descriptor() ([]byte, []int) {
-	return file_servercontrol_agent_v1_agent_proto_rawDescGZIP(), []int{9}
+	return file_servercontrol_agent_v1_agent_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *OperationRequest) GetTaskId() string {
@@ -1002,7 +1551,7 @@ type OperationResult struct {
 
 func (x *OperationResult) Reset() {
 	*x = OperationResult{}
-	mi := &file_servercontrol_agent_v1_agent_proto_msgTypes[10]
+	mi := &file_servercontrol_agent_v1_agent_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1014,7 +1563,7 @@ func (x *OperationResult) String() string {
 func (*OperationResult) ProtoMessage() {}
 
 func (x *OperationResult) ProtoReflect() protoreflect.Message {
-	mi := &file_servercontrol_agent_v1_agent_proto_msgTypes[10]
+	mi := &file_servercontrol_agent_v1_agent_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1027,7 +1576,7 @@ func (x *OperationResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OperationResult.ProtoReflect.Descriptor instead.
 func (*OperationResult) Descriptor() ([]byte, []int) {
-	return file_servercontrol_agent_v1_agent_proto_rawDescGZIP(), []int{10}
+	return file_servercontrol_agent_v1_agent_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *OperationResult) GetTaskId() string {
@@ -1086,7 +1635,7 @@ const file_servercontrol_agent_v1_agent_proto_rawDesc = "" +
 	"\x06ca_pem\x18\x03 \x01(\tR\x05caPem\x12-\n" +
 	"\x13cert_not_after_unix\x18\x04 \x01(\x03R\x10certNotAfterUnix\x12\x1d\n" +
 	"\n" +
-	"request_id\x18\x05 \x01(\tR\trequestId\"\xbf\x04\n" +
+	"request_id\x18\x05 \x01(\tR\trequestId\"\xec\x05\n" +
 	"\rAgentEnvelope\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x17\n" +
@@ -1100,7 +1649,9 @@ const file_servercontrol_agent_v1_agent_proto_rawDesc = "" +
 	" \x01(\v2\x1d.servercontrol.agent.v1.HelloH\x00R\x05hello\x12A\n" +
 	"\theartbeat\x18\v \x01(\v2!.servercontrol.agent.v1.HeartbeatH\x00R\theartbeat\x12W\n" +
 	"\x11capability_report\x18\f \x01(\v2(.servercontrol.agent.v1.CapabilityReportH\x00R\x10capabilityReport\x12T\n" +
-	"\x10operation_result\x18\r \x01(\v2'.servercontrol.agent.v1.OperationResultH\x00R\x0foperationResultB\t\n" +
+	"\x10operation_result\x18\r \x01(\v2'.servercontrol.agent.v1.OperationResultH\x00R\x0foperationResult\x12[\n" +
+	"\x13system_facts_report\x18\x0e \x01(\v2).servercontrol.agent.v1.SystemFactsReportH\x00R\x11systemFactsReport\x12N\n" +
+	"\x0emetrics_report\x18\x0f \x01(\v2%.servercontrol.agent.v1.MetricsReportH\x00R\rmetricsReportB\t\n" +
 	"\apayload\"\x98\x03\n" +
 	"\x0eServerEnvelope\x12\x1d\n" +
 	"\n" +
@@ -1121,10 +1672,11 @@ const file_servercontrol_agent_v1_agent_proto_rawDesc = "" +
 	"\tos_family\x18\x04 \x01(\tR\bosFamily\x12\x1d\n" +
 	"\n" +
 	"os_version\x18\x05 \x01(\tR\tosVersion\x12\x12\n" +
-	"\x04arch\x18\x06 \x01(\tR\x04arch\"\x9c\x01\n" +
+	"\x04arch\x18\x06 \x01(\tR\x04arch\"\xd6\x01\n" +
 	"\bHelloAck\x12R\n" +
 	"\x10protocol_version\x18\x01 \x01(\x0e2'.servercontrol.agent.v1.ProtocolVersionR\x0fprotocolVersion\x12<\n" +
-	"\x1aheartbeat_interval_seconds\x18\x02 \x01(\x03R\x18heartbeatIntervalSeconds\"N\n" +
+	"\x1aheartbeat_interval_seconds\x18\x02 \x01(\x03R\x18heartbeatIntervalSeconds\x128\n" +
+	"\x18metrics_interval_seconds\x18\x03 \x01(\x03R\x16metricsIntervalSeconds\"N\n" +
 	"\tHeartbeat\x12\x1a\n" +
 	"\bsequence\x18\x01 \x01(\x04R\bsequence\x12%\n" +
 	"\x0euptime_seconds\x18\x02 \x01(\x01R\ruptimeSeconds\"Z\n" +
@@ -1138,7 +1690,56 @@ const file_servercontrol_agent_v1_agent_proto_rawDesc = "" +
 	"\x12reason_unavailable\x18\x04 \x01(\tR\x11reasonUnavailable\x12\x1d\n" +
 	"\n" +
 	"adapter_id\x18\x05 \x01(\tR\tadapterId\x12'\n" +
-	"\x0fadapter_version\x18\x06 \x01(\tR\x0eadapterVersion\"\x90\x01\n" +
+	"\x0fadapter_version\x18\x06 \x01(\tR\x0eadapterVersion\"\xa9\x03\n" +
+	"\x11SystemFactsReport\x12\x13\n" +
+	"\x05os_id\x18\x02 \x01(\tR\x04osId\x12\"\n" +
+	"\ros_version_id\x18\x03 \x01(\tR\vosVersionId\x12$\n" +
+	"\x0eos_pretty_name\x18\x04 \x01(\tR\fosPrettyName\x12\x1e\n" +
+	"\vos_home_url\x18\x05 \x01(\tR\tosHomeUrl\x12%\n" +
+	"\x0ekernel_release\x18\x06 \x01(\tR\rkernelRelease\x12\x12\n" +
+	"\x04arch\x18\a \x01(\tR\x04arch\x12'\n" +
+	"\x0fsystemd_version\x18\b \x01(\tR\x0esystemdVersion\x12'\n" +
+	"\x0fpackage_manager\x18\t \x01(\tR\x0epackageManager\x12+\n" +
+	"\x11systemd_available\x18\n" +
+	" \x01(\bR\x10systemdAvailable\x12=\n" +
+	"\fcollected_at\x18\v \x01(\v2\x1a.google.protobuf.TimestampR\vcollectedAt\x12\x16\n" +
+	"\x06source\x18\f \x01(\tR\x06sourceJ\x04\b\x01\x10\x02\"\x81\x03\n" +
+	"\rMetricsReport\x12=\n" +
+	"\fcollected_at\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\vcollectedAt\x12\x16\n" +
+	"\x06source\x18\x02 \x01(\tR\x06source\x124\n" +
+	"\x03cpu\x18\x03 \x01(\v2\".servercontrol.agent.v1.CpuMetricsR\x03cpu\x12=\n" +
+	"\x06memory\x18\x04 \x01(\v2%.servercontrol.agent.v1.MemoryMetricsR\x06memory\x129\n" +
+	"\x05disks\x18\x05 \x03(\v2#.servercontrol.agent.v1.DiskMetricsR\x05disks\x12B\n" +
+	"\bnetworks\x18\x06 \x03(\v2&.servercontrol.agent.v1.NetworkMetricsR\bnetworks\x12%\n" +
+	"\x0euptime_seconds\x18\a \x01(\x01R\ruptimeSeconds\"\x98\x01\n" +
+	"\n" +
+	"CpuMetrics\x12\x18\n" +
+	"\apercent\x18\x01 \x01(\x01R\apercent\x12#\n" +
+	"\rlogical_cores\x18\x02 \x01(\rR\flogicalCores\x12\x17\n" +
+	"\aload_1m\x18\x03 \x01(\x01R\x06load1m\x12\x17\n" +
+	"\aload_5m\x18\x04 \x01(\x01R\x06load5m\x12\x19\n" +
+	"\bload_15m\x18\x05 \x01(\x01R\aload15m\"\x9b\x01\n" +
+	"\rMemoryMetrics\x12\x1f\n" +
+	"\vtotal_bytes\x18\x01 \x01(\x04R\n" +
+	"totalBytes\x12'\n" +
+	"\x0favailable_bytes\x18\x02 \x01(\x04R\x0eavailableBytes\x12\x1d\n" +
+	"\n" +
+	"used_bytes\x18\x03 \x01(\x04R\tusedBytes\x12!\n" +
+	"\fused_percent\x18\x04 \x01(\x01R\vusedPercent\"\xc8\x01\n" +
+	"\vDiskMetrics\x12\x16\n" +
+	"\x06device\x18\x01 \x01(\tR\x06device\x12\x1f\n" +
+	"\vmount_point\x18\x02 \x01(\tR\n" +
+	"mountPoint\x12\x17\n" +
+	"\afs_type\x18\x03 \x01(\tR\x06fsType\x12\x1f\n" +
+	"\vtotal_bytes\x18\x04 \x01(\x04R\n" +
+	"totalBytes\x12\x1d\n" +
+	"\n" +
+	"used_bytes\x18\x05 \x01(\x04R\tusedBytes\x12'\n" +
+	"\x0favailable_bytes\x18\x06 \x01(\x04R\x0eavailableBytes\"d\n" +
+	"\x0eNetworkMetrics\x12\x1c\n" +
+	"\tinterface\x18\x01 \x01(\tR\tinterface\x12\x19\n" +
+	"\brx_bytes\x18\x02 \x01(\x04R\arxBytes\x12\x19\n" +
+	"\btx_bytes\x18\x03 \x01(\x04R\atxBytes\"\x90\x01\n" +
 	"\x10OperationRequest\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12\x1c\n" +
 	"\toperation\x18\x02 \x01(\tR\toperation\x12+\n" +
@@ -1176,7 +1777,7 @@ func file_servercontrol_agent_v1_agent_proto_rawDescGZIP() []byte {
 }
 
 var file_servercontrol_agent_v1_agent_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_servercontrol_agent_v1_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
+var file_servercontrol_agent_v1_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 17)
 var file_servercontrol_agent_v1_agent_proto_goTypes = []any{
 	(ProtocolVersion)(0),          // 0: servercontrol.agent.v1.ProtocolVersion
 	(OperationResult_Status)(0),   // 1: servercontrol.agent.v1.OperationResult.Status
@@ -1189,35 +1790,49 @@ var file_servercontrol_agent_v1_agent_proto_goTypes = []any{
 	(*Heartbeat)(nil),             // 8: servercontrol.agent.v1.Heartbeat
 	(*CapabilityReport)(nil),      // 9: servercontrol.agent.v1.CapabilityReport
 	(*Capability)(nil),            // 10: servercontrol.agent.v1.Capability
-	(*OperationRequest)(nil),      // 11: servercontrol.agent.v1.OperationRequest
-	(*OperationResult)(nil),       // 12: servercontrol.agent.v1.OperationResult
-	(*timestamppb.Timestamp)(nil), // 13: google.protobuf.Timestamp
+	(*SystemFactsReport)(nil),     // 11: servercontrol.agent.v1.SystemFactsReport
+	(*MetricsReport)(nil),         // 12: servercontrol.agent.v1.MetricsReport
+	(*CpuMetrics)(nil),            // 13: servercontrol.agent.v1.CpuMetrics
+	(*MemoryMetrics)(nil),         // 14: servercontrol.agent.v1.MemoryMetrics
+	(*DiskMetrics)(nil),           // 15: servercontrol.agent.v1.DiskMetrics
+	(*NetworkMetrics)(nil),        // 16: servercontrol.agent.v1.NetworkMetrics
+	(*OperationRequest)(nil),      // 17: servercontrol.agent.v1.OperationRequest
+	(*OperationResult)(nil),       // 18: servercontrol.agent.v1.OperationResult
+	(*timestamppb.Timestamp)(nil), // 19: google.protobuf.Timestamp
 }
 var file_servercontrol_agent_v1_agent_proto_depIdxs = []int32{
 	0,  // 0: servercontrol.agent.v1.EnrollRequest.protocol_version:type_name -> servercontrol.agent.v1.ProtocolVersion
-	13, // 1: servercontrol.agent.v1.AgentEnvelope.issued_at:type_name -> google.protobuf.Timestamp
-	13, // 2: servercontrol.agent.v1.AgentEnvelope.expires_at:type_name -> google.protobuf.Timestamp
+	19, // 1: servercontrol.agent.v1.AgentEnvelope.issued_at:type_name -> google.protobuf.Timestamp
+	19, // 2: servercontrol.agent.v1.AgentEnvelope.expires_at:type_name -> google.protobuf.Timestamp
 	6,  // 3: servercontrol.agent.v1.AgentEnvelope.hello:type_name -> servercontrol.agent.v1.Hello
 	8,  // 4: servercontrol.agent.v1.AgentEnvelope.heartbeat:type_name -> servercontrol.agent.v1.Heartbeat
 	9,  // 5: servercontrol.agent.v1.AgentEnvelope.capability_report:type_name -> servercontrol.agent.v1.CapabilityReport
-	12, // 6: servercontrol.agent.v1.AgentEnvelope.operation_result:type_name -> servercontrol.agent.v1.OperationResult
-	13, // 7: servercontrol.agent.v1.ServerEnvelope.issued_at:type_name -> google.protobuf.Timestamp
-	13, // 8: servercontrol.agent.v1.ServerEnvelope.expires_at:type_name -> google.protobuf.Timestamp
-	7,  // 9: servercontrol.agent.v1.ServerEnvelope.hello_ack:type_name -> servercontrol.agent.v1.HelloAck
-	11, // 10: servercontrol.agent.v1.ServerEnvelope.operation_request:type_name -> servercontrol.agent.v1.OperationRequest
-	0,  // 11: servercontrol.agent.v1.Hello.protocol_version:type_name -> servercontrol.agent.v1.ProtocolVersion
-	0,  // 12: servercontrol.agent.v1.HelloAck.protocol_version:type_name -> servercontrol.agent.v1.ProtocolVersion
-	10, // 13: servercontrol.agent.v1.CapabilityReport.capabilities:type_name -> servercontrol.agent.v1.Capability
-	1,  // 14: servercontrol.agent.v1.OperationResult.status:type_name -> servercontrol.agent.v1.OperationResult.Status
-	2,  // 15: servercontrol.agent.v1.EnrollService.Enroll:input_type -> servercontrol.agent.v1.EnrollRequest
-	4,  // 16: servercontrol.agent.v1.AgentService.Connect:input_type -> servercontrol.agent.v1.AgentEnvelope
-	3,  // 17: servercontrol.agent.v1.EnrollService.Enroll:output_type -> servercontrol.agent.v1.EnrollResponse
-	5,  // 18: servercontrol.agent.v1.AgentService.Connect:output_type -> servercontrol.agent.v1.ServerEnvelope
-	17, // [17:19] is the sub-list for method output_type
-	15, // [15:17] is the sub-list for method input_type
-	15, // [15:15] is the sub-list for extension type_name
-	15, // [15:15] is the sub-list for extension extendee
-	0,  // [0:15] is the sub-list for field type_name
+	18, // 6: servercontrol.agent.v1.AgentEnvelope.operation_result:type_name -> servercontrol.agent.v1.OperationResult
+	11, // 7: servercontrol.agent.v1.AgentEnvelope.system_facts_report:type_name -> servercontrol.agent.v1.SystemFactsReport
+	12, // 8: servercontrol.agent.v1.AgentEnvelope.metrics_report:type_name -> servercontrol.agent.v1.MetricsReport
+	19, // 9: servercontrol.agent.v1.ServerEnvelope.issued_at:type_name -> google.protobuf.Timestamp
+	19, // 10: servercontrol.agent.v1.ServerEnvelope.expires_at:type_name -> google.protobuf.Timestamp
+	7,  // 11: servercontrol.agent.v1.ServerEnvelope.hello_ack:type_name -> servercontrol.agent.v1.HelloAck
+	17, // 12: servercontrol.agent.v1.ServerEnvelope.operation_request:type_name -> servercontrol.agent.v1.OperationRequest
+	0,  // 13: servercontrol.agent.v1.Hello.protocol_version:type_name -> servercontrol.agent.v1.ProtocolVersion
+	0,  // 14: servercontrol.agent.v1.HelloAck.protocol_version:type_name -> servercontrol.agent.v1.ProtocolVersion
+	10, // 15: servercontrol.agent.v1.CapabilityReport.capabilities:type_name -> servercontrol.agent.v1.Capability
+	19, // 16: servercontrol.agent.v1.SystemFactsReport.collected_at:type_name -> google.protobuf.Timestamp
+	19, // 17: servercontrol.agent.v1.MetricsReport.collected_at:type_name -> google.protobuf.Timestamp
+	13, // 18: servercontrol.agent.v1.MetricsReport.cpu:type_name -> servercontrol.agent.v1.CpuMetrics
+	14, // 19: servercontrol.agent.v1.MetricsReport.memory:type_name -> servercontrol.agent.v1.MemoryMetrics
+	15, // 20: servercontrol.agent.v1.MetricsReport.disks:type_name -> servercontrol.agent.v1.DiskMetrics
+	16, // 21: servercontrol.agent.v1.MetricsReport.networks:type_name -> servercontrol.agent.v1.NetworkMetrics
+	1,  // 22: servercontrol.agent.v1.OperationResult.status:type_name -> servercontrol.agent.v1.OperationResult.Status
+	2,  // 23: servercontrol.agent.v1.EnrollService.Enroll:input_type -> servercontrol.agent.v1.EnrollRequest
+	4,  // 24: servercontrol.agent.v1.AgentService.Connect:input_type -> servercontrol.agent.v1.AgentEnvelope
+	3,  // 25: servercontrol.agent.v1.EnrollService.Enroll:output_type -> servercontrol.agent.v1.EnrollResponse
+	5,  // 26: servercontrol.agent.v1.AgentService.Connect:output_type -> servercontrol.agent.v1.ServerEnvelope
+	25, // [25:27] is the sub-list for method output_type
+	23, // [23:25] is the sub-list for method input_type
+	23, // [23:23] is the sub-list for extension type_name
+	23, // [23:23] is the sub-list for extension extendee
+	0,  // [0:23] is the sub-list for field type_name
 }
 
 func init() { file_servercontrol_agent_v1_agent_proto_init() }
@@ -1230,6 +1845,8 @@ func file_servercontrol_agent_v1_agent_proto_init() {
 		(*AgentEnvelope_Heartbeat)(nil),
 		(*AgentEnvelope_CapabilityReport)(nil),
 		(*AgentEnvelope_OperationResult)(nil),
+		(*AgentEnvelope_SystemFactsReport)(nil),
+		(*AgentEnvelope_MetricsReport)(nil),
 	}
 	file_servercontrol_agent_v1_agent_proto_msgTypes[3].OneofWrappers = []any{
 		(*ServerEnvelope_HelloAck)(nil),
@@ -1241,7 +1858,7 @@ func file_servercontrol_agent_v1_agent_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_servercontrol_agent_v1_agent_proto_rawDesc), len(file_servercontrol_agent_v1_agent_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   11,
+			NumMessages:   17,
 			NumExtensions: 0,
 			NumServices:   2,
 		},

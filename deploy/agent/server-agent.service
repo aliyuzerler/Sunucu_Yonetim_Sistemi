@@ -1,0 +1,43 @@
+# systemd unit — server-agent (YETKİSİZ kullanıcı olarak çalışır).
+# Faz 04: outbound mTLS + heartbeat/facts/metrics + tipli operasyonlar.
+# Privileged işlemler YALNIZCA yerel broker (server-privd) üzerinden yapılır.
+#
+# Kurulum: make agent (veya go build) → cp server-agent /usr/local/bin/
+#          useradd -r -s /usr/sbin/nologin server-agent
+#          mkdir -p /var/lib/server-control-agent && chown server-agent: /var/lib/server-control-agent
+
+[Unit]
+Description=Server Control Agent (outbound mTLS)
+Documentation=https://github.com/aliyuzerler/Sunucu_Yonetim_Sistemi
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=server-agent
+Group=server-agent
+ExecStart=/usr/local/bin/server-agent run --server control-plane.example.internal:9090
+Restart=always
+RestartSec=5
+
+# Sertleştirme: ağ kimliği dışında hiçbir ayrıcalık yok.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ReadWritePaths=/var/lib/server-control-agent
+# Broker Unix socket'ine bağlanma izni grup üzerinden verilir.
+SupplementaryGroups=server-control-broker
+
+[Install]
+WantedBy=multi-user.target

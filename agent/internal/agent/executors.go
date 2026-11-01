@@ -12,6 +12,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/broker"
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/svcops"
 	agentv1 "github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/gen/proto/servercontrol/agent/v1"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -39,6 +41,12 @@ func NewRegistry(executors ...Executor) (*ExecutorRegistry, error) {
 		r.ops[info.GetCapabilityId()] = e
 	}
 	return r, nil
+}
+
+// Lookup returns the executor registered for an operation name.
+func (r *ExecutorRegistry) Lookup(op string) (Executor, bool) {
+	e, ok := r.ops[op]
+	return e, ok
 }
 
 // Capabilities returns the reported capability set.
@@ -176,12 +184,116 @@ func (EchoExecutor) Execute(_ context.Context, payload []byte) ([]byte, string, 
 	return body, "echo tamamlandı", nil
 }
 
-// DefaultRegistry returns the Faz 03 agent executor set.
-func DefaultRegistry() (*ExecutorRegistry, error) {
-	return NewRegistry(EchoExecutor{})
+// DefaultRegistry returns the Faz 04 agent executor set: the echo proof plus
+// the five systemd service operations (broker-backed). brokerPath is the local
+// privileged broker's Unix socket; the service capabilities report
+// availability by probing that socket at report time.
+func DefaultRegistry(brokerPath string) (*ExecutorRegistry, error) {
+	return NewRegistry(
+		EchoExecutor{},
+		NewServiceExecutor(broker.OpServiceList, brokerPath),
+		NewServiceExecutor(broker.OpServiceStatus, brokerPath),
+		NewServiceExecutor(broker.OpServiceStart, brokerPath),
+		NewServiceExecutor(broker.OpServiceStop, brokerPath),
+		NewServiceExecutor(broker.OpServiceRestart, brokerPath),
+	)
 }
 
-// ---- küçük yardımcılar ----
+// ---- Faz 04: servis işlemleri (yerel privileged broker üzerinden) ----
+
+// Prober lets an executor refine capability availability at report time
+// (docs/architecture/capability-system.md: capability is a runtime contract).
+type Prober interface {
+	ProbeAvailable(ctx context.Context) (available bool, reason string)
+}
+
+// ServiceExecutor executes one allowlisted linux.systemd.service.* operation
+// by forwarding the typed request to the local privileged broker (server-privd).
+// It NEVER runs anything itself and NEVER sees shell text: the payload is
+// schema-validated JSON and the broker speaks typed operations only.
+type ServiceExecutor struct {
+	op         string
+	brokerPath string
+}
+
+// NewServiceExecutor builds one broker-backed service executor.
+func NewServiceExecutor(op, brokerPath string) *ServiceExecutor {
+	return &ServiceExecutor{op: op, brokerPath: brokerPath}
+}
+
+// Info describes the capability; availability is refined by ProbeAvailable.
+func (s *ServiceExecutor) Info() *agentv1.Capability {
+	return &agentv1.Capability{
+		CapabilityId:   s.op,
+		Version:        "1.0.0",
+		Available:      false,
+		AdapterId:      "systemd-broker",
+		AdapterVersion: Version,
+	}
+}
+
+// ProbeAvailable dials the broker socket (read-only list probe with limit 1).
+func (s *ServiceExecutor) ProbeAvailable(ctx context.Context) (bool, string) {
+	cli := broker.NewClient(s.brokerPath)
+	probeCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	return cli.Ping(probeCtx)
+}
+
+// servicePayload is the agent-side mirror of the broker's unit schema
+// (validated on BOTH sides — proto contract).
+type servicePayload struct {
+	Unit  string `json:"unit"`
+	Limit int    `json:"limit,omitempty"`
+}
+
+// Execute validates the payload, forwards the typed request to the broker and
+// maps the response to an OperationResult payload.
+func (s *ServiceExecutor) Execute(ctx context.Context, payload []byte) ([]byte, string, error) {
+	req := &broker.Request{Operation: s.op}
+	switch s.op {
+	case broker.OpServiceList:
+		var p servicePayload
+		if len(payload) > 0 {
+			dec := json.NewDecoder(bytes.NewReader(payload))
+			dec.DisallowUnknownFields()
+			if err := dec.Decode(&p); err != nil {
+				return nil, "", fmt.Errorf("payload çözülemedi: %w", err)
+			}
+		}
+		limit := p.Limit
+		if limit == 0 {
+			limit = 200
+		}
+		if limit < 1 || limit > 500 {
+			return nil, "", fmt.Errorf("limit 1..500 olmalı")
+		}
+		req.Params, _ = json.Marshal(broker.ListParams{Limit: limit})
+	default:
+		var p servicePayload
+		dec := json.NewDecoder(bytes.NewReader(payload))
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&p); err != nil {
+			return nil, "", fmt.Errorf("payload çözülemedi: %w", err)
+		}
+		if err := svcops.ValidateUnit(p.Unit); err != nil {
+			return nil, "", err
+		}
+		req.Params, _ = json.Marshal(broker.UnitParams{Unit: p.Unit})
+	}
+	res, err := broker.NewClient(s.brokerPath).Call(ctx, req)
+	if err != nil {
+		return nil, "", fmt.Errorf("broker erişilemiyor: %w", err)
+	}
+	switch res.Status {
+	case broker.StatusSucceeded:
+		return res.Result, "broker işlemi tamamlandı", nil
+	case broker.StatusRejected:
+		return nil, res.Output, fmt.Errorf("broker reddetti: %s", res.ErrorCategory)
+	default:
+		return nil, res.Output, fmt.Errorf("broker işlemi başarısız: %s", res.ErrorCategory)
+	}
+}
 
 func now() *timestamppb.Timestamp { return timestamppb.New(time.Now().UTC()) }
 

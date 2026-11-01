@@ -57,6 +57,11 @@ type OperationSpec struct {
 	MaxPayload int           // raw payload size limit in bytes
 	Validate   func(payload json.RawMessage) error
 	Exec       Executor // control-plane executor; node ops carry Exec == nil
+
+	// RequiredPerm is an EXTRA RBAC permission checked at task creation on
+	// top of tasks:write (Faz 04: service mutations require service:control).
+	// Empty means no additional permission.
+	RequiredPerm string
 }
 
 // Registry holds the allowlisted operations for this control plane build.
