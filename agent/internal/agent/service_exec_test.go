@@ -143,14 +143,17 @@ func TestCapabilityProbing(t *testing.T) {
 		if c.GetAvailable() {
 			t.Fatalf("ölü broker ile unavailable olmalı: %+v", c)
 		}
-		// Docker ailesi önce socket varlığına bakar (farklı dürüst gerekçe);
-		// diğer her şey broker_unreachable döner.
+		// Docker ailesi önce socket varlığına bakar; socket yoksa dürüst
+		// socket gerekçesi, varsa broker ping'ine düşer → broker_unreachable
+		// (CI-18: docker host'larında soket VAR, gerekçe ortam-bağımlıdır —
+		// her ikisi de dürüsttür ve unavailable sonuç değişmez).
 		if strings.HasPrefix(c.GetCapabilityId(), "docker.container.") ||
 			strings.HasPrefix(c.GetCapabilityId(), "docker.image.") ||
 			strings.HasPrefix(c.GetCapabilityId(), "docker.network.") ||
 			strings.HasPrefix(c.GetCapabilityId(), "docker.volume.") {
-			if !strings.Contains(c.GetReasonUnavailable(), "docker socket") {
-				t.Fatalf("docker ailesi socket gerekçesi beklenir: %+v", c)
+			if !strings.Contains(c.GetReasonUnavailable(), "docker socket") &&
+				c.GetReasonUnavailable() != "broker_unreachable" {
+				t.Fatalf("docker ailesi socket/broker gerekçesi beklenir: %+v", c)
 			}
 			continue
 		}
