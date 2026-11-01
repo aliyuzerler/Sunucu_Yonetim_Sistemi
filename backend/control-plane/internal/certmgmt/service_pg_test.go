@@ -50,7 +50,10 @@ func newFlow(t *testing.T) (*Service, *fakeca.Server, *dns.Service) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	dnsSvc := &dns.Service{Key: key}
+	// CI-21 dersi: sağlayıcı CRUD PG yolunu da kullanır — Store MUTLAKA
+	// bağlanmalı (yerelde TEST_DATABASE_URL olmadan bu test skip olur,
+	// eksik bağımlılık yalnız CI'da patlar).
+	dnsSvc := &dns.Service{Store: dns.NewStore(pool), Key: key}
 	mgr := &acmex.Manager{
 		DirectoryURL: f.DirURL(),
 		Contact:      []string{"mailto:ops@example.internal"},
