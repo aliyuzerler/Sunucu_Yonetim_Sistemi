@@ -1,7 +1,7 @@
 # Project Status
 
-- **Status:** Phase 02 executed — identity (argon2id + server-side sessions), one-time admin bootstrap, default-deny RBAC with node/group scopes, node inventory, PostgreSQL durable task/outbox engine with leasing worker, append-only audit with redaction, and a Playwright E2E layer with committed screenshots; awaiting CI run, independent test-prompt run and owner approval.
-- **Current phase:** 02 — Identity, RBAC, node inventory, task/outbox (COMPLETE pending CI + owner approval) → next: 03 — Agent protocol, enrollment, mTLS, capability reporting.
+- **Status:** Phase 02 executed and CI-verified — identity (argon2id + server-side sessions), one-time admin bootstrap, default-deny RBAC with node/group scopes, node inventory, PostgreSQL durable task/outbox engine with leasing worker, append-only audit with redaction, and a Playwright E2E layer with committed screenshots; CI run 41298676383 (commit 832584e) green across backend/frontend/e2e/secret-scan. Independent test-prompt run and owner approval pending.
+- **Current phase:** 02 — Identity, RBAC, node inventory, task/outbox (COMPLETE; CI-verified) → next: 03 — Agent protocol, enrollment, mTLS, capability reporting.
 - **Phase 02 evidence:**
   - Migrations `0002_identity_rbac`, `0003_inventory`, `0004_tasks_outbox`, `0005_audit` (embedded, transactional, reversible; audit is append-only via trigger).
   - Backend packages: `internal/identity` (argon2id, hashed server-side sessions, derived CSRF token, one-time bootstrap, in-memory login throttling), `internal/rbac` (pure default-deny policy + SQL store), `internal/inventory` (nodes/groups/tags/facts/capabilities), `internal/tasks` (typed operation registry, single-transaction task+outbox creation, `FOR UPDATE SKIP LOCKED` leasing worker, lease recovery, expiry sweep, outbox publisher), `internal/audit` (redaction + keyset queries), `internal/testdb` (shared PG test harness).

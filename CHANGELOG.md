@@ -27,6 +27,12 @@
 ### Security
 - Oturum/CSRF token'larının veritabanında düz metin bulunmaması; audit ve loglarda secret redaction; audit tablosunun append-only olması; bootstrap token üretiminin yalnızca host CLI'sında olması; default-deny RBAC ve katalog dışı izin reddi; payload `DisallowUnknownFields` + boyut limitleri; login rate limit + uniform hata.
 
+### Fixed (CI doğrulama turunda)
+- CI-1: Paralel test paketlerinin migration advisory lock yarışı — `migrate` artık sınırlı süre bekler (30s), sonra yüksek sesle hata verir; lock testi iptal yolunu da kapsar.
+- CI-2: `PGRecorder.Record` merkezî secret redaction uygular (defense in depth).
+- CI-3: CI e2e job'ı `playwright install --with-deps` takılması — runner imajındaki system Chrome kullanılır (`E2E_BROWSER_CHANNEL=chrome`); job'lara `timeout-minutes` eklendi.
+- CI-4: Her test paketi `internal/testutil.UniqueDB` ile kendi izole disposable veritabanını kullanır (per-test DB'ler test sonunda DROP WITH FORCE ile kaldırılır).
+
 ## [0.2.0] — 2026-11-01 — Faz 01: Monorepo, geliştirme ortamı, temel UI/API
 
 ### Added

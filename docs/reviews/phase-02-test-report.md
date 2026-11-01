@@ -68,6 +68,7 @@
 
 ## Faz kabul kararı (öz-denetim)
 
-- Kriterler 1-5: lokal birim seviyede PASS; PostgreSQL entegrasyonu CI koşusuna bağlı.
-- Kritik/yüksek bulgu yok.
-- Karar: **ACCEPTED (koşullu — CI yeşil onayı beklenir)**, sonraki faza geçiş: **READY (CI doğrulamasından sonra)**
+- Kriterler 1-5: birim + PostgreSQL 18 entegrasyon testleriyle PASS (CI run 41298676383, commit 832584e — **success**).
+- CI doğrulama geçmişi: ilk koşu CI-1 bulgusu (migration lock yarışı), ikinci koşu CI-3 (Playwright --with-deps takılması), üçüncü koşu CI-4 (paylaşımlı test DB'si çakışması) — hepsi düzeltildi; son koşu: backend ✓ frontend ✓ e2e (gerçek Control Plane) ✓ secret-scan ✓.
+- Kritik/yüksek açık bulgu yok.
+- Karar: **ACCEPTED**, sonraki faza geçiş: **READY**
