@@ -22,6 +22,9 @@
 - Üç katmanlı doğrulama yeni op'lara taşındı: control-plane validator → agent executor → broker `validateRequest` (hepsi strict JSON + kapalı enum).
 - Gerçek-host smoke testleri gate'siz sessiz atlanamaz: gate konmuşsa host eşleşmezse test BAŞARISIZ olur (kanıt dürüstlüğü).
 
+### Fixed (bağımsız test koşusunda)
+- IT-01 (orta, test altyapısı): e2e `openRocky01`/`openWin01` yardımcıları node listesi yerleşmeden `row.count()` yapıyordu → ara sıra çift `rocky-01`/`win-01` oluşturuluyor ve strict mode ihlali flaky kırmızı üretiyordu (yerelde ~1/3 koşu; bağımsız Faz 06 test koşusunda yakalandı, yeniden üretildi). Satır sayımından önce `Yükleniyor…` göstergesinin kaybolması bekleniyor (`linux-distro.spec.ts`, `windows-node.spec.ts`); doğrulama: 6 ardışık tam koşu 14/14 = **84/84 yeşil**. Kanıt ve değerlendirme: `docs/reviews/phase-06-test-report.md` (ACCEPTED/READY).
+
 ## [0.6.0] — 2026-11-01 — Faz 05: Windows Server Agent ve native adaptörler
 
 ### Added

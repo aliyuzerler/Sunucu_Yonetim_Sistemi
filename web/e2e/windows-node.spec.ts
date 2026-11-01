@@ -31,6 +31,9 @@ async function login(page) {
 async function openWin01(page) {
   await page.getByRole("button", { name: /Sunucular/ }).click();
   const row = page.getByRole("row", { name: /win-01/ });
+  // Liste yerleşmeden count() YAPILMAZ: yükleniyor göstergesi kaybolmalı
+  // (çift kayıt yarışına karşı — IT-01, Faz 06 bağımsız testi).
+  await expect(page.getByText("Yükleniyor…")).toBeHidden();
   if (!(await row.count())) {
     await page.getByRole("button", { name: "Sunucu Ekle" }).click();
     await page.getByLabel("Görünen ad").fill("win-01");

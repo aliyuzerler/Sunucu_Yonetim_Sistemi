@@ -33,6 +33,10 @@ async function login(page) {
 async function openRocky01(page) {
   await page.getByRole("button", { name: /Sunucular/ }).click();
   const row = page.getByRole("row", { name: /rocky-01/ });
+  // Liste yerleşmeden count() YAPILMAZ: yükleniyor göstergesi kaybolmalı
+  // (aksine ara sıra çift rocky-01 oluşur ve strict mode ihlali flaky
+  // kırmızı üretir — bağımsız Faz 06 testi IT-01).
+  await expect(page.getByText("Yükleniyor…")).toBeHidden();
   if (!(await row.count())) {
     await page.getByRole("button", { name: "Sunucu Ekle" }).click();
     await page.getByLabel("Görünen ad").fill("rocky-01");
