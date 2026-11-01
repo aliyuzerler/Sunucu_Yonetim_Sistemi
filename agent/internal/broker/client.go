@@ -45,9 +45,9 @@ func (c *Client) Call(ctx context.Context, req *Request) (*Response, error) {
 	}
 
 	req.V = ProtocolV1
-	if err := json.NewEncoder(conn).Encode(req); err != nil {
-		return nil, fmt.Errorf("istek yazılamadı: %w", err)
-	}
+	// Yazma hatasını yut: broker bazı redlerde (peer_denied) isteği okumadan
+	// yanıtı yazıp kapanır; istemci yine de yanıtı okumayı dener.
+	_ = json.NewEncoder(conn).Encode(req)
 	// Yarı kapatma: sunucu tek istek/yanıt modelinde hemen EOF'u görür.
 	if tc, ok := conn.(*net.UnixConn); ok {
 		_ = tc.CloseWrite()

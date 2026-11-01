@@ -83,6 +83,7 @@ func Reset(t *testing.T, pool *pgxpool.Pool) {
 	_, err := pool.Exec(ctx, `
 TRUNCATE audit_events, outbox_events, task_attempts, tasks,
          node_capabilities, node_facts, node_tags, node_group_members,
+         node_metrics, node_system_facts,
          nodes, node_groups, sessions, admin_bootstrap_tokens,
          user_role_bindings, users
 RESTART IDENTITY CASCADE`)

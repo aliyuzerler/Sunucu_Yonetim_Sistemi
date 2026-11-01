@@ -173,11 +173,13 @@ func (s *Server) handleCreds(conn net.Conn, uid, gid uint32, pid int32) {
 	respond := func(res *Response, entry AuditEntry) {
 		entry.Status = res.Status
 		entry.ErrorCategory = res.ErrorCategory
-		_ = writeResponse(conn, res)
 		entry.DurationMS = time.Since(start).Milliseconds()
+		// Audit ÖNCE yazılır: istemci yanıtı aldıktan sonra test/izleyici
+		// audit kaydını hemen görebilir (yarışsız gözlem).
 		if s.cfg.Audit != nil {
 			s.cfg.Audit.Record(entry)
 		}
+		_ = writeResponse(conn, res)
 		_ = conn.Close()
 	}
 

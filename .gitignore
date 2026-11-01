@@ -19,6 +19,7 @@ coverage/
 
 # Go
 bin/
+!**/testdata/**/bin/
 *.exe
 *.test
 *.out

@@ -1,0 +1,3 @@
+#!/bin/sh
+echo "systemd 257 (257.2-2)
++PAM +AUDIT +SELINUX +APPARMOR"

@@ -44,8 +44,12 @@ INSERT INTO permissions (name) VALUES
     ('service:read'),
     ('service:control');
 
+-- DİKKAT: yalnızca YENİ izinler verilir; 0002 admin'e tüm kataloğu zaten
+-- verdi — CROSS JOIN pkey çakışması üretir (CI bulgusu CI-04).
 INSERT INTO role_permissions (role_id, permission_id)
-SELECT r.id, p.id FROM roles r CROSS JOIN permissions p WHERE r.name = 'admin';
+SELECT r.id, p.id FROM roles r JOIN permissions p
+  ON p.name IN ('service:read', 'service:control')
+WHERE r.name = 'admin';
 
 INSERT INTO role_permissions (role_id, permission_id)
 SELECT r.id, p.id FROM roles r JOIN permissions p
