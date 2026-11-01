@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"unicode/utf16"
 )
 
 // Operation names (must mirror backend/internal/tasks ops_windows.go).
@@ -218,8 +219,10 @@ type xmlRendering struct {
 // ParseWevtutilXML parses `wevtutil query-events … /format:xml` output into
 // bounded Events. Message is collapsed to one line and truncated to 4000
 // bytes. Malformed documents yield nil; unknown fields never fail the read.
+// CI bulgusu CI-12: wevtutil redirects emit UTF-16LE (BOM FF FE) on some
+// Windows builds — decode before parsing, never assume UTF-8.
 func ParseWevtutilXML(data []byte) []Event {
-	data = bytes.TrimPrefix(data, []byte("\xef\xbb\xbf")) // BOM
+	data = normalizeWevtEncoding(data)
 	var wrapper xmlEvents
 	if err := xml.Unmarshal(data, &wrapper); err != nil {
 		return nil
@@ -247,6 +250,33 @@ func ParseWevtutilXML(data []byte) []Event {
 		}
 	}
 	return out
+}
+
+// normalizeWevtEncoding decodes UTF-16LE/BE BOMs (and heuristic NUL-padded
+// UTF-16 without BOM) to UTF-8; UTF-8 BOM is stripped.
+func normalizeWevtEncoding(data []byte) []byte {
+	if len(data) >= 2 && data[0] == 0xFF && data[1] == 0xFE { // UTF-16LE BOM
+		return utf16ToUTF8(data[2:], true)
+	}
+	if len(data) >= 2 && data[0] == 0xFE && data[1] == 0xFF { // UTF-16BE BOM
+		return utf16ToUTF8(data[2:], false)
+	}
+	if len(data) >= 2 && data[0] == '<' && data[1] == 0 { // BOM'suz UTF-16LE
+		return utf16ToUTF8(data, true)
+	}
+	return bytes.TrimPrefix(data, []byte("\xef\xbb\xbf"))
+}
+
+func utf16ToUTF8(b []byte, little bool) []byte {
+	u := make([]uint16, 0, len(b)/2)
+	for i := 0; i+1 < len(b); i += 2 {
+		if little {
+			u = append(u, uint16(b[i])|uint16(b[i+1])<<8)
+		} else {
+			u = append(u, uint16(b[i])<<8|uint16(b[i+1]))
+		}
+	}
+	return []byte(string(utf16.Decode(u)))
 }
 
 // oneLine collapses whitespace runs and truncates (log safety).

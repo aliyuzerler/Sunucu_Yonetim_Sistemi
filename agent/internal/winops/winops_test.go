@@ -131,3 +131,40 @@ func TestParseWevtutilXMLMalformed(t *testing.T) {
 		t.Errorf("200 sınırı: %d", len(got))
 	}
 }
+
+func TestParseWevtutilXMLEncodings(t *testing.T) {
+	base := ParseWevtutilXML([]byte(wevtSample))
+	if len(base) != 2 {
+		t.Fatalf("referans UTF-8 ayrıştırması bozuldu: %d", len(base))
+	}
+	// UTF-16LE BOM'lu kopya (CI-12: wevtutil redirect davranışı).
+	le := []byte{0xFF, 0xFE}
+	for _, r := range wevtSample {
+		le = append(le, byte(r&0xFF), byte(r>>8))
+	}
+	got := ParseWevtutilXML(le)
+	if len(got) != 2 || got[0].EventID != 7040 || got[0].Message != base[0].Message {
+		t.Fatalf("UTF-16LE: %d olay; ilk: %+v", len(got), firstOrNil(got))
+	}
+	// BOM'suz UTF-16LE (heuristic).
+	noBom := le[2:]
+	got2 := ParseWevtutilXML(noBom)
+	if len(got2) != 2 {
+		t.Fatalf("BOM'suz UTF-16LE: %d olay", len(got2))
+	}
+	// UTF-16BE BOM'lu.
+	be := []byte{0xFE, 0xFF}
+	for _, r := range wevtSample {
+		be = append(be, byte(r>>8), byte(r&0xFF))
+	}
+	if got3 := ParseWevtutilXML(be); len(got3) != 2 {
+		t.Fatalf("UTF-16BE: %d olay", len(got3))
+	}
+}
+
+func firstOrNil(evs []Event) *Event {
+	if len(evs) == 0 {
+		return nil
+	}
+	return &evs[0]
+}

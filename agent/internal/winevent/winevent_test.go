@@ -19,7 +19,14 @@ func TestReadSmoke(t *testing.T) {
 		t.Fatalf("Read(System): %v", err)
 	}
 	if len(events) == 0 {
-		t.Fatal("System kanalında en az bir olay beklenir (runner'da boş olamaz)")
+		// Teşhis (CI-12 sınıfı sorunlar için): ham çıktının ilk baytları.
+		out, rerr := runArgv(context.Background(), r.wevtutil(),
+			"query-events", "System", "/count:1", "/rd:true", "/format:xml")
+		head := out
+		if len(head) > 64 {
+			head = head[:64]
+		}
+		t.Fatalf("System kanalında olay beklenirdi (parse=0); ham çıktı ilk 64 bayt: %q (err=%v)", head, rerr)
 	}
 	if len(events) > 10 {
 		t.Fatalf("count sınırı aşıldı: %d", len(events))
