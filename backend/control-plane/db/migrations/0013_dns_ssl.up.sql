@@ -7,10 +7,12 @@
 -- düz metin kimlik bilgisi hiçbir okuma yoluna çıkmaz (yalnız anahtar
 -- ADLARI credential_keys alanında tutulur).
 --
--- ssl_certificates: node_certificates (0006, agent mTLS kimlik
--- sertifikaları) ile karışmaması için ayrı ad alanı. TLS özel anahtarı
--- bu tabloda ASLA tutulmaz (node'da doğar; yalnız CSR — public materyal —
--- saklanır); sertifika/zincir PEM'i GCM sealed saklanır.
+-- certificates: yönetilen TLS sertifikalarının yaşam döngüsü durumu
+-- (certmgmt store SQL'i ile aynı ad — CI-22 dersi: migration ve store
+-- şemaları birebir hizalı olmalı; 0006'daki node_certificates agent
+-- mTLS kimlik sertifikalarıdır, ayrıdır). TLS özel anahtarı bu tabloda
+-- ASLA tutulmaz (node'da doğar; yalnız CSR — public materyal — saklanır);
+-- sertifika/zincir PEM'i GCM sealed saklanır.
 
 CREATE TABLE dns_providers (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -23,7 +25,7 @@ CREATE TABLE dns_providers (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE TABLE ssl_certificates (
+CREATE TABLE certificates (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name TEXT NOT NULL,
     sans JSONB NOT NULL DEFAULT '[]'::jsonb,
@@ -49,8 +51,8 @@ CREATE TABLE ssl_certificates (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE INDEX ssl_certificates_state_idx ON ssl_certificates (state);
-CREATE INDEX ssl_certificates_not_after_idx ON ssl_certificates (not_after);
+CREATE INDEX certificates_state_idx ON certificates (state);
+CREATE INDEX certificates_not_after_idx ON certificates (not_after);
 
 INSERT INTO permissions (name) VALUES
     ('dns:read'), ('dns:control'), ('cert:read'), ('cert:control');

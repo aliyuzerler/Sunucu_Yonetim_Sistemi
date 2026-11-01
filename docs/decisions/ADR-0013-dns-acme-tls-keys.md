@@ -39,7 +39,7 @@ Yenileme, **saklanan CSR'yi yeniden kullanır** (aynı anahtar çifti). Trade-of
 
 ### 5. Sertifika durumu makinesi + süre izleyicisi
 
-`ssl_certificates` tablosu kapalı durum kümesi taşır: `pending → issuing → issued → (renewing → issued | renewal_failed)`, `revoked`, `expired`. "expired" hem okuma anında türetilir (`EffectiveStateOf`) hem de `certmgmt.Watcher` tarafından kalıcılaştırılır; 30 günden az ömür `expiring_soon` rozetidir. Tüm başarısızlıklar `last_error` + `last_error_class` + `retry_after_secs` ile kayda işlenir.
+`certificates` tablosu kapalı durum kümesi taşır: `pending → issuing → issued → (renewing → issued | renewal_failed)`, `revoked`, `expired`. "expired" hem okuma anında türetilir (`EffectiveStateOf`) hem de `certmgmt.Watcher` tarafından kalıcılaştırılır; 30 günden az ömür `expiring_soon` rozetidir. Tüm başarısızlıklar `last_error` + `last_error_class` + `retry_after_secs` ile kayda işlenir.
 
 ## Alternatifler ve neden reddedildiği
 

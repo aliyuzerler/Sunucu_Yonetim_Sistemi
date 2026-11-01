@@ -7,7 +7,7 @@ Bu belge, domain/DNS sağlayıcı adaptörü ve ACME sertifika yaşam döngüsü
 ```
 ┌─ Control Plane ──────────────────────────────────────────────┐
 │ dns.Service        → Provider adapter (mock) + şifreli creds │
-│ certmgmt.Service   → ACME akışı + ssl_certificates durumu    │
+│ certmgmt.Service   → ACME akışı + certificates durumu    │
 │ acmex.Manager      → x/crypto/acme + hesap-imzalı revoke     │
 │ typed ops (worker) : dns.zone.list / dns.record.list /        │
 │   dns.record.diff / dns.record.apply / dns.record.delete /    │
