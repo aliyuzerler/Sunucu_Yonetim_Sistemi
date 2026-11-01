@@ -81,7 +81,9 @@ func TestFlowIssueRenewRevoke(t *testing.T) {
 	ctx := t.Context()
 
 	// DNS sağlayıcı: mock, kayıtlı.
-	if _, err := dnsSvc.CreateProvider(ctx, "flow-provider", "mock", json.RawMessage(`{"api_key":"flow-key-1"}`)); err != nil {
+	// CI-26 dersi: mock sağlayıcı her executor çağrısında credentials'dan
+	// YENIDEN kurulur — bölge state'i credential blob'unda taşınmalı.
+	if _, err := dnsSvc.CreateProvider(ctx, "flow-provider", "mock", json.RawMessage(`{"api_key":"flow-key-1","zones":["example.internal"]}`)); err != nil {
 		t.Fatalf("provider: %v", err)
 	}
 	providers, err := dnsSvc.ListProviders(ctx)
@@ -185,7 +187,7 @@ func TestFlowIssueFailureClassificationPersisted(t *testing.T) {
 	svc, f, dnsSvc := newFlow(t)
 	ctx := t.Context()
 
-	if _, err := dnsSvc.CreateProvider(ctx, "p2", "mock", json.RawMessage(`{"api_key":"k2"}`)); err != nil {
+	if _, err := dnsSvc.CreateProvider(ctx, "p2", "mock", json.RawMessage(`{"api_key":"k2","zones":["example.internal"]}`)); err != nil {
 		t.Fatal(err)
 	}
 	providers, _ := dnsSvc.ListProviders(ctx)

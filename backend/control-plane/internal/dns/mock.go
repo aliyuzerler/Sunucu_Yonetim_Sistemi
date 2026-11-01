@@ -26,9 +26,13 @@ type recordKey struct{ name, typ string }
 // MockCredentials is the credential shape accepted for kind "mock".
 // The mock does not call anything external, but the credential contract is
 // still enforced (non-empty api_key) so the encrypted-at-rest path is
-// exercised end to end in tests.
+// exercised end to end in tests. Zones seeds the hosted zones: the service
+// builds a FRESH provider per executor call from these credentials, so
+// zone state must be part of the credential blob (CI-26 dersi: in-memory
+// durum çağrılar arası taşınmaz).
 type MockCredentials struct {
-	APIKey string `json:"api_key"`
+	APIKey string   `json:"api_key"`
+	Zones  []string `json:"zones,omitempty"`
 }
 
 // NewMock builds a mock provider with the default capability set:
@@ -177,5 +181,17 @@ func BuildMock(creds []byte) (*MockProvider, error) {
 	if len(c.APIKey) > 512 {
 		return nil, fmt.Errorf("%w: api_key 512 karakteri aşamaz", ErrInvalidRecord)
 	}
-	return NewMock(), nil
+	if len(c.Zones) > MaxZones {
+		return nil, fmt.Errorf("%w: en fazla %d bölge seed edilebilir", ErrLimit, MaxZones)
+	}
+	m := NewMock()
+	for _, z := range c.Zones {
+		if !ValidZoneName(z) {
+			return nil, fmt.Errorf("%w: %q", ErrInvalidZone, z)
+		}
+		if err := m.SeedZone(z); err != nil {
+			return nil, err
+		}
+	}
+	return m, nil
 }

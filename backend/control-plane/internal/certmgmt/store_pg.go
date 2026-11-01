@@ -119,13 +119,14 @@ func (s *Store) MarkIssuing(ctx context.Context, id string) error {
 	return requireAffected(tag, "issuing")
 }
 
-// MarkRenewing transitions issued/expiring → renewing.
+// MarkRenewing transitions issued/expired/renewal_failed → renewing
+// (yenileme başarısızlığından sonra yeniden deneme meşrudur — CI-26).
 func (s *Store) MarkRenewing(ctx context.Context, id string) error {
 	tag, err := s.pool.Exec(ctx, `
 		UPDATE certificates SET state = $2, last_error = NULL, last_error_class = NULL,
 		       retry_after_secs = 0, updated_at = now()
-		WHERE id = $1 AND state IN ($3, $4)`,
-		id, StateRenewing, StateIssued, StateExpired)
+		WHERE id = $1 AND state IN ($3, $4, $5)`,
+		id, StateRenewing, StateIssued, StateExpired, StateRenewalFail)
 	if err != nil {
 		return fmtWrap("renewing", err)
 	}
