@@ -1,56 +1,64 @@
-# Faz 04 Test Raporu — Linux Agent ve temel OS yönetimi
+# Faz 04 Bağımsız Test Raporu — Linux Agent ve temel OS yönetimi
 
-**Tarih:** 2026-11-01 · **Dal:** main · **Sürüm:** v0.5.0 (aday)
-**Kapsam:** `docs/phases/phase-04.md` kabul kriterleri + `prompts/phase-test/phase-04-test.md` zorunlu kontroller.
+**Tarih:** 2026-11-01 · **Dal:** main · **Sürüm:** v0.5.0 (commit 2eb2ee8)
+**Denetçi rolü:** `prompts/phase-test/phase-04-test.md` — uygulayıcı ajan varsayımı YOK; kanıt dosya:satır düzeyinde istendi.
+**Kapsam:** `docs/phases/phase-04.md` kabul kriterleri + 5 zorunlu kabul kontrolü + negatif/regresyon seti.
 
-## Kabul kriteri sonuçları
+## Zorunlu kabul kontrolleri (bağımsız kanıt)
 
-| # | Kriter | Sonuç | Kanıt |
+| # | Kriter | Sonuç | Bağımsız kanıt (kod okundu, uygulayıcı iddiasına güvenilmedi) |
 | --- | --- | --- | --- |
-| 1 | Agent ve root broker ayrı servis/kimlik; broker yalnız Unix socket | **PASS** | `agent/cmd/server-agent` (yetkisiz) + `agent/cmd/server-privd` (root) ayrı ikililer; broker TCP dinlemez, `/run/server-control/privd.sock` 0660 + dizin 0750; unit test: `TestPeerDeniedWhenUIDNotAllowlisted`, `TestDefaultDenyWhenNoUIDs` (`agent/internal/broker/server_test.go`); sertleştirme unit'leri `deploy/agent/*.service` |
-| 2 | OS/distro/sürüm/systemd/paket yöneticisi tespiti + capability beyanı test edildi | **PASS** | `agent/internal/osdetect` fixture matrisi (Ubuntu 24.04 + Debian 13): `TestDetectUbuntu2404`, `TestDetectDebian13`; capability probe: `TestCapabilityProbing` (canlı broker → available, ölü socket → `broker_unavailable`/`broker_unreachable` nedeni); control-plane tarafı `TestConnectFactsAndMetricsTelemetry` (CI'da PG ile) |
-| 3 | CPU/RAM/disk/network/uptime metrikleri kaynak + timestamp ile | **PASS** | `agent/internal/metrics` testleri (fixture + canlı smoke); zarflar `CollectedAt` + `Source` taşıyor; REST çıktı doğrulaması `TestTelemetryJSONShape` |
-| 4 | Servis listele/status/start/stop/restart allowlist + RBAC | **PASS** | Registry: `linux.systemd.service.*` 5 operasyon; RBAC katmanı `TestServiceOpPermissionLayering` (okuma→`service:read`, start/stop/restart→`service:control`); broker allowlist `TestAllowlistAndServiceOps`; migration 0008 seed (admin=hepsi, operator=sadece okuma) |
-| 5 | İşlem girdileri shell string olarak birleştirilmemeli; güvenli broker + audit | **PASS** | systemctl yalnız argv: `TestVerbExecutesWithFixedArgv`, `TestListAndStatusArgv` (meta karakter sızıntı denetimi); üç katmanlı birim doğrulama: `TestValidateUnit`, `TestRejectsBadUnitPayloads`, `TestValidateServiceUnitPayload`; audit zorunluluğu `TestAllowlistAndServiceOps` (5/5 kayıt), `TestPeerDeniedWhenUIDNotAllowlisted`, `TestRejectsNonJSONRawRequest` |
+| 1 | Agent ve root broker ayrı servis/kimlik; broker yalnız Unix socket | **PASS** | Ayrı ikililer `agent/cmd/server-agent` + `agent/cmd/server-privd`; broker dinleyicisi yalnız `net.Listen("unix", …)` (`cmd/server-privd/main.go:86`); TCP hiçbir yerde açılmıyor; socket 0660 + grup chown (`main.go:90-95`), dizin 0750 (`main.go:81`, `broker.SocketDirPerms`); systemd birim ayrımı `deploy/agent/server-agent.service` (User=server-agent) vs `server-privd.service` (User=root, RestrictAddressFamilies=AF_UNIX). Default-deny + zorunlu `--allow-uid` (`main.go:68-70`); boş allowlist tam kapalı (`server.go:119-126` unit test: `TestDefaultDenyWhenNoUIDs`) |
+| 2 | OS/distro/sürüm/systemd/paket yöneticisi tespiti + capability beyanı | **PASS** | `osdetect.go:45-73` (os-release + procfs kernel + systemd probe + pkg manager, kaynak provenansı `Source` alanı); Ubuntu 24.04 + Debian 13 fixture matrisi `osdetect_test.go` (`TestDetectUbuntu2404`, `TestDetectDebian13`); canlı socket capability probe testi `broker/server_test.go` (available vs `broker_unavailable`) |
+| 3 | CPU/RAM/disk/network/uptime — kaynak + timestamp | **PASS** | `metrics.go:57-66` Snapshot `CollectedAt` + `Source` zorunlu alanlar; `metrics.go:99-120` procfs/statfs okuma; disk filtresi gerçek FS (`realFSTypes` metrics.go:70-74) + list bound 500 (`systemd.go:169`); CI'da PG tarafı `TestTelemetryJSONShape` + telemetry entegrasyonu |
+| 4 | Servis list/status/start/stop/restart — allowlist + RBAC | **PASS** | Broker allowlist yalnız 5 op (`protocol.go:28-34`); üç katmanlı birim doğrulama: `svcops.ValidateUnit` (`systemd.go:34-42`) → broker `validateRequest` (`protocol.go:92-126`, strict JSON) → backend task validator; RBAC katmanı `httpapi/handlers_tasks.go` (`spec.RequiredPerm` kontrolü, tasks:write ÜSTÜNE ek)`; ops.go` 5 operasyon: okuma→`service:read`, start/stop/restart→`service:control`; migration 0008 seed admin=2 izin, operator=salt okuma |
+| 5 | Girdiler shell string'e birleştirilmez; güvenli broker + audit | **PASS** | `svcops/systemd.go:196-204` `exec.CommandContext(bin, args...)` — argv yalnız, shell yok; birim adı regex allowlist `^[A-Za-z0-9][A-Za-z0-9@._-]{0,246}\.service$` öncül `-` reddi (flag injection yok); audit HER istekte (reddedilenler dahil) yazılır ve yanıttan ÖNCE (`server.go:173-184`); audit kimliği sanitize edilir (`protocol.go:160-168`); istek 16 KiB sınırlı (`protocol.go:88`) |
 
-## Çalıştırılan testler (yerel sandbox, 2026-11-01)
+## Bağımsız yerel test koşusu (sandbox, 2026-11-01 — bu raporla eş zamanlı)
 
 | Komut | Sonuç |
 | --- | --- |
-| `cd agent && go build ./... && go vet ./... && go test -race ./internal/...` | **PASS** — 5 paket (agent, broker, metrics, osdetect, svcops) |
-| `cd backend/control-plane && go build ./... && go vet ./... && go test ./...` | **PASS** — 11 paket; PG entegrasyon testleri lokalde SKIP (testdb TEST_DATABASE_URL ister) |
-| `cd proto && buf lint && buf generate` (+ determinizmi iki kez üretimle doğrulama) | **PASS** — lint temiz; üretim byte-deterministik |
-| `cd web && npm run lint && npm run typecheck && npm test && npm run build` | **PASS** — lint 0 uyarı, strict TS, 12/12 vitest, build OK |
-| `cd web && npx playwright test` (mock mod) | **PASS** — 8/8 (6 mevcut + 2 yeni Faz 04) |
+| `agent`: `go build ./... && go vet ./... && go test -race ./internal/...` | **PASS** — 5/5 paket (agent, broker, metrics, osdetect, svcops) |
+| `backend/control-plane`: `go build ./... && go vet ./... && go test ./...` | **PASS** — 12 test paketi OK; PG entegrasyonları TEST_DATABASE_URL olmadan SKIP (aşağıda CI kanıtı) |
+| `web`: `npm run lint && npm run typecheck && npm test && npm run build` | **PASS** — lint 0 uyarı; strict TS; vitest 12/12; prod build OK (295.12 kB js) |
+| `web`: `npx playwright test` (mock mod) | **PASS** — 8/8 (6 Faz 02/03 + 2 Faz 04); ekran görüntüleri tazelendi: `docs/reviews/screenshots/phase-04/01..03.png` (+ Faz 02/03 klasikleri) |
+| `proto`: `buf lint` + 2× `buf generate` (pinli protoc-gen-go@v1.36.12, protoc-gen-go-grpc@v1.6.1) | **PASS** — lint temiz; üretim byte-deterministik (ikinci üretim git diff üretmiyor) |
 | `bash scripts/secret-scan.sh` | **PASS** — temiz |
 
-## CI'da çalışacaklar (lokalde NOT RUN)
+## Bağımsız denetim bulguları
 
-- PostgreSQL 18 entegrasyon testleri: telemetry PG testleri (`TestFactsUpsertPG`, `TestMetricsPG`), agentsrv telemetry akışı, migration 0008 up/down — CI `backend` job'ı.
-- İki distro matrisi: CI `agent` job'ı ubuntu-24.04 runner + debian:13 container üzerinde aynı test setini koşar.
-- Gerçek backend E2E (`E2E_REAL=1`): telemetry spec gerçek modda dürüst boş durumları + görev oluşturmayı doğrular.
+| ID | Önem | Bulgu | Öneri |
+| --- | --- | --- | --- |
+| IN-01 | **Düşük** | `broker.Server.Handle` Unix socket dışı bağlantıda (test taşımacılığı) kimlik 0/0/0 varsayıyor (`server.go:165-166`). Üretimde sömürülemiyor: main yalnız Unix dinleyici kurar (`main.go:86`) ve UID 0 allowlist'e ancak operatör açıkça yazarsa girer. Ancak savunma derinliği olarak test-affordansı üretim kodunda duruyor. | `Handle`'ın UnixConn olmayan bağlantıyı reddetmesi; test taşımacılığı için ayrı `_test` yapıcısı. Faz 05+ temizliğinde değerlendir. |
+| IN-02 | **Düşük** | Broker audit yazım hataları sessizce yutuluyor (`server.go:59-74`); kontrol düzlemi audit'i yetkili kabul edilmiş (belgelenmiş karar). Disk dolu senaryoda lokal kanıt kaybı olası. | journald/logrotate yönlendirmesi + disk-dolu alarmı; operasyon dokümanına not (öneri mevcut: `deploy/agent/README.md`). |
+| IN-03 | **Bilgi** | Gerçek-host doğrulaması (canlı systemd start/stop/restart, socket izinleri gerçek kullanıcılarla) bu sandbox'ta koşulamadı (Docker/systemd yok). CI iki distro matrisi + hermetik socket testleri kapsıyor. | Sahip, disposable Ubuntu 24.04 / Debian 13 VM'de `deploy/agent/README.md` prosedürini koşmalı. |
+
+Kritik/Yüksek bulgu: **YOK**. (Uygulayıcının CI turunda yakaladığı CI-04 kritik seed çakışması düzeltildi ve bu bağımsız koşuda regression yok.)
+
+## Negatif senaryo kapsamı (test kodlarından bağımsız doğrulama)
+
+- Yetkisiz UID → `peer_denied` + audit (`TestPeerDeniedWhenUIDNotAllowlisted`); creds alınamazsa da reddi.
+- Allowlist dışı operasyon → `unsupported_operation` (`protocol.go:123-124`); boş operasyon reddi.
+- Bozuk payload: strict JSON (`DisallowUnknownFields`, trailing data reddi, `protocol.go:129-139`); unit şema ihlali `invalid_params`.
+- Birim adı: öncül `-`, `/`, `%`, boşluk, 256+ uzunluk reddi (regex + `TestRejectsBadUnitPayloads`).
+- İstek taşması: 16 KiB üstü reddi (`readBoundedLine`); eşzamanlılık sınırı → `rate_limited`; işlem timeout → `executor_timeout`.
+- Protokol sürümü ≠1 reddi. Proxy'de tekrar/replay: task katmanı idempotency + lease (Faz 03 testleri, CI).
+
+## Regresyon sonucu
+
+- Backend tüm paketler (Faz 02 identity/rbac/tasks/audit + Faz 03 agentsrv/certs + Faz 04 telemetry) OK.
+- Web vitest 12/12 + Playwright 8/8 (Faz 02 smoke + Faz 03 enrollment + Faz 04 telemetry) OK.
+- proto: pinned toolchain ile deterministik üretim, lint temiz.
+- CI: **run 41309395227 (e0b0bb4) success 7/7** ve **run 41309860892 (2eb2ee8, v0.5.0) success** — bağımsız API doğrulaması bu denetim sırasında yapıldı (GitHub Actions API, 2026-11-01). PG 18 entegrasyon testleri ve debian:13 matrisi CI kanıtıyla kaplı.
 
 ## Güvenlik değerlendirmesi
 
-- **Shell string yok:** broker tipli JSON; systemctl `exec.Command` argv; statik analiz testleri argv'ya meta karakter sızmadığını kanıtlıyor.
-- **Üç katmanlı birim allowlist'i:** sunucu validator → agent executor → broker `validateRequest`; `-flag` enjeksiyonu, yol geçişi, komut ikamesi, boşluk/`%` reddedilir.
-- **Broker kimlik doğrulama:** SO_PEERCRED UID allowlist; boş allowlist = tam kapalı; her reddedilen istek auditlenir.
-- **En az ayrıcalık:** agent yetkisiz kullanıcı; `service:control` ayrı izin — görev oluşturma yetkisi servis kontrolü vermez.
-- **Kaynak koruması:** metrics yutumu node başına 10s hız sınırı + alan sınırları; facts sınırlı boyut.
-- **Bilinen boşluklar:** gerçek host doğrulaması yapılamadı (sandbox'ta systemd/Docker yok) — sahibi için `deploy/agent/README.md` prosedürü; broker audit rotasyonu yok; metrics prune işi periyodik job bekliyor.
-
-## CI koşusu (kanıt)
-
-- **Run 41309395227 (commit e0b0bb4): success — 7/7 job** — Backend (Go, PostgreSQL 18 entegrasyon dahil), Frontend (React/TS), Agent (Go, ubuntu-24.04), Agent (Go, **debian-13** container), E2E (Playwright, gerçek backend), Protokol (buf), Secret taraması.
-- **CI bulguları ve düzeltmeleri:**
-  - **CI-04 (kritik):** 0008 migration, admin'e CROSS JOIN ile 0002'de verilmiş 7 izni yeniden ekliyordu → `role_permissions_pkey` ihlali; yalnız YENİ izinlerin verilmesiyle düzeltildi. PG entegrasyon testleri bu hatayı lokalde (PG yok) yakalayamadı; CI yakaladı.
-  - **CI-05:** debian-13 container'da `go build` VCS damgası dubious-ownership hatası → `-buildvcs=false`.
-  - **CI-06:** `.gitignore` `bin/` kuralı `testdata/**/usr/bin` fixture'larını dışlıyordu (osdetect "unknown" paket yöneticisi hatası) → `!**/testdata/**/bin/`.
-  - **CI-07:** debian:13'te `-race` cgo ister → gcc+libc6-dev kuruldu, `CGO_ENABLED=1`.
-  - **CI-08:** telemetry prune test beklentisi düzeltildi (kod doğruydu; ikinci snapshot ilk cutoff'ta kalıyor).
-- Gerçek-host broker/systemd doğrulaması: **NOT RUN** (sandbox'ta systemd/VM yok) — `deploy/agent/README.md` prosedürü sahibine.
+- Shell/spray yüzeyi yok: tek exec yüzeyi systemctl argv; girdi hiçbir yerde string birleştirilmiyor (3 ayrı pakette `exec.CommandContext` kullanımı doğrulandı).
+- En az ayrıcalık: agent yetkisiz; broker root ama AF_UNIX kısıtlı systemd sandbox'ı; `service:control` ayrı izin — görev yazma yetkisi servis kontrolü vermiyor.
+- Denetim: reddedilen istekler dahil her broker işlemi auditlenir (yanıt-öncesi yazım yarışsız gözlem sağlar); kontrol düzlemi audit append-only.
+- Bilinen boşluklar: IN-01/02/03 (yukarıda) — hiçbiri kabul engelleyici değil.
 
 ## Karar
 
-- **Kabul:** ACCEPTED (CI kanıtı: run 41309395227, 7/7 yeşil)
-- **Sonraki faza geçiş:** READY
+- **Kabul:** **ACCEPTED** — 5/5 zorunlu kriter PASS (bağımsız kod incelemesi + yerel koşu + CI kanıtı); kritik/yüksek bulgu yok.
+- **Sonraki faza geçiş:** **READY** — Faz 05 başlatılabilir (sahip onayı 2026-11-01'de verildi).
