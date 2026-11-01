@@ -15,13 +15,19 @@ type Store struct{ pool *pgxpool.Pool }
 
 func NewStore(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
 
-// recordCols: provider_id/node_id NULL olabilir (FK'li referanslar) —
-// okumada COALESCE ile "" e lenir (CI-23/24 dersi: UUID kolonlara boş
-// string ASLA yazılmaz, NULL'lar taranır).
+// recordCols: NULL-olabilir kolonlar (referanslar + materyal + zamanlar)
+// okumada COALESCE ile Go sıfır-değerlerine iner (CI-24/25 dersi: pgx NULL
+// taramasını *string/*time.Time'a yapmaz; pending kayıtlarda not_after vs
+// NULL'dür).
 const recordCols = `id, name, sans, COALESCE(provider_id::text, '') AS provider_id,
-	COALESCE(node_id::text, '') AS node_id, csr_pem, state, not_after,
-	fingerprint, last_error, last_error_class, retry_after_secs,
-	issued_at, revoked_at, created_at, updated_at`
+	COALESCE(node_id::text, '') AS node_id, csr_pem, state,
+	COALESCE(not_after, '0001-01-01 00:00:00+00'::timestamptz) AS not_after,
+	COALESCE(fingerprint, '') AS fingerprint,
+	COALESCE(last_error, '') AS last_error,
+	COALESCE(last_error_class, '') AS last_error_class, retry_after_secs,
+	COALESCE(issued_at, '0001-01-01 00:00:00+00'::timestamptz) AS issued_at,
+	COALESCE(revoked_at, '0001-01-01 00:00:00+00'::timestamptz) AS revoked_at,
+	created_at, updated_at`
 
 func scanRecord(row pgx.Row) (Record, error) {
 	var r Record
