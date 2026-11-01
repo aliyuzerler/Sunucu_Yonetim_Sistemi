@@ -13,6 +13,9 @@ Doğrulama tarihi: **2026-11-01** (sürümler güncel stable çizgiler; kit taba
 |---|---|---|---|---|
 | `github.com/go-chi/chi/v5` | v5.5.0 | github.com/go-chi/chi | MIT | HTTP router (teknoloji tabanı kararı) |
 | `golang.org/x/crypto` | v0.58.0 | go.googlesource.com/crypto | BSD-3-Clause | argon2id parola özeti (ADR-0007) |
+| `google.golang.org/grpc` | v1.85.0 | go.googlesource.com/grpc | Apache-2.0 | Agent transport (ADR-0008) |
+| `google.golang.org/protobuf` | v1.36.12 | go.googlesource.com/protobuf | BSD-3-Clause | Protobuf runtime |
+| `gen/proto` (üretim kodu) | pinli buf v1.75.0 + protoc-gen-go v1.36.12 + protoc-gen-go-grpc v1.6.1 | buf.build / go.googlesource.com | Apache-2.0 / BSD-3-Clause | `make proto-tools` ile Go proxy checksum'lu kurulum; üretim CI'da diff kapısıyla doğrulanır |
 | `github.com/jackc/pgx/v5` | v5.12.0 | github.com/jackc/pgx | MIT | PostgreSQL erişimi (pgxpool) |
 | `golang.org/x/text` | v0.41.0 | go.googlesource.com/text | BSD-3-Clause | pgx geçiş bağımlılığı |
 

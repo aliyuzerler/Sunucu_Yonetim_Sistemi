@@ -81,6 +81,10 @@ func (f *fakeStore) CancelQueued(_ context.Context, id string) (bool, error) {
 
 func (f *fakeStore) CountTasks(context.Context) (int64, error) { return int64(len(f.tasks)), nil }
 
+func (f *fakeStore) ClaimBatchForNode(_ context.Context, _ string, owner string, limit int, leaseFor time.Duration) ([]*Task, error) {
+	return f.ClaimBatch(context.Background(), owner, limit, leaseFor)
+}
+
 func (f *fakeStore) ClaimBatch(_ context.Context, owner string, limit int, leaseFor time.Duration) ([]*Task, error) {
 	var out []*Task
 	for _, t := range f.tasks {
@@ -196,7 +200,7 @@ func TestRegistryValidation(t *testing.T) {
 		t.Fatalf("boş kayıt defteri kurulu olmalı: %v", err)
 	}
 	_, err := NewRegistry(&OperationSpec{
-		Name: "BAD NAME", Version: "1", Class: ClassReadOnly,
+		Name: "BAD NAME", Version: "1", Class: ClassReadOnly, Target: TargetControlPlane,
 		Timeout: time.Second, MaxPayload: 10, Validate: func(json.RawMessage) error { return nil },
 		Exec: NoopExecutor{},
 	})
@@ -207,7 +211,7 @@ func TestRegistryValidation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("varsayılan kayıt defteri: %v", err)
 	}
-	if len(reg.Names()) != 2 {
+	if len(reg.Names()) != 3 {
 		t.Fatalf("iki operasyon bekleniyordu: %v", reg.Names())
 	}
 	if _, ok := reg.Spec("noop.echo"); !ok {
@@ -437,7 +441,7 @@ func TestWorkerExecutesQueuedTask(t *testing.T) {
 func TestWorkerFailsOnExecutorError(t *testing.T) {
 	store := newFakeStore()
 	reg, err := NewRegistry(&OperationSpec{
-		Name: "boom.op", Version: "1.0.0", Class: ClassNonIdem, RetrySafe: false,
+		Name: "boom.op", Version: "1.0.0", Class: ClassNonIdem, Target: TargetControlPlane, RetrySafe: false,
 		Timeout: time.Second, MaxPayload: 1024,
 		Validate: func(json.RawMessage) error { return nil },
 		Exec:     failingExecutor{},
@@ -477,7 +481,7 @@ func TestWorkerFailsOnExecutorError(t *testing.T) {
 func TestWorkerFailsOnExecutorPanic(t *testing.T) {
 	store := newFakeStore()
 	reg, _ := NewRegistry(&OperationSpec{
-		Name: "panic.op", Version: "1.0.0", Class: ClassReadOnly, RetrySafe: true,
+		Name: "panic.op", Version: "1.0.0", Class: ClassReadOnly, Target: TargetControlPlane, RetrySafe: true,
 		Timeout: time.Second, MaxPayload: 1024,
 		Validate: func(json.RawMessage) error { return nil },
 		Exec:     panickingExecutor{},

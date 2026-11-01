@@ -1,0 +1,10 @@
+# buf üretim yapılandırması: yerel, pinli Go plugin'leri (Makefile proto hedefi).
+# Üretilen kod repoya commit edilir; elle düzenlenmez (make proto ile yenilenir).
+version: v2
+plugins:
+  - local: protoc-gen-go
+    out: ../gen/proto
+    opt: paths=source_relative
+  - local: protoc-gen-go-grpc
+    out: ../gen/proto
+    opt: paths=source_relative

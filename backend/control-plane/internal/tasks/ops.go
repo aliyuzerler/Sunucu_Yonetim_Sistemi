@@ -100,6 +100,7 @@ func BuildDefaultRegistry(tagSetter TagSetter) (*Registry, error) {
 			Name:       "noop.echo",
 			Version:    "1.0.0",
 			Class:      ClassReadOnly,
+			Target:     TargetControlPlane,
 			RetrySafe:  true,
 			Timeout:    30 * time.Second,
 			MaxPayload: 4 << 10,
@@ -110,11 +111,42 @@ func BuildDefaultRegistry(tagSetter TagSetter) (*Registry, error) {
 			Name:       "inventory.node.tag.set",
 			Version:    "1.0.0",
 			Class:      ClassIdempotent,
+			Target:     TargetControlPlane,
 			RetrySafe:  true,
 			Timeout:    30 * time.Second,
 			MaxPayload: 8 << 10,
 			Validate:   ValidateSetTagsPayload,
 			Exec:       SetTagsExecutor{Setter: tagSetter},
 		},
+		&OperationSpec{
+			Name:       "agent.echo",
+			Version:    "1.0.0",
+			Class:      ClassReadOnly,
+			Target:     TargetNode,
+			RetrySafe:  true,
+			Timeout:    30 * time.Second,
+			MaxPayload: 1 << 10,
+			Validate:   ValidateAgentEchoPayload,
+		},
 	)
+}
+
+// agentEchoPayload is the typed schema for the node-side echo operation; it
+// proves the mTLS dispatch loop without touching the host (Faz 03).
+type agentEchoPayload struct {
+	Message string `json:"message"`
+}
+
+// ValidateAgentEchoPayload enforces {message: string(<=256)}.
+func ValidateAgentEchoPayload(payload json.RawMessage) error {
+	var p agentEchoPayload
+	dec := json.NewDecoder(bytes.NewReader(payload))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&p); err != nil {
+		return fmt.Errorf("şema uyumsuz: %w", err)
+	}
+	if len(p.Message) > 256 {
+		return errors.New("message en fazla 256 karakter")
+	}
+	return nil
 }

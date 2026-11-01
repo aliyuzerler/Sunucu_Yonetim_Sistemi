@@ -31,6 +31,11 @@ type Config struct {
 	CookieSecure bool          // Secure flag on the session cookie (prod TLS: true)
 	SessionTTL   time.Duration // server-side session lifetime
 	BootstrapTTL time.Duration // one-time admin bootstrap token lifetime
+
+	// Agent protocol settings (Faz 03). CA paths empty → gRPC listener off.
+	GRPCAddr string
+	CACert   string
+	CAKey    string
 }
 
 // Load reads configuration from process environment variables.
@@ -113,6 +118,13 @@ func FromEnv(env map[string]string) (Config, error) {
 			return Config{}, fmt.Errorf("CP_BOOTSTRAP_TTL geçersiz: %q (1m..1h)", v)
 		}
 		cfg.BootstrapTTL = d
+	}
+
+	cfg.GRPCAddr = valueOr(env, "CP_GRPC_ADDR", ":9090")
+	cfg.CACert = strings.TrimSpace(env["CP_CA_CERT"])
+	cfg.CAKey = strings.TrimSpace(env["CP_CA_KEY"])
+	if (cfg.CACert == "") != (cfg.CAKey == "") {
+		return Config{}, fmt.Errorf("CP_CA_CERT ve CP_CA_KEY birlikte tanımlanmalı")
 	}
 	return cfg, nil
 }

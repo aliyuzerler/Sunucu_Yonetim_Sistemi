@@ -62,6 +62,7 @@ type Task struct {
 	NodeID           *string         `json:"node_id,omitempty"`
 	Payload          json.RawMessage `json:"payload"`
 	Status           string          `json:"status"`
+	ExecutionTarget  string          `json:"execution_target"`
 	Priority         int             `json:"priority"`
 	Actor            string          `json:"actor"`
 	CorrelationID    string          `json:"correlation_id"`
@@ -124,6 +125,8 @@ type Store interface {
 
 	// Worker operations (lease + SKIP LOCKED in SQL store).
 	ClaimBatch(ctx context.Context, owner string, limit int, leaseFor time.Duration) ([]*Task, error)
+	// ClaimBatchForNode leases node-targeted tasks for one agent stream.
+	ClaimBatchForNode(ctx context.Context, nodeID, owner string, limit int, leaseFor time.Duration) ([]*Task, error)
 	StartAttempt(ctx context.Context, taskID string, attemptNo int) error
 	CompleteExecution(ctx context.Context, taskID string, attemptNo int, result map[string]any) (bool, error)
 	FailExecution(ctx context.Context, taskID string, attemptNo int, category, output string) (bool, error)
@@ -161,6 +164,9 @@ func (s *Service) Create(ctx context.Context, actor, correlationID string, in Cr
 			ErrUnsupportedOperation, in.Operation, strings.Join(s.registry.Names(), ", "))
 	}
 	if in.NodeID != "" && !uuidRE.MatchString(in.NodeID) {
+		return nil, false, ErrInvalidNodeID
+	}
+	if spec.Target == TargetNode && in.NodeID == "" {
 		return nil, false, ErrInvalidNodeID
 	}
 	if !correlRE.MatchString(correlationID) {
@@ -211,6 +217,7 @@ func (s *Service) Create(ctx context.Context, actor, correlationID string, in Cr
 		NodeID:           nodeID,
 		Payload:          in.Payload,
 		Status:           StatusQueued,
+		ExecutionTarget:  spec.Target,
 		Priority:         clampPriority(in.Priority),
 		Actor:            actor,
 		CorrelationID:    correlationID,

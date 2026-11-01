@@ -159,6 +159,38 @@ export const tr = {
   "users.status.active": "Etkin",
   "users.status.disabled": "Devre dışı",
   "users.neverLoggedIn": "Hiç girmedi",
+  "enrollment.scope.node": "Mevcut node'a devir",
+  "enrollment.scope.group": "Yeni node (grup kapsamlı)",
+  "enrollment.form.scope": "Kapsam",
+  "enrollment.form.node": "Hedef node",
+  "enrollment.form.group": "Hedef grup",
+  "enrollment.form.pick": "Seçin",
+  "enrollment.form.ttl": "Geçerlilik",
+  "enrollment.form.minutes": "dakika",
+  "enrollment.form.submit": "Token Üret",
+  "enrollment.reveal.title": "Token bir kez gösterilir",
+  "enrollment.reveal.description":
+    "Bu token tek kullanımlıktır ve tekrar görüntülenemez. Şimdi kopyalayın.",
+  "enrollment.reveal.command":
+    "Agent: ca.crt dosyasını aktarın, sonra: server-agent enroll --server <cp>:9090 --ca-file ca.crt --token <TOKEN> · Bitiş: {expires}",
+  "enrollment.reveal.dismiss": "Anladım, gizle",
+  "enrollment.empty.title": "Kayıt tokenı yok",
+  "enrollment.empty.description":
+    "Agent kaydı için tek kullanımlık token üretin; token yalnızca özeti saklanır.",
+  "enrollment.table.caption": "Kayıt token'ları",
+  "enrollment.col.scope": "Kapsam",
+  "enrollment.col.target": "Hedef",
+  "enrollment.col.status": "Durum",
+  "enrollment.col.expires": "Bitiş",
+  "enrollment.col.actions": "İşlemler",
+  "enrollment.state.pending": "Bekliyor",
+  "enrollment.state.consumed": "Kullanıldı",
+  "enrollment.state.revoked": "İptal",
+  "enrollment.state.expired": "Süresi doldu",
+  "enrollment.revoke": "İptal et",
+  "enrollment.securityNote":
+    "Token'lar SHA-256 özeti ile saklanır; tüketim tek transaction'da yapılır ve sertifikalar node kimliğine bağlanır (ADR-0008).",
+
   "users.scopeNote":
     "Faz 02 salt-okunur görünüm verir. Rol/kullanıcı yönetimi sonraki fazlarda; yetkiler sunucu tarafında RBAC ile zorlanır.",
 

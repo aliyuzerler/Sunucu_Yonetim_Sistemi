@@ -3,6 +3,7 @@ import { TopBar } from "./components/layout/TopBar";
 import { useAuth } from "./auth/AuthProvider";
 import { AuditPage } from "./pages/AuditPage";
 import { ComingSoonPage } from "./pages/ComingSoonPage";
+import { EnrollmentPage } from "./pages/EnrollmentPage";
 import { LoginPage } from "./pages/LoginPage";
 import { NodesPage } from "./pages/NodesPage";
 import { OverviewPage } from "./pages/OverviewPage";
@@ -37,7 +38,8 @@ export function App() {
           {active === "tasks" && <TasksPage />}
           {active === "audit" && <AuditPage />}
           {active === "users" && <UsersPage />}
-          {!["overview", "nodes", "tasks", "audit", "users"].includes(active) && (
+          {active === "enrollment" && <EnrollmentPage />}
+          {!["overview", "nodes", "tasks", "audit", "users", "enrollment"].includes(active) && (
             <ComingSoonPage moduleId={active} />
           )}
         </main>

@@ -71,6 +71,12 @@ deploy/              PostgreSQL 18 compose (digest pinli) + .env.example
 | 14 | Yedekleme, geri yükleme, bulut ve çoklu sunucu ölçekleme |
 | 15 | Eklenti sistemi, güncelleme, paketleme ve üretim sertleştirmesi |
 
+| Bileşen | Durum |
+|---|---|
+| Control Plane (Go REST + gRPC mTLS) | Faz 02–03: kimlik, RBAC, envanter, görev motoru, agent kayıt/mTLS |
+| Agent (`server-agent`) | Faz 03: lokal anahtar + CSR kaydı, outbound mTLS stream, `agent.echo` |
+| Protokol | `proto/servercontrol/agent/v1` (buf lint/breaking CI kapısı) |
+
 ## Hızlı başlangıç (geliştirme)
 
 Gereksinimler: **Go 1.27.3**, **Node.js 26.13.0 LTS**, **Docker Engine + Compose**.

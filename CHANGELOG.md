@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+## [0.4.0] — 2026-11-01 — Faz 03: Agent protokolü, kayıt, mTLS ve capability
+
+### Added
+- Protokol sözleşmesi: `proto/servercontrol/agent/v1/agent.proto` — `EnrollService` + `AgentService.Connect` (bidi stream); zarflar request_id/node_id/correlation_id/issued_at/expires_at/idempotency_key taşır; `buf.yaml` lint/breaking; üretilen kod `gen/proto` (ayrı modül); `make proto-tools/proto/proto-check` (CI kırılma kapısı).
+- Enrollment (ADR-0008): tek kullanımlık, ≤1h, node/group kapsamlı token'lar (yalnızca SHA-256 özeti saklanır); tüketim + node devri/oluşumu + sertifika kaydı TEK transaction'da (FOR UPDATE + replay koruması); plaintext token yalnızca üretim anında bir kez döner.
+- mTLS kimlik: operatör CA'sı (`control-plane ca init`, anahtar 0600, DB'de asla değil); agent anahtarı LOKALDE üretilir, yalnızca CSR iletilir; leaf sertifikaya sunucu tarafında URI SAN node kimliği yazılır; gRPC sunucusu istemci sertifikası + DB revocation + node durumu denetimi yapar; her zarfta node_id ↔ sertifika kimliği eşleşmesi zorunlu.
+- Stream: Hello→HelloAck (v1 anlaşması), heartbeat (last_seen/active), capability raporu → node_capabilities upsert; süresi geçmiş zarflar atılır.
+- Görev dağıtımı: tasks tablosuna `execution_target` (control_plane|node); node-hedefli görevler canlı stream üzerinden SKIP LOCKED + 60s lease ile dağıtılır; `OperationResult` (SUCCEEDED/FAILED/REJECTED) yalnızca dispatched durumda ve doğru node'dan uygulanır.
+- Agent ikilisi (`server-agent`, ayrı Go modülü): lokal ECDSA anahtar (0600) + CSR, CA pinlemeli enroll (MITM guard), outbound mTLS koşu döngüsü (backoff+jitter), allowlist executor'lar (`agent.echo`) ve sınırlı idempotency cache; bilinmeyen operasyon REJECTED.
+- HTTP API + UI: `/api/v1/agent-enrollments` (list/issue/revoke) ve "Agent Kaydı" sayfası (tek gösterim paneli, durum listesi, iptal); `enrollment` menü öğesi Faz 03'ten aktife alındı.
+- CI: `proto` job (buf lint + üretim + git diff kapısı) ve `agent` job (vet/build/test-race).
+- Testler: certs birim testleri; agent birim testleri; agentsrv PostgreSQL entegrasyon testleri (enroll akışları, sertifikasız/yanlış-node bağlantı reddi, uçtan uca dispatch); E2E'ye Agent Kaydı senaryosu (6/6).
+
+### Changed
+- `docs/decisions/ADR-0008-agent-protocol-mtls.md` ve ADR dizini; `docs/technology/dependency-registry.md` (grpc v1.85.0, protobuf v1.36.12, pinli buf/plugin araç zinciri); `docs/operations/development-environment.md` (CA/enroll/agent akışları); proto/ ve agent/ README'leri gerçek içerikle dolduruldu; README bileşen tablosu.
+
+### Security
+- Özel anahtar node'dan asla çıkmaz; CSR dışındaki malzeme reddedilir; sertifikada kimlik sunucu tarafından atanır (agent kimliğini seçemez); token/sertifika hash'leri DB'de; revoke edilmiş sertifika bağlantı kuruluşunda reddedilir; zarf expiry her iki yönde uygulanır; payload üst sınırları (64KiB) ve allowlist doğrulamaları her iki uçta.
+
 ## [0.3.0] — 2026-11-01 — Faz 02: Kimlik, RBAC, node envanteri, görev altyapısı ve E2E
 
 ### Added

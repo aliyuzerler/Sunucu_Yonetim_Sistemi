@@ -24,10 +24,10 @@ func NewPGStore(pool *pgxpool.Pool) *PGStore { return &PGStore{pool: pool} }
 // uniqueViolation is the PostgreSQL constraint-violation SQLSTATE.
 const uniqueViolation = "23505"
 
-const taskCols = `id, operation, operation_version, node_id, payload, status, priority,
-                  actor, correlation_id, idempotency_key, result, error_category,
-                  attempts, max_attempts, retry_safe, deadline_at, lease_owner,
-                  lease_expires_at, created_at, updated_at`
+const taskCols = `id, operation, operation_version, node_id, payload, status,
+                  execution_target, priority, actor, correlation_id, idempotency_key,
+                  result, error_category, attempts, max_attempts, retry_safe,
+                  deadline_at, lease_owner, lease_expires_at, created_at, updated_at`
 
 func scanTask(row pgx.Row) (*Task, error) {
 	t := &Task{}
@@ -52,17 +52,17 @@ func (s *PGStore) CreateTaskWithOutbox(ctx context.Context, t *Task, ev OutboxEv
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	err = tx.QueryRow(ctx, `
-INSERT INTO tasks (operation, operation_version, node_id, payload, status, priority,
-                   actor, correlation_id, idempotency_key, max_attempts, retry_safe, deadline_at)
-VALUES ($1, $2, NULLIF($3,'')::uuid, $4, $5, $6, $7, $8, NULLIF($9,''), $10, $11, $12)
+INSERT INTO tasks (operation, operation_version, node_id, payload, status, execution_target,
+                   priority, actor, correlation_id, idempotency_key, max_attempts, retry_safe, deadline_at)
+VALUES ($1, $2, NULLIF($3,'')::uuid, $4, $5, $6, $7, $8, $9, NULLIF($10,''), $11, $12, $13)
 RETURNING `+taskCols,
 		t.Operation, t.OperationVersion, derefOrEmpty(t.NodeID), t.Payload, t.Status,
-		t.Priority, t.Actor, t.CorrelationID, derefOrEmpty(t.IdempotencyKey),
+		t.ExecutionTarget, t.Priority, t.Actor, t.CorrelationID, derefOrEmpty(t.IdempotencyKey),
 		t.MaxAttempts, t.RetrySafe, t.DeadlineAt,
 	).Scan(&t.ID, &t.Operation, &t.OperationVersion, &t.NodeID, &t.Payload,
-		&t.Status, &t.Priority, &t.Actor, &t.CorrelationID, &t.IdempotencyKey,
-		&t.Result, &t.ErrorCategory, &t.Attempts, &t.MaxAttempts, &t.RetrySafe,
-		&t.DeadlineAt, &t.LeaseOwner, &t.LeaseExpiresAt, &t.CreatedAt, &t.UpdatedAt)
+		&t.Status, &t.ExecutionTarget, &t.Priority, &t.Actor, &t.CorrelationID,
+		&t.IdempotencyKey, &t.Result, &t.ErrorCategory, &t.Attempts, &t.MaxAttempts,
+		&t.RetrySafe, &t.DeadlineAt, &t.LeaseOwner, &t.LeaseExpiresAt, &t.CreatedAt, &t.UpdatedAt)
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == uniqueViolation {
@@ -222,6 +222,7 @@ func (s *PGStore) ClaimBatch(ctx context.Context, owner string, limit int, lease
           WHERE id IN (
             SELECT id FROM tasks
             WHERE status = 'queued'
+              AND execution_target = 'control_plane'
               AND (deadline_at IS NULL OR deadline_at > now())
             ORDER BY priority DESC, created_at
             LIMIT $3
@@ -453,4 +454,40 @@ func decodeTaskCursor(s string) (time.Time, string, error) {
 		return time.Time{}, "", errors.New("cursor zaman")
 	}
 	return time.Unix(0, ns), parts[1], nil
+}
+
+// ClaimBatchForNode atomically leases queued node-targeted tasks for one
+// agent stream (SKIP LOCKED; a node may have multiple streams over time but
+// one active stream per process in Faz 03).
+func (s *PGStore) ClaimBatchForNode(ctx context.Context, nodeID, owner string, limit int, leaseFor time.Duration) ([]*Task, error) {
+	q := `UPDATE tasks SET
+            status = 'dispatched',
+            lease_owner = $1,
+            lease_expires_at = now() + make_interval(secs => $2),
+            updated_at = now()
+          WHERE id IN (
+            SELECT id FROM tasks
+            WHERE status = 'queued'
+              AND execution_target = 'node'
+              AND node_id = $3::uuid
+              AND (deadline_at IS NULL OR deadline_at > now())
+            ORDER BY priority DESC, created_at
+            LIMIT $4
+            FOR UPDATE SKIP LOCKED)
+          RETURNING ` + taskCols
+
+	rows, err := s.pool.Query(ctx, q, owner, leaseFor.Seconds(), nodeID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("node task kiralaması: %w", err)
+	}
+	defer rows.Close()
+	var out []*Task
+	for rows.Next() {
+		t, err := scanTask(rows)
+		if err != nil {
+			return nil, fmt.Errorf("node kiralama satırı: %w", err)
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
 }

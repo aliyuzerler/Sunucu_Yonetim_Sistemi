@@ -17,6 +17,7 @@ const nodes = [];
 const groups = [];
 const tasks = [];
 const audit = [];
+const enrollmentTokens = [];
 let idSeq = 1;
 const uuid = () =>
   `${String(idSeq++).padStart(8, "0")}-0000-4000-8000-${String(idSeq).padStart(12, "0")}`;
@@ -288,6 +289,46 @@ const server = createServer(async (req, res) => {
     t.status = "cancelled";
     logAudit(actor, "task.cancel", "task", t.id, "success");
     json(res, 200, t);
+    return;
+  }
+
+    // ---- agent enrollment tokens (mock) ----
+  if (method === "GET" && path === "/api/v1/agent-enrollments") {
+    json(res, 200, { tokens: enrollmentTokens });
+    return;
+  }
+  if (method === "POST" && path === "/api/v1/agent-enrollments") {
+    const body = await readBody();
+    const now = new Date().toISOString();
+    const ttl = (body.ttl_minutes ?? 15) * 60_000;
+    const tok = {
+      id: uuid(),
+      scope_type: body.scope_type === "node" ? "node" : "group",
+      node_id: body.node_id || null,
+      group_id: body.group_id || null,
+      created_by: actor,
+      expires_at: new Date(Date.now() + ttl).toISOString(),
+      consumed_at: null,
+      revoked_at: null,
+      created_at: now,
+    };
+    enrollmentTokens.unshift(tok);
+    logAudit(actor, "agent.token.issue", "enrollment_token", tok.id, "success");
+    // Plaintext yalnızca oluşturma yanıtında bir kez döner (gerçek API gibi).
+    const plaintext = "e2e-" + tok.id.slice(0, 8) + "-mock-token";
+    json(res, 201, { token: tok, plaintext, expires_at: tok.expires_at, warning: "tek gösterim" });
+    return;
+  }
+  const revokeMatch = /^\/api\/v1\/agent-enrollments\/([^/]+)\/revoke$/.exec(path);
+  if (method === "POST" && revokeMatch) {
+    const tok = enrollmentTokens.find((x) => x.id === revokeMatch[1] && !x.consumed_at && !x.revoked_at);
+    if (!tok) {
+      json(res, 404, errorBody("not_found", "Token bulunamadı.", 404));
+      return;
+    }
+    tok.revoked_at = new Date().toISOString();
+    logAudit(actor, "agent.token.revoke", "enrollment_token", tok.id, "success");
+    json(res, 200, { status: "ok" });
     return;
   }
 

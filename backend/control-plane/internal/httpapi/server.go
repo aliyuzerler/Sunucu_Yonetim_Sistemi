@@ -7,9 +7,11 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/enroll"
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/identity"
+
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/audit"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/config"
-	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/identity"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/inventory"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/rbac"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/tasks"
@@ -22,6 +24,14 @@ var ErrNotConfigured = errors.New("database not configured")
 // AuditLister reads audit entries (implemented by audit.Service).
 type AuditLister interface {
 	List(ctx context.Context, f audit.Filter) (audit.Page, error)
+}
+
+// EnrollmentManager issues/lists/revokes agent enrollment tokens
+// (implemented by enroll.Service).
+type EnrollmentManager interface {
+	IssueToken(ctx context.Context, actor string, in enroll.IssueInput) (identity.Token, *enroll.Token, error)
+	List(ctx context.Context) ([]enroll.Token, error)
+	Revoke(ctx context.Context, id string) error
 }
 
 // Options wires the API server to its dependencies.nil services keep the
@@ -37,6 +47,7 @@ type Options struct {
 	Tasks     *tasks.Service
 	Audit     audit.Recorder
 	AuditList AuditLister
+	Enroll    EnrollmentManager
 }
 
 // api holds handler dependencies.
@@ -47,6 +58,7 @@ type api struct {
 	identity  *identity.Service
 	authz     *rbac.Service
 	inventory *inventory.Service
+	enroll    EnrollmentManager
 	tasks     *tasks.Service
 	audit     audit.Recorder
 	auditList AuditLister
@@ -76,6 +88,7 @@ func New(opts Options) http.Handler {
 		tasks:     opts.Tasks,
 		audit:     opts.Audit,
 		auditList: opts.AuditList,
+		enroll:    opts.Enroll,
 	}
 
 	r := chi.NewRouter()
@@ -126,6 +139,11 @@ func New(opts Options) http.Handler {
 			r.With(a.requirePermission(rbac.PermNodesRead)).Get("/node-groups", a.handleListGroups)
 			r.With(a.requirePermission(rbac.PermNodesWrite)).Post("/node-groups", a.handleCreateGroup)
 			r.With(a.requirePermission(rbac.PermNodesWrite)).Put("/nodes/{nodeID}/groups", a.handleAssignGroups)
+
+			// Agent kayıt token'ları (Faz 03).
+			r.With(a.requirePermission(rbac.PermNodesRead)).Get("/agent-enrollments", a.handleListEnrollments)
+			r.With(a.requirePermission(rbac.PermNodesWrite)).Post("/agent-enrollments", a.handleIssueEnrollment)
+			r.With(a.requirePermission(rbac.PermNodesWrite)).Post("/agent-enrollments/{tokenID}/revoke", a.handleRevokeEnrollment)
 
 			// Görevler.
 			r.With(a.requirePermission(rbac.PermTasksRead)).Get("/tasks", a.handleListTasks)

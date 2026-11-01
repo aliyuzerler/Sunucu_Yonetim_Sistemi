@@ -4,40 +4,163 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/agentsrv"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/audit"
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/certs"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/config"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/db"
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/enroll"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/httpapi"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/identity"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/inventory"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/platform"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/rbac"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/tasks"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 )
 
 func main() {
-	// bootstrap alt komutu: ilk yönetici kurulum tokenı üretir (tek kullanımlık).
-	if len(os.Args) > 1 && os.Args[1] == "bootstrap" {
-		if err := runBootstrap(); err != nil {
-			fmt.Fprintf(os.Stderr, "control-plane bootstrap: %v\n", err)
-			os.Exit(1)
+	// Alt komutlar: bootstrap (ilk yönetici), ca init (CA üretimi),
+	// enroll-token (agent kayıt tokenı). Kalanı sunucu modudur.
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "bootstrap":
+			if err := runBootstrap(); err != nil {
+				fmt.Fprintf(os.Stderr, "control-plane bootstrap: %v\n", err)
+				os.Exit(1)
+			}
+			return
+		case "ca":
+			if err := runCA(os.Args[2:]); err != nil {
+				fmt.Fprintf(os.Stderr, "control-plane ca: %v\n", err)
+				os.Exit(1)
+			}
+			return
+		case "enroll-token":
+			if err := runEnrollToken(os.Args[2:]); err != nil {
+				fmt.Fprintf(os.Stderr, "control-plane enroll-token: %v\n", err)
+				os.Exit(1)
+			}
+			return
 		}
-		return
 	}
 
 	if err := run(); err != nil {
 		fmt.Fprintf(os.Stderr, "control-plane: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+// runCA implements `ca init --cert <path> --key <path> [--cn <name>]`.
+func runCA(args []string) error {
+	if len(args) == 0 || args[0] != "init" {
+		return errors.New("kullanım: control-plane ca init --cert <yol> --key <yol>")
+	}
+	certPath, keyPath, cn := "", "", ""
+	for i := 1; i < len(args); i++ {
+		switch args[i] {
+		case "--cert":
+			i++
+			if i < len(args) {
+				certPath = args[i]
+			}
+		case "--key":
+			i++
+			if i < len(args) {
+				keyPath = args[i]
+			}
+		case "--cn":
+			i++
+			if i < len(args) {
+				cn = args[i]
+			}
+		}
+	}
+	if certPath == "" || keyPath == "" {
+		return errors.New("--cert ve --key zorunlu")
+	}
+	if err := certs.GenerateCA(certPath, keyPath, cn); err != nil {
+		return err
+	}
+	fmt.Println("CA üretildi:")
+	fmt.Println("  sertifika:", certPath)
+	fmt.Println("  anahtar  :", keyPath, "(0600)")
+	fmt.Println("Agent'lara güven için ca.crt dosyasını kopyalayın (gizli değildir).")
+	return nil
+}
+
+// runEnrollToken implements `enroll-token --scope node:<id>|group:<id> [--ttl 15m]`.
+func runEnrollToken(args []string) error {
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("yapılandırma: %w", err)
+	}
+	if !cfg.DatabaseURLSet {
+		return errors.New("CP_DATABASE_URL tanımlı olmalı")
+	}
+	scope, ttl := "", 15*time.Minute
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--scope":
+			i++
+			if i < len(args) {
+				scope = args[i]
+			}
+		case "--ttl":
+			i++
+			if i < len(args) {
+				if d, err := time.ParseDuration(args[i]); err == nil {
+					ttl = d
+				}
+			}
+		}
+	}
+	if scope == "" {
+		return errors.New("--scope node:<uuid> veya group:<uuid> zorunlu")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	pool, err := db.NewPool(ctx, cfg.DatabaseURL, db.DefaultPoolConfig(), nil)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+
+	svc := enroll.NewService(pool, nil)
+	in := enroll.IssueInput{ScopeType: enroll.ScopeNode, TTL: ttl}
+	if strings.HasPrefix(scope, "node:") {
+		in.NodeID = strings.TrimPrefix(scope, "node:")
+	} else if strings.HasPrefix(scope, "group:") {
+		in.ScopeType = enroll.ScopeGroup
+		in.GroupID = strings.TrimPrefix(scope, "group:")
+	} else {
+		return errors.New("--scope node:<uuid> veya group:<uuid> biçimi gerekli")
+	}
+	tok, t, err := svc.IssueToken(ctx, "cli", in)
+	if err != nil {
+		return err
+	}
+	fmt.Println("Tek kullanımlık agent kayıt tokenı:")
+	fmt.Println()
+	fmt.Println("  " + tok.Plain)
+	fmt.Println()
+	fmt.Printf("Kapsam: %s (%s) · Geçerlilik: %s\n", t.ScopeType, scope, t.ExpiresAt.Format(time.RFC3339))
+	fmt.Println("Agent tarafında: server-agent enroll --server <host:9090> --ca-file ca.crt --token <TOKEN>")
+	return nil
 }
 
 // runBootstrap issues a one-time admin bootstrap token. It must run on the
@@ -142,12 +265,64 @@ func run() error {
 		defer workerStop()
 		go taskWorker.Run(workerCtx)
 
+		var ca *certs.CA
+		if cfg.CACert != "" && cfg.CAKey != "" {
+			ca, err = certs.LoadCA(cfg.CACert, cfg.CAKey)
+			if err != nil {
+				return fmt.Errorf("agent CA: %w", err)
+			}
+		}
+		enrollSvc := enroll.NewService(p, ca)
+
 		opts.Identity = identitySvc
 		opts.Authz = authzSvc
 		opts.Inventory = inventorySvc
 		opts.Tasks = tasksSvc
 		opts.Audit = auditRec
 		opts.AuditList = audit.NewService(p)
+		opts.Enroll = enrollSvc
+
+		// Agent gRPC sunucusu: yalnızca CA yapılandırıldığında başlar.
+		if ca != nil {
+			serverCert, err := ca.IssueServerCert(
+				[]string{"localhost", hostnameOrLocal()},
+				[]string{"127.0.0.1", "::1"},
+				0)
+			if err != nil {
+				return fmt.Errorf("agent sunucu sertifikası: %w", err)
+			}
+			tlsCfg := &tls.Config{
+				Certificates: []tls.Certificate{serverCert},
+				ClientAuth:   tls.VerifyClientCertIfGiven,
+				ClientCAs:    certPoolWith(ca.Cert),
+				MinVersion:   tls.VersionTLS12,
+			}
+			agentServer := agentsrv.New(agentsrv.Services{
+				CA:        ca,
+				Enroll:    enrollSvc,
+				Inventory: inventorySvc,
+				Tasks:     tasksSvc,
+				TaskStore: taskStore,
+				Audit:     auditRec,
+				Logger:    logger,
+			}, logger)
+			grpcSrv := grpc.NewServer(grpc.Creds(credentials.NewTLS(tlsCfg)))
+			agentServer.RegisterGRPC(grpcSrv)
+
+			grpcListener, err := net.Listen("tcp", cfg.GRPCAddr)
+			if err != nil {
+				return fmt.Errorf("agent gRPC dinleyicisi: %w", err)
+			}
+			go func() {
+				logger.Info("agent_grpc_listening", slog.String("addr", cfg.GRPCAddr))
+				if err := grpcSrv.Serve(grpcListener); err != nil {
+					logger.Error("agent_grpc_serve_failed", slog.String("error", err.Error()))
+				}
+			}()
+			defer grpcSrv.Stop()
+		} else {
+			logger.Warn("agent_grpc_disabled", slog.String("hint", "CP_CA_CERT/CP_CA_KEY tanımlayın (control-plane ca init)"))
+		}
 	}
 
 	srv := &http.Server{
@@ -211,4 +386,20 @@ type httpapiPingerNotConfigured struct{}
 
 func (httpapiPingerNotConfigured) Ping(context.Context) error {
 	return httpapi.ErrNotConfigured
+}
+
+// certPoolWith builds a CA pool for client certificate verification.
+func certPoolWith(ca *x509.Certificate) *x509.CertPool {
+	pool := x509.NewCertPool()
+	pool.AddCert(ca)
+	return pool
+}
+
+// hostnameOrLocal returns the OS hostname (fallback: "localhost").
+func hostnameOrLocal() string {
+	h, err := os.Hostname()
+	if err != nil || h == "" {
+		return "localhost"
+	}
+	return h
 }

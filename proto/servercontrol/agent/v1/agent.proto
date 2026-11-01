@@ -1,0 +1,148 @@
+syntax = "proto3";
+
+// Agent ↔ Control Plane protocol, version 1.
+//
+// Rules (docs/architecture/api-and-protocol.md):
+//   - Field numbers are never reused; deleted fields are reserved.
+//   - Unknown enum values must be handled safely by both sides.
+//   - Every envelope carries request_id, node_id (agent→server), correlation_id,
+//     issued_at, expires_at and idempotency_key where relevant.
+//   - The agent ALWAYS dials outbound; the server never connects to nodes.
+package servercontrol.agent.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/gen/proto/servercontrol/agent/v1;agentv1";
+
+// ProtocolVersion is the wire contract this file defines. Both sides send it
+// on Hello/EnrollRequest and reject mismatches loudly (never silently coerce).
+enum ProtocolVersion {
+  PROTOCOL_VERSION_UNSPECIFIED = 0;
+  PROTOCOL_VERSION_V1 = 1;
+}
+
+// Enroll exchanges a single-use enrollment token plus a client-generated CSR
+// for a node identity certificate. The private key never leaves the node.
+// Transport: TLS with SERVER certificate only (no client cert yet).
+message EnrollRequest {
+  ProtocolVersion protocol_version = 1;
+  string enrollment_token = 2; // plaintext token; consumed atomically server-side
+  string csr_pem = 3;          // PKCS#10 CSR (PEM), public key only
+  string display_name = 4;     // used when the token scope creates a new node
+  string hostname = 5;
+  string os_family = 6;        // linux | windows | unknown (informational)
+  string agent_version = 7;
+  string request_id = 8;
+}
+
+message EnrollResponse {
+  string node_id = 1;            // immutable node identity (UUID)
+  string cert_pem = 2;           // signed leaf certificate (PEM)
+  string ca_pem = 3;             // issuing CA certificate (PEM), for pinning
+  int64 cert_not_after_unix = 4; // leaf expiry, unix seconds
+  string request_id = 5;
+}
+
+// EnrollService is served over the same gRPC port as AgentService but does
+// NOT require a client certificate (the agent has none before enrollment).
+service EnrollService {
+  rpc Enroll(EnrollRequest) returns (EnrollResponse);
+}
+
+// AgentService requires a valid, unrevoked client certificate bound to an
+// immutable node ID (mTLS). The agent dials outbound and holds one
+// bidirectional stream for hello/heartbeat/capabilities and task delivery.
+service AgentService {
+  rpc Connect(stream AgentEnvelope) returns (stream ServerEnvelope);
+}
+
+// AgentEnvelope: agent → control plane.
+message AgentEnvelope {
+  string request_id = 1;
+  string node_id = 2; // must match the mTLS certificate identity
+  string correlation_id = 3;
+  google.protobuf.Timestamp issued_at = 4;
+  google.protobuf.Timestamp expires_at = 5;
+  string idempotency_key = 6;
+  oneof payload {
+    Hello hello = 10;
+    Heartbeat heartbeat = 11;
+    CapabilityReport capability_report = 12;
+    OperationResult operation_result = 13;
+  }
+}
+
+// ServerEnvelope: control plane → agent.
+message ServerEnvelope {
+  string request_id = 1;
+  string correlation_id = 2;
+  google.protobuf.Timestamp issued_at = 3;
+  google.protobuf.Timestamp expires_at = 4;
+  string idempotency_key = 5;
+  oneof payload {
+    HelloAck hello_ack = 10;
+    OperationRequest operation_request = 11;
+  }
+}
+
+// Hello opens the stream: agent self-description and protocol negotiation.
+message Hello {
+  ProtocolVersion protocol_version = 1;
+  string agent_version = 2;
+  string hostname = 3;
+  string os_family = 4;
+  string os_version = 5;
+  string arch = 6;
+}
+
+message HelloAck {
+  ProtocolVersion protocol_version = 1;
+  int64 heartbeat_interval_seconds = 2; // server-advised heartbeat cadence
+}
+
+// Heartbeat proves liveness; server refreshes nodes.last_seen_at.
+message Heartbeat {
+  uint64 sequence = 1;
+  double uptime_seconds = 2;
+}
+
+// CapabilityReport publishes what this node can actually do right now
+// (docs/architecture/capability-system.md). Server upserts node_capabilities.
+message CapabilityReport {
+  repeated Capability capabilities = 1;
+}
+
+message Capability {
+  string capability_id = 1;      // namespaced, e.g. "agent.echo"
+  string version = 2;            // semantic contract version
+  bool available = 3;
+  string reason_unavailable = 4; // set when available == false
+  string adapter_id = 5;
+  string adapter_version = 6;
+}
+
+// OperationRequest is a typed operation delivered to the node. It NEVER
+// contains shell text; payloads are validated against the operation schema
+// on BOTH sides. Expiry/idempotency/correlation ride on the envelope.
+message OperationRequest {
+  string task_id = 1;    // control plane task UUID
+  string operation = 2;  // namespaced, e.g. "noop.echo"
+  string operation_version = 3;
+  bytes payload = 4;     // JSON payload, schema-validated
+}
+
+// OperationResult reports a terminal (or rejected) outcome for a task.
+// A task that is neither terminal nor rejected must not produce a result.
+message OperationResult {
+  enum Status {
+    STATUS_UNSPECIFIED = 0;
+    STATUS_SUCCEEDED = 1;
+    STATUS_FAILED = 2;   // executor ran and failed
+    STATUS_REJECTED = 3; // validation failed; never executed
+  }
+  string task_id = 1;
+  Status status = 2;
+  string error_category = 3; // bounded, stable category for failures/rejections
+  bytes result = 4;          // JSON result on success
+  string output = 5;         // bounded, sanitized executor output
+}

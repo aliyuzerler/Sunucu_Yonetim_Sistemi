@@ -16,6 +16,13 @@ import (
 // maxOpTimeout bounds per-execution timeouts (registry validation + worker).
 const maxOpTimeout = 5 * time.Minute
 
+// Execution targets: control_plane executes inside the control plane worker;
+// node operations are delivered to the agent over the mTLS stream.
+const (
+	TargetControlPlane = "control_plane"
+	TargetNode         = "node"
+)
+
 // Operation classes per task-lifecycle.md.
 type Class string
 
@@ -44,11 +51,12 @@ type OperationSpec struct {
 	Name       string        // namespaced, e.g. "noop.echo"
 	Version    string        // semantic contract version
 	Class      Class         // retry semantics class
+	Target     string        // TargetControlPlane | TargetNode
 	RetrySafe  bool          // whether the executor may be retried after a lost lease
 	Timeout    time.Duration // per-execution timeout
 	MaxPayload int           // raw payload size limit in bytes
 	Validate   func(payload json.RawMessage) error
-	Exec       Executor
+	Exec       Executor // control-plane executor; node ops carry Exec == nil
 }
 
 // Registry holds the allowlisted operations for this control plane build.
@@ -85,6 +93,15 @@ func (r *Registry) validateSpec(s *OperationSpec) error {
 	default:
 		return fmt.Errorf("tasks: %s sınıfı geçersiz", s.Name)
 	}
+	if s.Target != TargetControlPlane && s.Target != TargetNode {
+		return fmt.Errorf("tasks: %s hedefi geçersiz", s.Name)
+	}
+	if s.Target == TargetControlPlane && s.Exec == nil {
+		return fmt.Errorf("tasks: %s control_plane hedefli ama executor yok", s.Name)
+	}
+	if s.Target == TargetNode && s.Exec != nil {
+		return fmt.Errorf("tasks: %s node hedefli ama control-plane executor tanımlı", s.Name)
+	}
 	if s.Timeout <= 0 || s.Timeout > maxOpTimeout {
 		return fmt.Errorf("tasks: %s zaman aşımı 1s..%s olmalı", s.Name, maxOpTimeout)
 	}
@@ -94,9 +111,9 @@ func (r *Registry) validateSpec(s *OperationSpec) error {
 	if s.Validate == nil {
 		return fmt.Errorf("tasks: %s validator eksik", s.Name)
 	}
-	if s.Exec == nil {
-		return fmt.Errorf("tasks: %s executor eksik", s.Name)
-	}
+	// Exec zorunluluğu hedefe bağlıdır (yukarıdaki hedef denetimlerine bakın):
+	// control_plane operasyonlarında executor zorunlu, node operasyonlarında
+	// executor sunucu tarafında OLMAMALI (agent yürütür).
 	return nil
 }
 

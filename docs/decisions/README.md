@@ -31,3 +31,4 @@ ADR'ler, mimari olarak önemli kararları, bağlamlarını ve sonuçlarını kay
 | [ADR-0005](ADR-0005-linux-first-cross-platform-agent.md) | Linux-first Control Plane, Cross-platform Agent Contracts | Accepted (baseline) |
 | [ADR-0006](ADR-0006-multi-node-strategy.md) | Multi-node Strategy — Single Control Plane First, Multi-node-ready Contracts | Accepted (baseline, Phase 00) |
 | [ADR-0007](ADR-0007-identity-sessions-bootstrap.md) | Identity, Sessions, First-Admin Bootstrap and CSRF Model | Accepted (Phase 02) |
+| [ADR-0008](ADR-0008-agent-protocol-mtls.md) | Agent Protocol, mTLS Identity and Enrollment | Accepted (Phase 03) |

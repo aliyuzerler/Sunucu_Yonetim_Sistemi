@@ -37,6 +37,16 @@ Root `Makefile` targets (see also `deploy/README.md` quickstart):
 - Proto: generation and breaking-change check — **Phase 03** (proto/ is reserved, empty by design).
 - Security: secret scan (`scripts/secret-scan.sh`, CI job), `npm audit` (run at Phase 01: 12 moderate findings, dev-toolchain-only), Go vulnerability scanning and container image scan planned as dependencies arrive.
 
+## Phase 03 additions (2026-11-01)
+
+- **Protokol:** `make proto-tools` (pinli buf v1.75.0 + Go plugin'leri) → `make proto` (lint+üretim) → `make proto-check` (kırılma kapısı, CI'da zorlu).
+- **CA ve agent kaydı:**
+  1. `go run ./cmd/control-plane ca init --cert deploy/ca.crt --key deploy/ca.key` (anahtar 0600, repoya girmez).
+  2. Control Plane'i `CP_CA_CERT` + `CP_CA_KEY` + (isteğe bağlı `CP_GRPC_ADDR`, default `:9090`) ile çalıştırın; gRPC mTLS dinleyicisi açılır.
+  3. Token: `control-plane enroll-token --scope group:<uuid> --ttl 15m` (veya UI > Agent Kaydı).
+  4. Agent: `cp deploy/ca.crt <dizin>/ca.crt && server-agent enroll --server <cp>:9090 --ca-file ca.crt --token <TOKEN>` → `server-agent run --server <cp>:9090`.
+- **Ortam değişkenleri (yeni):** `CP_GRPC_ADDR`, `CP_CA_CERT`, `CP_CA_KEY` (ikisi birlikte zorunlu; tanımsızsa gRPC kapalı ve log uyarı verir).
+
 ## Environment safety
 
 Use mock adapters by default. Any real Agent installation or server change requires an explicit opt-in profile and a dedicated disposable test host. Do not expose the development UI to the public internet. The dev compose binds PostgreSQL to `127.0.0.1` only.

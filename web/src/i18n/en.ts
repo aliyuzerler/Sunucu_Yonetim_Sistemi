@@ -163,6 +163,38 @@ export const en: Record<TranslationKey, string> = {
   "users.status.active": "Active",
   "users.status.disabled": "Disabled",
   "users.neverLoggedIn": "Never signed in",
+  "enrollment.scope.node": "Adopt existing node",
+  "enrollment.scope.group": "New node (group scoped)",
+  "enrollment.form.scope": "Scope",
+  "enrollment.form.node": "Target node",
+  "enrollment.form.group": "Target group",
+  "enrollment.form.pick": "Pick",
+  "enrollment.form.ttl": "Validity",
+  "enrollment.form.minutes": "minutes",
+  "enrollment.form.submit": "Issue token",
+  "enrollment.reveal.title": "Token shown once",
+  "enrollment.reveal.description":
+    "This token is single-use and will not be shown again. Copy it now.",
+  "enrollment.reveal.command":
+    "Agent: copy ca.crt, then: server-agent enroll --server <cp>:9090 --ca-file ca.crt --token <TOKEN> · Expires: {expires}",
+  "enrollment.reveal.dismiss": "Got it, hide",
+  "enrollment.empty.title": "No enrollment tokens",
+  "enrollment.empty.description":
+    "Issue a single-use token to enroll an agent; only its digest is stored.",
+  "enrollment.table.caption": "Enrollment tokens",
+  "enrollment.col.scope": "Scope",
+  "enrollment.col.target": "Target",
+  "enrollment.col.status": "Status",
+  "enrollment.col.expires": "Expires",
+  "enrollment.col.actions": "Actions",
+  "enrollment.state.pending": "Pending",
+  "enrollment.state.consumed": "Consumed",
+  "enrollment.state.revoked": "Revoked",
+  "enrollment.state.expired": "Expired",
+  "enrollment.revoke": "Revoke",
+  "enrollment.securityNote":
+    "Tokens are stored as SHA-256 digests; consumption is atomic in one transaction and certificates bind immutable node identities (ADR-0008).",
+
   "users.scopeNote":
     "Phase 02 provides a read-only view. User/role management arrives later; permissions are enforced server-side by RBAC.",
 
