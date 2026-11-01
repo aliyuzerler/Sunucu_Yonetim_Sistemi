@@ -18,6 +18,9 @@
 - CI: `agent-web` job — runner'da GERÇEK nginx + php8.3-fpm ile tam lifecycle kanıtı (create→update→disable→delete, rollback dosyası varlığı, docroot korunması); `EXPECTED_WEB=1` gate'i sessiz atlanamaz (CI-17 dersi). Toplam 12 job.
 - Docs: ADR-0012 (broker-tekil opt-in yürütme, dosya-koruyucu delete, marker config disiplini), `docs/architecture/web-hosting.md` (destek matrisi + güvenlik modeli + dürüst sınırlar), dependency-registry notu (yeni harici bağımlılık YOK), deploy README (`--web-enable` semantiği), ADR dizini güncellendi.
 
+### Fixed (CI agent-web job kanıtından)
+- CI-19: `ensureSiteUser` kullanıcı home dizinini `paths()` sırası yüzünden **confDir'den** türetiyordu — `useradd --create-home` nginx config dizini altına site dizini açıyordu (gerçek runner kanıtı: `/etc/nginx/conf.d/srvctl-citest` dizini + `rm: Is a directory`). Home artık `webRoot/<site>`; regresyon testi useradd argv'sini kesin doğrular.
+
 ### Security
 - Web ailesi VARSAYILAN KAPALI: gerçek sistem mutasyonu (useradd/config yazımı/reload) yalnız `--web-enable` ile açılır; operatör bilinçli seçim yapar (ADR-0012).
 - Site adı tek tohumdur: kullanıcı/yol/docroot yalnız allowlist'li addan türetilir; docroot override yoktur (path traversal yapısal olarak imkânsız).

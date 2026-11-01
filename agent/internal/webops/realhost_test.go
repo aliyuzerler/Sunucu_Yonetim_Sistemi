@@ -26,7 +26,7 @@ func TestRealWebHostLifecycle(t *testing.T) {
 	if _, err := exec.LookPath("nginx"); err != nil {
 		t.Fatalf("nginx kurulu değil: %v", err)
 	}
-	const site = "srvctl-citest"
+	const site = "citest"
 	r := NewRunner()
 	ctx := context.Background()
 

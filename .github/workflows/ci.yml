@@ -353,8 +353,8 @@ jobs:
         run: |
           sudo rm -f /etc/nginx/conf.d/srvctl-* || true
           sudo rm -f /etc/php/8.3/fpm/pool.d/srvctl-* || true
-          sudo userdel sc-web-srvctl-citest 2>/dev/null || true
-          sudo rm -rf /var/www/server-control/srvctl-citest || true
+          sudo userdel sc-web-citest 2>/dev/null || true
+          sudo rm -rf /var/www/server-control/citest || true
 
   agent-windows:
     name: Agent (Go, windows-2025)

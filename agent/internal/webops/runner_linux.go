@@ -428,8 +428,12 @@ func (r *Runner) ensureSiteUser(ctx context.Context, name string) (string, error
 	if _, err := r.userLookup(u); err == nil {
 		return u, nil
 	}
-	home, _, _ := r.paths()
-	home = filepath.Join(home, name)
+	// Home = webRoot/<site> (docroot'un üst dizini). paths() SIRASI
+	// (confDir, webRoot, poolFmt): home confDir'den TÜRETİLEMEZ — aksi
+	// halde useradd --create-home nginx config dizini altına dizin açar
+	// (CI agent-web job'ında yakalanan gerçek kusur).
+	_, webRoot, _ := r.paths()
+	home := filepath.Join(webRoot, name)
 	if _, err := r.run(ctx, r.useraddBinName(), "--system", "--user-group",
 		"--home-dir", home, "--create-home", "--shell", r.nologinShell(), u); err != nil {
 		return "", fmt.Errorf("site kullanıcısı oluşturulamadı: %w", err)

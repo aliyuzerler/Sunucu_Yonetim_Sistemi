@@ -189,6 +189,12 @@ func TestCreateStaticHappyPath(t *testing.T) {
 	if _, err := os.Stat(res.DocRoot); err != nil {
 		t.Fatalf("docroot yok: %v", err)
 	}
+	// Kusur regresyonu (CI agent-web kanıtı): useradd home dizini confDir
+	// DEĞİL webRoot altında olmalı — aksi halde useradd --create-home
+	// nginx config dizinine dizin açar.
+	if !e.ex.has("useradd --system --user-group --home-dir " + e.web + "/blog --create-home --shell /usr/sbin/nologin sc-web-blog") {
+		t.Fatal("useradd --home-dir webRoot/<site> olmalı (confDir değil)")
+	}
 	// argv discipline: syntax check BEFORE reload; inclusion proof ran.
 	calls := e.ex.count("nginx -t")
 	if calls != 1 {
