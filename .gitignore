@@ -7,7 +7,7 @@
 *.p12
 *.pfx
 *.token
-secrets/
+/secrets/
 
 # Node / frontend
 node_modules/

@@ -111,7 +111,9 @@ func TestRealTLSLifecycle(t *testing.T) {
 
 	// 5) NEGATİF: eşleşmeyen anahtarla üretilmiş sertifika reddedilir ve
 	//    CANLI SERTİFİKA korunur (kriter 4 gerçek-host kanıtı).
-	_, otherPEM, _ := newTestCA(t).issue(t, []string{"citest.example.internal"}, time.Now().Add(30*24*time.Hour))
+	// DİKKAT: issue(certPEM, chainPEM, key) döner — CI-20: burada YAPRAK
+	// PEM kullanılmalı; zincir değil (zincirin SAN alanı yoktur).
+	otherPEM, _, _ := newTestCA(t).issue(t, []string{"citest.example.internal"}, time.Now().Add(30*24*time.Hour))
 	_, err = r.Install(ctx, "citest.example.internal", otherPEM, "")
 	if !errors.Is(err, ErrKeyPairMismatch) {
 		t.Fatalf("çift eşleşmezliği tipli olmalı: %v", err)

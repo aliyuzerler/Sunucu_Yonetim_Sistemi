@@ -92,11 +92,16 @@ func (s *Service) Issue(ctx context.Context, req IssueRequest) (IssueOutcome, er
 		}
 	}
 
-	// issuing'e geç (pending → issuing; renewing kayıtları korunur).
-	if err := s.Store.MarkIssuing(ctx, rec.ID); err != nil && !errors.Is(err, ErrCertNotFound) {
-		// renewing zaten issuing benzeri bir "akışta" durumu; sadece
-		// pending→issuing geçişi zorunlu.
-		_ = err
+	// issuing'e geç: FRESH akışta pending→issuing ZORUNLUDUR — geçiş
+	// başarısızsa ACME'ye hiç başlanmaz (hızlı, dürüst hata). RENEWAL'da
+	// kayıt zaten renewing durumundadır ve MarkIssuing yalnız
+	// pending/renewal_failed/expired'tan kabul ettiği için reddi bilinçli
+	// no-op'tur (IT-03: davranış aynı, niyet artık açık).
+	if err := s.Store.MarkIssuing(ctx, rec.ID); err != nil {
+		if req.CertID == "" {
+			return IssueOutcome{}, err
+		}
+		// renewal: beklenen red — renewing zaten akış durumu.
 	}
 
 	providerID := req.ProviderID

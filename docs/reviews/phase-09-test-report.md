@@ -3,6 +3,7 @@
 - **Test tarihi:** 2026-11-02
 - **Denetlenen commit:** da86058 (Faz 09 implementasyonu; taban f9bd5c0 = Faz 08 ACCEPTED/READY, tag v0.9.0)
 - **Test eden rolü:** bağımsız denetçi (uygulama ajanı varsayımları alınmadı; kanıt file:line + komut çıktısı istendi)
+- **CI koşusu:** run 41355496209 (ilk koşu, 9/12 job yeşil) CI-20'yi yakaladı; düzeltmeler sonrası ikinci koşu yeşil beklenir — aşağıdaki komut çıktıları da86058 tabanlıdır, düzeltme commit'i yalnız .gitignore + test sabiti + IT-03 netleştirmesi içerir
 - **Kapsam:** yalnız Faz 09 (`prompts/phase-test/phase-09-test.md`); sonraki faz başlatılmadı.
 
 ## Zorunlu kabul kontrolleri
@@ -74,6 +75,8 @@ Komut: `go test ./internal/dns` → `ok` (7 test).
 - **IT-01 (Orta, kapsam-kısıtı — belgelendi):** Gerçek ACME staging uçtan uca koşusu disposable domain gerektirdiğinden NOT RUN. Sözleşme kanıtı fakeca ile karşılanır; `dns-ssl.md` §7'de sonraki iş olarak kayıtlı. Düzeltme önerisi: disposable domain + CI secret ile ayrı doğrulama işi.
 - **IT-02 (Düşük, tasarım trade-off — belgelendi):** Yenileme saklanan CSR'yi yeniden kullanır (aynı anahtar çifti). ADR-0013'te açıkça kabul edildi; anahtar rotasyonu sonraki iş.
 - **IT-03 (Düşük, kod-netlik):** `certmgmt.Service.Issue` içindeki `MarkIssuing` hatası bilinçli yoksayılır (renewing→issuing geçişi başarısız olur çünkü state zaten akışta); kod `_ = err` ile karartılmış — davranış doğru (hem fresh hem renewal yolları testli) ama okunabilirlik için ayrık ifade önerilir. Düzeltme zorunlu değil; izleme listesi.
+- **CI-20 (Orta, test-infra — CI ilk koşusunda yakalandı, DÜZELTİLDİ):** `.gitignore`'daki geniş `secrets/` kuralı `backend/control-plane/internal/secrets/` paketini sessizce repodan dışlamıştı — yerelde paket diskte olduğundan her şey yeşildi ama 3 CI job'ı (backend/e2e/frontend-yakın) `no required module provides package …/internal/secrets` ile düştü. Ders: yerdeş paket adlarıyla güvenlik amaçlı ignore kuralları yan etki üretir. Düzeltme: kural kök-ancaklı `/secrets/` yapıldı + paket repoya eklendi. Aynı koşuda ikinci bulgu: `TestRealTLSLifecycle` eşleşmezlik adımı `issue()` dönüşünden YAPRAK yerine ZİNCİR PEM'ini kullanıyordu (`ErrCertInvalid: SAN kapsamıyor` gerçek-host kanıtında yakalandı) — düzeltildi, yanına niyet yorumu eklendi.
+- **IT-03 (Düşük, kod-netlik — DÜZELTİLDİ):** `certmgmt.Service.Issue` içindeki `MarkIssuing` hatası `_ = err` ile karartılmıştı; artık fresh akışta geçiş hatası hızlı-dürüst hata olarak döner, renewal'daki beklenen red açık yorumla no-op'tur (davranış değişmedi; her iki yol testli).
 - **Kritik/Yüksek bulgu:** yok.
 
 ## Test komutları ve kısa çıktılar (taze koşu, commit da86058)
