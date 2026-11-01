@@ -83,10 +83,15 @@ type PGRecorder struct {
 // NewPGRecorder builds a PostgreSQL-backed recorder.
 func NewPGRecorder(pool *pgxpool.Pool) *PGRecorder { return &PGRecorder{pool: pool} }
 
-// Record inserts one event. Validation errors and SQL failures are returned.
+// Record inserts one event. Metadata is redacted HERE as defense in depth
+// (callers must also redact), then validated and stored. Validation errors
+// and SQL failures are returned.
 func (r *PGRecorder) Record(ctx context.Context, e Event) error {
 	if err := e.Validate(); err != nil {
 		return err
+	}
+	if e.Metadata != nil {
+		e.Metadata = Redact(e.Metadata).(map[string]any)
 	}
 	const q = `
 INSERT INTO audit_events (actor, actor_id, action, target_type, target_id,

@@ -53,7 +53,10 @@
 
 | ID | Önem | Bulgu | Durum |
 |---|---|---|---|
-| N-1 | Not | Sandbox'ta PostgreSQL/Docker yok: PG entegrasyon testleri lokalde NOT RUN (SKIP), CI'da koşacak. Kullanıcıya `TEST_DATABASE_URL` ile lokal doğrulama komutları verildi. | Açık (ortam kısıtı) |
+| CI-1 | Yüksek | İlk CI koşusunda paralel test paketleri migration advisory lock'unda yarıştı: `migrate` fail-fast yaptığı için bazı paketler "başka bir migration çalışıyor" aldı ve migration uygulanmadan kaldı (0 applied). | **Düzeltildi:** `Runner.lock` artık 30s'ye kadar bekler, sonra yüksek sesle hata verir; lock testi kısa context ile iptal yolunu da doğrular. |
+| CI-2 | Orta | `PGRecorder.Record` merkezî redaction yapmıyordu; test, ham metadata'nın DB'ye yazıldığını yakaladı (kırmızı şerit: çağıranlar redact ediyor, recorder etmiyordu). | **Düzeltildi:** Record artık girişte `audit.Redact` uygular (defense in depth). |
+| CI-3 | Yüksek | CI e2e job'ı `playwright install --with-deps chromium` adımında 25+ dk takıldı (apt tabanlı kurulum). | **Düzeltildi:** CI, runner imajındaki system Chrome'u kullanır (`E2E_BROWSER_CHANNEL=chrome`, indirme/apt yok); job'lara `timeout-minutes` eklendi (gelecekteki takılmalar hızlı başarısız olur). |
+| N-1 | Not | Sandbox'ta PostgreSQL/Docker yok: PG entegrasyon testleri lokalde NOT RUN (SKIP), CI'da koşar. Kullanıcıya `TEST_DATABASE_URL` ile lokal doğrulama komutları verildi. | Açık (ortam kısıtı) |
 | N-2 | Not | OpenAPI artefaktı henüz üretilmedi; `/api/v1` yüzeyi Faz 02'de büyüdü. Sonraki faz başında OpenAPI + breaking-change CI eklenmeli. | Açık (planlı) |
 | N-3 | Not | Login rate limit tek örnek içi bellektir; HA geçişinde paylaşımlı depoya taşınmalı (ADR-0006/0007 sonucu). | Kabul edilmiş tasarım |
 | N-4 | Düşük | Task işleyici Faz 02'de yalnızca control-plane içi operasyonları yürütür (noop.echo, inventory.node.tag.set); agent dağıtımı Faz 03 kapsamı. | Plan gereği |

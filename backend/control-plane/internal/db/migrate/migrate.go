@@ -2,13 +2,15 @@
 //
 // Design (backend-rules): migrations are explicit, transactional, reversible
 // when safe and guarded by a PostgreSQL advisory lock so two control plane
-// instances never run them concurrently.
+// instances SERIALIZE with a bounded wait (lockWaitTimeout) instead of
+// failing fast; after the timeout the second migrator errors loudly.
 package migrate
 
 import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -156,7 +158,7 @@ func (r *Runner) applyOne(ctx context.Context, version int, name, sql string, up
 	if up {
 		if _, err := tx.Exec(ctx,
 			`INSERT INTO schema_migrations (version, name) VALUES ($1, $2)
-			 ON CONFLICT (version) DO UPDATE SET name = EXCLUDED.name, applied_at = now()`,
+                         ON CONFLICT (version) DO UPDATE SET name = EXCLUDED.name, applied_at = now()`,
 			version, name,
 		); err != nil {
 			return err
@@ -169,24 +171,42 @@ func (r *Runner) applyOne(ctx context.Context, version int, name, sql string, up
 	return tx.Commit(ctx)
 }
 
-// lock acquires the migration advisory lock; the returned function releases it.
+// lockWaitTimeout bounds how long a second migrator waits for the advisory
+// lock. Waiting briefly is the desired behavior for both production (a second
+// control plane instance starting right after the first) and CI (parallel
+// test packages sharing one database); after the timeout the error is loud.
+const lockWaitTimeout = 30 * time.Second
+
+// lock acquires the migration advisory lock, waiting up to lockWaitTimeout
+// for a concurrent holder; the returned function releases it.
 func (r *Runner) lock(ctx context.Context) (func(context.Context), error) {
 	conn, err := r.Pool.Acquire(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("advisory lock bağlantısı alınamadı: %w", err)
 	}
-	var ok bool
-	if err := conn.QueryRow(ctx, "SELECT pg_try_advisory_lock($1)", advisoryLockKey).Scan(&ok); err != nil {
-		conn.Release()
-		return nil, fmt.Errorf("advisory lock alınamadı: %w", err)
+	deadline := time.Now().Add(lockWaitTimeout)
+	for {
+		var ok bool
+		if err := conn.QueryRow(ctx, "SELECT pg_try_advisory_lock($1)", advisoryLockKey).Scan(&ok); err != nil {
+			conn.Release()
+			return nil, fmt.Errorf("advisory lock alınamadı: %w", err)
+		}
+		if ok {
+			release := func(uctx context.Context) {
+				_, _ = conn.Exec(uctx, "SELECT pg_advisory_unlock($1)", advisoryLockKey)
+				conn.Release()
+			}
+			return release, nil
+		}
+		if time.Now().After(deadline) {
+			conn.Release()
+			return nil, fmt.Errorf("başka bir migration çalışıyor (advisory lock %s içinde serbest kalmadı)", lockWaitTimeout)
+		}
+		select {
+		case <-ctx.Done():
+			conn.Release()
+			return nil, fmt.Errorf("advisory lock beklemesi iptal edildi: %w", ctx.Err())
+		case <-time.After(200 * time.Millisecond):
+		}
 	}
-	if !ok {
-		conn.Release()
-		return nil, fmt.Errorf("başka bir migration çalışıyor (advisory lock meşgul)")
-	}
-	release := func(uctx context.Context) {
-		_, _ = conn.Exec(uctx, "SELECT pg_advisory_unlock($1)", advisoryLockKey)
-		conn.Release()
-	}
-	return release, nil
 }

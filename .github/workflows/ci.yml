@@ -15,6 +15,7 @@ jobs:
   backend:
     name: Backend (Go)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     services:
       postgres:
         # postgres:18-alpine, 2026-11-01 digest'i (deploy/docker-compose.yml ile aynı)
@@ -55,6 +56,7 @@ jobs:
   frontend:
     name: Frontend (React/TS)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: web
@@ -81,6 +83,7 @@ jobs:
   e2e:
     name: E2E (Playwright, gerçek backend)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     services:
       postgres:
         image: postgres:18-alpine@sha256:10a5c69a83035ab5239f5620d708520e8b28f5aa1f2b20143e6024532edadfb5
@@ -135,10 +138,8 @@ jobs:
           cd web
           npm ci
           npm run build
-      - name: Playwright chromium kur
-        run: cd web && npx playwright install --with-deps chromium
-      - name: E2E smoke (gerçek Control Plane)
-        run: cd web && E2E_REAL=1 API_PROXY_TARGET=http://127.0.0.1:8080 npx playwright test
+      - name: E2E smoke (gerçek Control Plane, system Chrome)
+        run: cd web && E2E_REAL=1 E2E_BROWSER_CHANNEL=chrome API_PROXY_TARGET=http://127.0.0.1:8080 npx playwright test
       - name: Ekran görüntüleri ve rapor (artifact)
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

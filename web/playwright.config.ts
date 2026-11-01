@@ -20,7 +20,17 @@ export default defineConfig({
     trace: "retain-on-failure",
     locale: "tr-TR",
   },
-  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
+  // CI, runner imajındaki system Chrome'u kullanır (E2E_BROWSER_CHANNEL=chrome);
+  // böylece `playwright install --with-deps` (apt) takılma riski ortadan kalkar.
+  // Lokal koşu paketli chromium'u kullanmaya devam eder.
+  projects: [
+    process.env.E2E_BROWSER_CHANNEL
+      ? {
+          name: process.env.E2E_BROWSER_CHANNEL,
+          use: { channel: process.env.E2E_BROWSER_CHANNEL },
+        }
+      : { name: "chromium", use: { ...devices["Desktop Chrome"] } },
+  ],
   webServer: realBackend
     ? [
         {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -110,7 +111,11 @@ func TestAdvisoryLockRejectsSecondRunnerIntegration(t *testing.T) {
 		t.Fatal("test kilidi alınamadı")
 	}
 
-	if _, err := r2.Up(ctx); err == nil {
+	// Kilit tutulurken ikinci runner bekler ve kısa context ile reddedilir
+	// (advisory lock artık sınırlı bekler — bkz. CI-2 düzeltmesi).
+	ctx2, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	if _, err := r2.Up(ctx2); err == nil {
 		t.Fatal("kilit tutulurken ikinci runner başarısız olmalıydı")
 	}
 }
