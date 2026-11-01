@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/broker"
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/fwops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/winops"
 	agentv1 "github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/gen/proto/servercontrol/agent/v1"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -301,6 +302,114 @@ func (s *ServiceExecutor) Execute(ctx context.Context, payload []byte) ([]byte, 
 // isWinOp reports whether the executor targets the windows SCM family.
 func isWinOp(op string) bool {
 	return strings.HasPrefix(op, "windows.scm.")
+}
+
+// SurveyExecutor executes one Faz 06 read-only survey operation
+// (linux.pkg.list | linux.firewall.status | linux.firewall.rules.list |
+// linux.firewall.rule.preview) by forwarding the typed request to the local
+// privileged broker. Read-only by construction: the broker allowlist has NO
+// mutating member in this family, and the preview op renders commands as
+// data without ever executing them (ADR-0010).
+type SurveyExecutor struct {
+	op         string
+	brokerPath string
+}
+
+// NewSurveyExecutor builds one broker-backed survey executor.
+func NewSurveyExecutor(op, brokerPath string) *SurveyExecutor {
+	return &SurveyExecutor{op: op, brokerPath: brokerPath}
+}
+
+// Info describes the capability; availability is refined by ProbeAvailable.
+func (s *SurveyExecutor) Info() *agentv1.Capability {
+	adapter := "survey-broker"
+	switch {
+	case s.op == broker.OpLinuxPkgList:
+		adapter = "pkg-broker"
+	case strings.HasPrefix(s.op, "linux.firewall."):
+		adapter = "fw-broker"
+	}
+	return &agentv1.Capability{
+		CapabilityId:   s.op,
+		Version:        "1.0.0",
+		Available:      false,
+		AdapterId:      adapter,
+		AdapterVersion: Version,
+	}
+}
+
+// ProbeAvailable dials the broker socket (read-only ping).
+func (s *SurveyExecutor) ProbeAvailable(ctx context.Context) (bool, string) {
+	cli := broker.NewClient(s.brokerPath)
+	probeCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	return cli.Ping(probeCtx)
+}
+
+// surveyListPayload is the shared {limit} schema.
+type surveyListPayload struct {
+	Limit int `json:"limit,omitempty"`
+}
+
+// surveyPreviewPayload mirrors fwops.PreviewParams (validated BOTH sides).
+type surveyPreviewPayload struct {
+	Zone     string `json:"zone,omitempty"`
+	Port     int    `json:"port"`
+	Protocol string `json:"protocol"`
+	Action   string `json:"action"`
+}
+
+// Execute validates the payload, forwards the typed request to the broker
+// and maps the response.
+func (s *SurveyExecutor) Execute(ctx context.Context, payload []byte) ([]byte, string, error) {
+	req := &broker.Request{Operation: s.op}
+	switch s.op {
+	case broker.OpLinuxPkgList, broker.OpLinuxFirewallRulesList:
+		var p surveyListPayload
+		if len(payload) > 0 {
+			dec := json.NewDecoder(bytes.NewReader(payload))
+			dec.DisallowUnknownFields()
+			if err := dec.Decode(&p); err != nil {
+				return nil, "", fmt.Errorf("payload çözülemedi: %w", err)
+			}
+		}
+		limit := p.Limit
+		if limit == 0 {
+			limit = 200
+		}
+		if limit < 1 || limit > 500 {
+			return nil, "", fmt.Errorf("limit 1..500 olmalı")
+		}
+		req.Params, _ = json.Marshal(broker.ListParams{Limit: limit})
+	case broker.OpLinuxFirewallStatus:
+		req.Params, _ = json.Marshal(struct{}{})
+	case broker.OpLinuxFirewallRulePreview:
+		var p surveyPreviewPayload
+		dec := json.NewDecoder(bytes.NewReader(payload))
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&p); err != nil {
+			return nil, "", fmt.Errorf("payload çözülemedi: %w", err)
+		}
+		pp := fwops.PreviewParams{Zone: p.Zone, Port: p.Port, Protocol: p.Protocol, Action: p.Action}
+		if err := fwops.ValidatePreviewParams(pp); err != nil {
+			return nil, "", err
+		}
+		req.Params, _ = json.Marshal(pp)
+	default:
+		return nil, "", fmt.Errorf("survey executor izin dışı operasyon: %s", s.op)
+	}
+	res, err := broker.NewClient(s.brokerPath).Call(ctx, req)
+	if err != nil {
+		return nil, "", fmt.Errorf("broker erişilemiyor: %w", err)
+	}
+	switch res.Status {
+	case broker.StatusSucceeded:
+		return res.Result, "broker işlemi tamamlandı", nil
+	case broker.StatusRejected:
+		return nil, res.Output, fmt.Errorf("broker reddetti: %s", res.ErrorCategory)
+	default:
+		return nil, res.Output, fmt.Errorf("broker işlemi başarısız: %s", res.ErrorCategory)
+	}
 }
 
 // winServicePayload is the agent-side mirror of the windows service schema.

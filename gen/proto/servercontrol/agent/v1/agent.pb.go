@@ -972,8 +972,14 @@ type SystemFactsReport struct {
 	SystemdAvailable bool                   `protobuf:"varint,10,opt,name=systemd_available,json=systemdAvailable,proto3" json:"systemd_available,omitempty"`
 	CollectedAt      *timestamppb.Timestamp `protobuf:"bytes,11,opt,name=collected_at,json=collectedAt,proto3" json:"collected_at,omitempty"` // when the agent collected this
 	Source           string                 `protobuf:"bytes,12,opt,name=source,proto3" json:"source,omitempty"`                              // e.g. "os-release+procfs+systemctl"
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// Faz 06: distro classification + explicit support matrix (additive,
+	// backwards-compatible fields; docs/architecture/linux-support.md).
+	DistroFamily  string `protobuf:"bytes,13,opt,name=distro_family,json=distroFamily,proto3" json:"distro_family,omitempty"`    // deb | rhel | debian-like | rhel-like | windows | unknown
+	DistroLike    string `protobuf:"bytes,14,opt,name=distro_like,json=distroLike,proto3" json:"distro_like,omitempty"`          // raw os-release ID_LIKE value ("" when absent)
+	SupportState  string `protobuf:"bytes,15,opt,name=support_state,json=supportState,proto3" json:"support_state,omitempty"`    // supported | untested | unknown
+	SupportReason string `protobuf:"bytes,16,opt,name=support_reason,json=supportReason,proto3" json:"support_reason,omitempty"` // human-readable reason for the state
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *SystemFactsReport) Reset() {
@@ -1079,6 +1085,34 @@ func (x *SystemFactsReport) GetCollectedAt() *timestamppb.Timestamp {
 func (x *SystemFactsReport) GetSource() string {
 	if x != nil {
 		return x.Source
+	}
+	return ""
+}
+
+func (x *SystemFactsReport) GetDistroFamily() string {
+	if x != nil {
+		return x.DistroFamily
+	}
+	return ""
+}
+
+func (x *SystemFactsReport) GetDistroLike() string {
+	if x != nil {
+		return x.DistroLike
+	}
+	return ""
+}
+
+func (x *SystemFactsReport) GetSupportState() string {
+	if x != nil {
+		return x.SupportState
+	}
+	return ""
+}
+
+func (x *SystemFactsReport) GetSupportReason() string {
+	if x != nil {
+		return x.SupportReason
 	}
 	return ""
 }
@@ -1690,7 +1724,7 @@ const file_servercontrol_agent_v1_agent_proto_rawDesc = "" +
 	"\x12reason_unavailable\x18\x04 \x01(\tR\x11reasonUnavailable\x12\x1d\n" +
 	"\n" +
 	"adapter_id\x18\x05 \x01(\tR\tadapterId\x12'\n" +
-	"\x0fadapter_version\x18\x06 \x01(\tR\x0eadapterVersion\"\xa9\x03\n" +
+	"\x0fadapter_version\x18\x06 \x01(\tR\x0eadapterVersion\"\xbb\x04\n" +
 	"\x11SystemFactsReport\x12\x13\n" +
 	"\x05os_id\x18\x02 \x01(\tR\x04osId\x12\"\n" +
 	"\ros_version_id\x18\x03 \x01(\tR\vosVersionId\x12$\n" +
@@ -1703,7 +1737,12 @@ const file_servercontrol_agent_v1_agent_proto_rawDesc = "" +
 	"\x11systemd_available\x18\n" +
 	" \x01(\bR\x10systemdAvailable\x12=\n" +
 	"\fcollected_at\x18\v \x01(\v2\x1a.google.protobuf.TimestampR\vcollectedAt\x12\x16\n" +
-	"\x06source\x18\f \x01(\tR\x06sourceJ\x04\b\x01\x10\x02\"\x81\x03\n" +
+	"\x06source\x18\f \x01(\tR\x06source\x12#\n" +
+	"\rdistro_family\x18\r \x01(\tR\fdistroFamily\x12\x1f\n" +
+	"\vdistro_like\x18\x0e \x01(\tR\n" +
+	"distroLike\x12#\n" +
+	"\rsupport_state\x18\x0f \x01(\tR\fsupportState\x12%\n" +
+	"\x0esupport_reason\x18\x10 \x01(\tR\rsupportReasonJ\x04\b\x01\x10\x02\"\x81\x03\n" +
 	"\rMetricsReport\x12=\n" +
 	"\fcollected_at\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\vcollectedAt\x12\x16\n" +
 	"\x06source\x18\x02 \x01(\tR\x06source\x124\n" +

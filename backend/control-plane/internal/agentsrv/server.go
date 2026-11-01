@@ -344,6 +344,10 @@ func (s *Server) handleSystemFacts(ctx context.Context, nodeID string, env *agen
 		SystemdVersion:   rep.GetSystemdVersion(),
 		PackageManager:   rep.GetPackageManager(),
 		SystemdAvailable: rep.GetSystemdAvailable(),
+		DistroFamily:     rep.GetDistroFamily(),
+		DistroLike:       rep.GetDistroLike(),
+		SupportState:     rep.GetSupportState(),
+		SupportReason:    rep.GetSupportReason(),
 		Source:           rep.GetSource(),
 		CollectedAt:      collected,
 	}

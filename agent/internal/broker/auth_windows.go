@@ -11,6 +11,7 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/fwops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/winops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/winscm"
 	"golang.org/x/sys/windows"
@@ -98,8 +99,10 @@ func pipeCallerSID(h windows.Handle) (string, error) {
 }
 
 // execute runs the validated windows operation with bounded concurrency +
-// timeout.
-func (s *Server) execute(req *Request, name string, listLimit int) *Response {
+// timeout. Faz 06 linux survey ops never reach here: validateRequest
+// validates them, but this windows dispatcher has no member for the linux
+// family — they fall through to the default unsupported rejection.
+func (s *Server) execute(req *Request, name string, listLimit int, _ fwops.PreviewParams) *Response {
 	res := &Response{Status: StatusFailed}
 	select {
 	case s.sem <- struct{}{}:

@@ -28,8 +28,12 @@ func Detect(root string, probe Probe) (Facts, error) {
 		f.OSVersionID = release["VERSION_ID"]
 		f.OSPrettyName = release["PRETTY_NAME"]
 		f.OSHomeURL = release["HOME_URL"]
+		f.DistroLike = release["ID_LIKE"]
 		f.Source = SourceOSRelease
 	}
+	// Faz 06: distro family + explicit support matrix (false-positive
+	// guard: ID_LIKE alone never yields supported).
+	f.DistroFamily, f.SupportState, f.SupportReason = ClassifyDistro(f.OSID, f.OSVersionID, f.DistroLike)
 	if kr, err := os.ReadFile(filepath.Join(root, "proc", "sys", "kernel", "osrelease")); err == nil {
 		f.KernelRelease = strings.TrimSpace(string(kr))
 		f.Source = joinSource(f.Source, SourceProcfs)

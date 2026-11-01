@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+## [0.7.0] — 2026-11-01 — Faz 06: Ek Linux dağıtımı adaptörleri (Rocky Linux + AlmaLinux)
+
+### Added
+- Distro sınıflandırma + AÇIK destek matrisi (`agent/internal/osdetect`): `SupportedDistros` — ubuntu 22/24, debian 12/13, **rocky 9/10, almalinux 9/10**; aile yalnız `ID=`'den gelir, `ID_LIKE` yalnız kaba `debian-like`/`rhel-like` etiketi üretir ve ASLA `supported` döndürmez; katı majör ayrıştırma (9.5→9, 24.04→24); matris dışı majör `untested`, bilinmeyen distro `unknown` — yanlış pozitif yok (kriter). Rocky/Alma os-release fixture'ları + yanlış-pozitif test seti.
+- Salt-okuma paket envanteri (`agent/internal/pkgops`): `linux.pkg.list` — deb ailesi `dpkg-query -W -f=…`, rhel ailesi `rpm -qa --qf=…` (SABİT argv; 1 MiB çıktı sınırı; limit 1..500; kontrol-karakter yankı koruması). Kurulum/kaldırma/güncelleme yüzeyi YOK (belgeli kapsam kararı).
+- Firewall adaptörü (`agent/internal/fwops`): dürüst backend tespiti (firewalld→ufw→nftables→iptables→none, `Reason` ile), backend'e göre sınırlı salt-okuma kural listesi (firewalld aktif zon başına `--list-all` ≤16 zon; 64 KiB/400 satır), zon adı katı allowlist. **`linux.firewall.rule.preview` YALNIZ ÖNİZLEME (ADR-0010):** komutları veri olarak döndürür, hiçbir şey çalıştırmaz; firewalld/ufw şablonları, nftables/iptables dürüst ret (`ErrPreviewUnsupported`).
+- Broker: 4 yeni op allowlist'e eklendi (strict şema doğrulaması — preview payload'ı kapalı enum'lar + sınırlı int'ler); unix registry 10 capability; `SurveyExecutor` broker-arka yüzeyli; server-privd Pkg/Firewall runner'ları bağladı.
+- Control plane: 4 salt-okuma operasyon spec'i (`ops_faz06.go`); YENİ izinler `pkg:read`, `firewall:read` (yalnız yeni izinler seed edilir — migration 0010, CI-04 dersi); `node_system_facts` +4 kolon (distro_family/distro_like/support_state/support_reason).
+- Protokol: `SystemFactsReport` +4 additive alan (13–16) — buf lint + deterministik üretim; sözleşme geriye dönük uyumlu.
+- UI: destek durumu rozeti (destekleniyor / desteklenmiyor(?) + gerekçe), dağıtım ailesi fact'i, linux node'larda salt-okuma dağıtım işlemleri bölümü (paket limit formu, firewall durum/kurallar butonları, kural önizleme formu + "çalıştırmaz" etiketi); TR/EN sözlükler; 2 yeni vitest paketi (4 test).
+- E2E: Playwright `linux-distro.spec.ts` (3 test) + `docs/reviews/screenshots/phase-06/` ekran görüntüleri repoda; mock `/e2e/reset` önkoşul ucu + `/e2e` proxy'si (spec'ler sıra-bağımsız).
+- CI: `agent-rhel` job — disposable **privileged systemd container**'lar (rockylinux:9, almalinux:9) içinde GERÇEK kanıt: `TestRealHostSmoke` (os-release/matris/dnf/systemd; gate'li ama mismatch'te SESSİZ ATLANMAZ), gerçek rpm envanteri ayrıştırma, gerçek firewalld durum+kural+önizleme sondağı.
+- Docs: ADR-0010 (firewall preview-only), `docs/architecture/linux-support.md` (açık distro/majör matrisi + yanlış pozitif engel kuralları + dürüst sınırlar).
+
+### Security
+- Kural değişikliği yüzeyi YOKTUR (ADR-0010): önizleme `Executed=false` değişmezi; firewalld/ufw komut şablonları sabit, zon adı `^[A-Za-z0-9_.-]{0,32}$` allowlist'li.
+- Paket envanteri salt-okuma; çıktı sınırlı (500/1 MiB); alan yankısı kontrol-karakter korumalı.
+- Üç katmanlı doğrulama yeni op'lara taşındı: control-plane validator → agent executor → broker `validateRequest` (hepsi strict JSON + kapalı enum).
+- Gerçek-host smoke testleri gate'siz sessiz atlanamaz: gate konmuşsa host eşleşmezse test BAŞARISIZ olur (kanıt dürüstlüğü).
+
 ## [0.6.0] — 2026-11-01 — Faz 05: Windows Server Agent ve native adaptörler
 
 ### Added

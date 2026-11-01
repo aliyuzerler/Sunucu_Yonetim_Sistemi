@@ -154,7 +154,7 @@ func decodeStrict(payload json.RawMessage, v any) error {
 // BuildDefaultRegistry returns the Faz 02 operation registry (Faz 04 ile
 // genişletildi: linux systemd servis operasyonları).
 func BuildDefaultRegistry(tagSetter TagSetter) (*Registry, error) {
-	return NewRegistry(
+	specs := []*OperationSpec{
 		&OperationSpec{
 			Name:       "noop.echo",
 			Version:    "1.0.0",
@@ -315,7 +315,11 @@ func BuildDefaultRegistry(tagSetter TagSetter) (*Registry, error) {
 			Validate:     ValidateEventlogRead,
 			RequiredPerm: rbac.PermEventlogRead,
 		},
-	)
+	}
+	// Faz 06: Linux dağıtım adaptörleri (paket envanteri + firewall
+	// sörvey/önizleme) ayrı dosyada: ops_faz06.go.
+	specs = append(specs, buildFaz06Registry()...)
+	return NewRegistry(specs...)
 }
 
 // agentEchoPayload is the typed schema for the node-side echo operation; it

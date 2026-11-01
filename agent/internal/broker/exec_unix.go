@@ -10,6 +10,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/fwops"
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/pkgops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/svcops"
 )
 
@@ -69,7 +71,7 @@ func peerCreds(conn *net.UnixConn) (uid, gid uint32, pid int32, err error) {
 
 // execute runs the validated linux operation with bounded concurrency +
 // timeout.
-func (s *Server) execute(req *Request, unit string, listLimit int) *Response {
+func (s *Server) execute(req *Request, unit string, listLimit int, preview fwops.PreviewParams) *Response {
 	res := &Response{Status: StatusFailed}
 	select {
 	case s.sem <- struct{}{}:
@@ -89,6 +91,39 @@ func (s *Server) execute(req *Request, unit string, listLimit int) *Response {
 	var result any
 	var err error
 	switch req.Operation {
+	case OpLinuxPkgList:
+		pkg := s.cfg.Pkg
+		if pkg == nil {
+			pkg = &pkgops.Runner{}
+		}
+		var pkgs []pkgops.PackageInfo
+		pkgs, err = pkg.List(ctx, listLimit)
+		result = map[string]any{"packages": pkgs}
+	case OpLinuxFirewallStatus:
+		fw := s.fwRunner()
+		st := fw.Probe(ctx)
+		result = map[string]any{"firewall": st}
+	case OpLinuxFirewallRulesList:
+		fw := s.fwRunner()
+		var rs fwops.Ruleset
+		rs, err = fw.Rules(ctx, listLimit)
+		result = map[string]any{"ruleset": rs}
+	case OpLinuxFirewallRulePreview:
+		// PREVIEW-ONLY (ADR-0010): render commands as data; NEVER
+		// execute. The active backend decides the syntax.
+		fw := s.fwRunner()
+		st := fw.Probe(ctx)
+		if st.Backend == fwops.BackendNone {
+			res.Status = StatusFailed
+			res.ErrorCategory = CatExecutorFailed
+			res.Output = "tanınan firewall backend yok"
+			return res
+		}
+		var pv fwops.Preview
+		pv, err = fwops.RenderPreview(st.Backend, preview)
+		if err == nil {
+			result = map[string]any{"preview": pv}
+		}
 	case OpServiceList:
 		var units []svcops.UnitInfo
 		units, err = sysd.List(ctx)
@@ -126,6 +161,12 @@ func (s *Server) execute(req *Request, unit string, listLimit int) *Response {
 		case errors.Is(err, svcops.ErrTimeout):
 			res.Status = StatusFailed
 			res.ErrorCategory = CatExecutorTimedOut
+		case errors.Is(err, pkgops.ErrPkgUnavailable), errors.Is(err, fwops.ErrPreviewUnsupported):
+			res.Status = StatusRejected
+			res.ErrorCategory = CatUnsupportedOp
+		case errors.Is(err, pkgops.ErrLimit), errors.Is(err, fwops.ErrInvalidPreview):
+			res.Status = StatusRejected
+			res.ErrorCategory = CatInvalidParams
 		default:
 			res.Status = StatusFailed
 			res.ErrorCategory = CatExecutorFailed
@@ -136,4 +177,12 @@ func (s *Server) execute(req *Request, unit string, listLimit int) *Response {
 	res.Status = StatusSucceeded
 	res.Result = b
 	return res
+}
+
+// fwRunner resolves the firewall runner (zero value probes PATH).
+func (s *Server) fwRunner() FirewallRunner {
+	if s.cfg.Firewall != nil {
+		return s.cfg.Firewall
+	}
+	return &fwops.Runner{}
 }

@@ -42,6 +42,8 @@ func Detect(root string, probe Probe) (Facts, error) {
 		f.OSVersionID = build // older hosts without DisplayVersion
 	}
 	f.PackageManager = detectWindowsPackageManager()
+	// Faz 06: windows family classification (separate support matrix).
+	f.DistroFamily, f.SupportState, f.SupportReason = ClassifyDistro(f.OSID, f.OSVersionID, "")
 	f.Source = SourceRegistry
 	if f.OSPrettyName == "" && build == "" {
 		return f, fmt.Errorf("sistem bilgileri okunamadı")

@@ -130,6 +130,10 @@ export interface SystemFactsRecord {
   systemd_version: string;
   package_manager: string;
   systemd_available: boolean;
+  distro_family: string; // Faz 06
+  distro_like: string; // Faz 06
+  support_state: string; // Faz 06: supported|untested|unknown
+  support_reason: string; // Faz 06
   source: string;
   collected_at: string;
 }

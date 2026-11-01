@@ -61,6 +61,11 @@ const OPERATIONS = [
   { name: "windows.scm.service.stop", version: "1.0.0", class: "idempotent_desired_state", retry_safe: true, timeout_seconds: 120 },
   { name: "windows.scm.service.restart", version: "1.0.0", class: "non_idempotent", retry_safe: false, timeout_seconds: 180 },
   { name: "windows.eventlog.read", version: "1.0.0", class: "read_only", retry_safe: true, timeout_seconds: 60 },
+  // Faz 06: Linux dağıtım adaptörleri (salt-okuma; kural değişikliği yok — ADR-0010).
+  { name: "linux.pkg.list", version: "1.0.0", class: "read_only", retry_safe: true, timeout_seconds: 60 },
+  { name: "linux.firewall.status", version: "1.0.0", class: "read_only", retry_safe: true, timeout_seconds: 60 },
+  { name: "linux.firewall.rules.list", version: "1.0.0", class: "read_only", retry_safe: true, timeout_seconds: 60 },
+  { name: "linux.firewall.rule.preview", version: "1.0.0", class: "read_only", retry_safe: true, timeout_seconds: 60 },
 ];
 
 // Faz 04 telemetri mock verisi: her node'a agent telemetrisi eklenir.
@@ -169,6 +174,65 @@ function attachWindowsTelemetry(node) {
   ]);
 }
 
+// Faz 06: Rocky/Alma node şablonu — distro sınıflandırması + salt-okuma
+// dağıtım kabiliyetleriyle (paket envanteri + firewall sörvey/önizleme).
+function attachRockyTelemetry(node) {
+  const now = new Date().toISOString();
+  nodeFacts.set(node.id, {
+    node_id: node.id,
+    os_id: "rocky",
+    os_version_id: "9.5",
+    os_pretty_name: "Rocky Linux 9.5 (Blue Onyx)",
+    os_home_url: "https://rockylinux.org/",
+    kernel_release: "5.14.0-503.22.1.el9_5.x86_64",
+    arch: "amd64",
+    systemd_version: "252",
+    package_manager: "dnf",
+    systemd_available: true,
+    distro_family: "rhel",
+    distro_like: "rhel centos fedora",
+    support_state: "supported",
+    support_reason: "desteklenen majör sürüm 9",
+    source: "os-release+procfs+systemctl",
+    collected_at: now,
+  });
+  nodeMetrics.set(node.id, {
+    collected_at: now,
+    source: "procfs+statfs",
+    cpu: { percent: 18.2, logical_cores: 4, load_1m: 0.2, load_5m: 0.15, load_15m: 0.1 },
+    memory: {
+      total_bytes: 8 * 1024 ** 3,
+      available_bytes: 5 * 1024 ** 3,
+      used_bytes: 3 * 1024 ** 3,
+      used_percent: 37.5,
+    },
+    disks: [
+      {
+        device: "/dev/vda1",
+        mount_point: "/",
+        fs_type: "xfs",
+        total_bytes: 60 * 1024 ** 3,
+        used_bytes: 18 * 1024 ** 3,
+        available_bytes: 42 * 1024 ** 3,
+      },
+    ],
+    networks: [{ interface: "eth0", rx_bytes: 333333333, tx_bytes: 222222222 }],
+    uptime_seconds: 259200,
+  });
+  nodeCapabilities.set(node.id, [
+    { node_id: node.id, capability_id: "agent.echo", version: "1.0.0", available: true, adapter_id: "builtin" },
+    { node_id: node.id, capability_id: "linux.systemd.service.list", version: "1.0.0", available: true, adapter_id: "systemd-broker" },
+    { node_id: node.id, capability_id: "linux.systemd.service.status", version: "1.0.0", available: true, adapter_id: "systemd-broker" },
+    { node_id: node.id, capability_id: "linux.systemd.service.start", version: "1.0.0", available: true, adapter_id: "systemd-broker" },
+    { node_id: node.id, capability_id: "linux.systemd.service.stop", version: "1.0.0", available: true, adapter_id: "systemd-broker" },
+    { node_id: node.id, capability_id: "linux.systemd.service.restart", version: "1.0.0", available: true, adapter_id: "systemd-broker" },
+    { node_id: node.id, capability_id: "linux.pkg.list", version: "1.0.0", available: true, adapter_id: "pkg-broker" },
+    { node_id: node.id, capability_id: "linux.firewall.status", version: "1.0.0", available: true, adapter_id: "fw-broker" },
+    { node_id: node.id, capability_id: "linux.firewall.rules.list", version: "1.0.0", available: true, adapter_id: "fw-broker" },
+    { node_id: node.id, capability_id: "linux.firewall.rule.preview", version: "1.0.0", available: true, adapter_id: "fw-broker" },
+  ]);
+}
+
 function json(res, status, body) {
   const data = JSON.stringify(body);
   res.writeHead(status, { "Content-Type": "application/json; charset=utf-8" });
@@ -224,12 +288,28 @@ const server = createServer(async (req, res) => {
   const mutations = new Set(["POST", "PUT", "PATCH", "DELETE"]);
   if (mutations.has(method)) {
     const exempt =
-      path === "/api/v1/auth/login" || path === "/api/v1/bootstrap/admin";
+      path === "/api/v1/auth/login" || path === "/api/v1/bootstrap/admin" || path === "/e2e/reset";
     const presented = req.headers["x-csrf-token"] ?? "";
     if (!exempt && (!session || presented !== deriveCsrf(cookieToken))) {
       json(res, 403, errorBody("csrf_invalid", "CSRF doğrulaması başarısız.", 403));
       return;
     }
+  }
+
+  // E2E durum sıfırlama (yalnız MOCK; spec'ler açık önkoşul bildirir):
+  // node/görev/audit/telemetri durumunu temizler, oturumları KORUR.
+  // CSRF muaf (yalnız test altyapısı; üretimde karşılığı yoktur).
+  if (method === "POST" && path === "/e2e/reset") {
+    nodes.length = 0;
+    groups.length = 0;
+    tasks.length = 0;
+    audit.length = 0;
+    enrollmentTokens.length = 0;
+    nodeFacts.clear();
+    nodeMetrics.clear();
+    nodeCapabilities.clear();
+    json(res, 200, { status: "reset", mock: true });
+    return;
   }
 
   // ---- auth ----
@@ -347,6 +427,8 @@ const server = createServer(async (req, res) => {
     // akışlarını form bağımsız sınaması için.
     if (body.os_family === "windows" || String(body.display_name || "").startsWith("win-")) {
       attachWindowsTelemetry(node);
+    } else if (body.os_family === "rocky" || String(body.display_name || "").startsWith("rocky-") || String(body.display_name || "").startsWith("alma-")) {
+      attachRockyTelemetry(node);
     } else {
       attachMockTelemetry(node);
     }

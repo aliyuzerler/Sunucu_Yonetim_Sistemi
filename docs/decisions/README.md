@@ -33,3 +33,4 @@ ADR'ler, mimari olarak önemli kararları, bağlamlarını ve sonuçlarını kay
 | [ADR-0007](ADR-0007-identity-sessions-bootstrap.md) | Identity, Sessions, First-Admin Bootstrap and CSRF Model | Accepted (Phase 02) |
 | [ADR-0008](ADR-0008-agent-protocol-mtls.md) | Agent Protocol, mTLS Identity and Enrollment | Accepted (Phase 03) |
 | [ADR-0009](ADR-0009-windows-agent.md) | Windows Server Agent and Native Adapters | Accepted (Phase 05) |
+| [ADR-0010](ADR-0010-firewall-preview-only.md) | Firewall Rule Changes — Preview-Only (No Mutation Surface) | Accepted (Phase 06) |

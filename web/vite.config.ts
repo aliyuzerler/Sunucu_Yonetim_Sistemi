@@ -12,6 +12,8 @@ export default defineConfig({
     port: 4173,
     proxy: {
       "/api": { target: apiProxyTarget, changeOrigin: true },
+      // E2E yardımcı uçları (/e2e/health, /e2e/reset) — yalnız mock.
+      "/e2e": { target: apiProxyTarget, changeOrigin: true },
     },
   },
   test: {

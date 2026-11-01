@@ -140,6 +140,12 @@ message SystemFactsReport {
   bool systemd_available = 10;
   google.protobuf.Timestamp collected_at = 11; // when the agent collected this
   string source = 12;          // e.g. "os-release+procfs+systemctl"
+  // Faz 06: distro classification + explicit support matrix (additive,
+  // backwards-compatible fields; docs/architecture/linux-support.md).
+  string distro_family = 13;   // deb | rhel | debian-like | rhel-like | windows | unknown
+  string distro_like = 14;     // raw os-release ID_LIKE value ("" when absent)
+  string support_state = 15;   // supported | untested | unknown
+  string support_reason = 16;  // human-readable reason for the state
 }
 
 // MetricsReport is one periodic snapshot. Every value carries its source and

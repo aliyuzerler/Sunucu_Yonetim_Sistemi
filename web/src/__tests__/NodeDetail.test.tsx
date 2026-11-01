@@ -44,6 +44,10 @@ const facts = {
   systemd_version: "255",
   package_manager: "apt",
   systemd_available: true,
+  distro_family: "deb",
+  distro_like: "debian",
+  support_state: "supported",
+  support_reason: "desteklenen majör sürüm 24",
   source: "os-release+procfs+systemctl",
   collected_at: "2026-11-01T10:00:00Z",
 };
@@ -303,5 +307,77 @@ describe("NodeDetail (Faz 05 — Windows SCM ailesi)", () => {
     const body = JSON.parse(String((init as RequestInit).body));
     expect(body.operation).toBe("windows.eventlog.read");
     expect(body.payload).toEqual({ channel: "System", level: 0, count: 50 });
+  });
+});
+
+describe("NodeDetail (Faz 06: dağıtım işlemleri)", () => {
+  it("destek rozetini, aileyi ve dağıtım işlemleri bölümünü linux node'da gösterir", async () => {
+    mockFetch.mockImplementation(
+      routeJson({
+        [`/api/v1/nodes/${node.id}/facts/system`]: facts,
+        [`/api/v1/nodes/${node.id}/metrics/latest`]: metrics,
+        [`/api/v1/nodes/${node.id}/capabilities`]: capabilities,
+        "/api/v1/tasks": { tasks: [] },
+      }),
+    );
+    render(
+      <LocaleProvider>
+        <NodeDetail node={node} onBack={() => {}} />
+      </LocaleProvider>,
+    );
+    await waitFor(() => {
+      expect(screen.getByText("Ubuntu 24.04.3 LTS")).toBeInTheDocument();
+    });
+    // Destek durumu + gerekçe + aile.
+    expect(screen.getByText("Destekleniyor")).toBeInTheDocument();
+    expect(screen.getByText(/desteklenen majör sürüm 24/)).toBeInTheDocument();
+    expect(screen.getByText("deb")).toBeInTheDocument();
+    // Faz 06 bölümü linux node'da görünür; paket limiti 500 üstü reddedilir.
+    expect(screen.getByText(/Dağıtım işlemleri/)).toBeInTheDocument();
+    const user = userEvent.setup();
+    const limitInput = screen.getByLabelText(/Paket limiti/);
+    await user.clear(limitInput);
+    await user.type(limitInput, "501");
+    await user.click(screen.getByRole("button", { name: "Paket listesi görevi" }));
+    expect(await screen.findByText(/Limit 1-500 arasında olmalı/)).toBeInTheDocument();
+    expect(mockFetch).not.toHaveBeenCalledWith("/api/v1/tasks", expect.objectContaining({ method: "POST" }));
+  });
+
+  it("geçersiz firewall bölgesini istemcide reddeder, geçerli önizlemeyi payload ile oluşturur", async () => {
+    mockFetch.mockImplementation(
+      routeJson({
+        [`/api/v1/nodes/${node.id}/facts/system`]: facts,
+        [`/api/v1/nodes/${node.id}/metrics/latest`]: metrics,
+        [`/api/v1/nodes/${node.id}/capabilities`]: capabilities,
+        "/api/v1/tasks": { tasks: [] },
+      }),
+    );
+    const user = userEvent.setup();
+    render(
+      <LocaleProvider>
+        <NodeDetail node={node} onBack={() => {}} />
+      </LocaleProvider>,
+    );
+    await waitFor(() => {
+      expect(screen.getByText(/Dağıtım işlemleri/)).toBeInTheDocument();
+    });
+    // Geçersiz bölge (noktalı virgül) → istemci reddi, istek gitmez.
+    await user.type(screen.getByPlaceholderText("public"), "bad;zone");
+    await user.click(screen.getByRole("button", { name: "Kural önizlemesi (çalıştırmaz)" }));
+    expect(await screen.findByText(/Bölge adı/)).toBeInTheDocument();
+    expect(mockFetch).not.toHaveBeenCalledWith("/api/v1/tasks", expect.objectContaining({ method: "POST" }));
+
+    // Geçerli bölge → {zone, port, protocol, action} payload'ıyla görev.
+    await user.clear(screen.getByPlaceholderText("public"));
+    await user.type(screen.getByPlaceholderText("public"), "public");
+    await user.click(screen.getByRole("button", { name: "Kural önizlemesi (çalıştırmaz)" }));
+    await waitFor(() => {
+      const call = mockFetch.mock.calls.find(([p]) => String(p) === "/api/v1/tasks");
+      expect(call).toBeTruthy();
+    });
+    const [, init] = mockFetch.mock.calls.find(([p]) => String(p) === "/api/v1/tasks")!;
+    const body = JSON.parse(String((init as RequestInit).body));
+    expect(body.operation).toBe("linux.firewall.rule.preview");
+    expect(body.payload).toEqual({ zone: "public", port: 8080, protocol: "tcp", action: "allow" });
   });
 });

@@ -264,17 +264,17 @@ func TestExecutorTimeoutMapsToTimeoutCategory(t *testing.T) {
 }
 
 func TestValidateRequestDirectly(t *testing.T) {
-	if _, _, err := validateRequest(&Request{V: 2, Operation: OpServiceList}); err == nil {
+	if _, _, _, err := validateRequest(&Request{V: 2, Operation: OpServiceList}); err == nil {
 		t.Fatalf("yanlış sürüm reddedilmeli")
 	}
-	unit, limit, err := validateRequest(&Request{V: ProtocolV1, Operation: OpServiceList})
+	unit, limit, _, err := validateRequest(&Request{V: ProtocolV1, Operation: OpServiceList})
 	if err != nil || limit != 200 || unit != "" {
 		t.Fatalf("list varsayılan limit 200: %v %d %v", err, limit, unit)
 	}
-	if _, _, err = validateRequest(&Request{V: ProtocolV1, Operation: OpServiceList, Params: []byte(`{"limit":501}`)}); err == nil {
+	if _, _, _, err = validateRequest(&Request{V: ProtocolV1, Operation: OpServiceList, Params: []byte(`{"limit":501}`)}); err == nil {
 		t.Fatalf("limit 501 reddedilmeli")
 	}
-	if _, _, err = validateRequest(nil); err == nil {
+	if _, _, _, err = validateRequest(nil); err == nil {
 		t.Fatalf("nil istek reddedilmeli")
 	}
 }

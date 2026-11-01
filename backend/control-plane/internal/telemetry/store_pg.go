@@ -21,8 +21,9 @@ func NewPGStore(pool *pgxpool.Pool) *PGStore { return &PGStore{pool: pool} }
 const factsUpsert = `
 INSERT INTO node_system_facts (node_id, os_id, os_version_id, os_pretty_name, os_home_url,
                                kernel_release, arch, systemd_version, package_manager,
-                               systemd_available, source, collected_at, updated_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, now())
+                               systemd_available, distro_family, distro_like, support_state,
+                               support_reason, source, collected_at, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, now())
 ON CONFLICT (node_id) DO UPDATE SET
     os_id = EXCLUDED.os_id,
     os_version_id = EXCLUDED.os_version_id,
@@ -33,6 +34,10 @@ ON CONFLICT (node_id) DO UPDATE SET
     systemd_version = EXCLUDED.systemd_version,
     package_manager = EXCLUDED.package_manager,
     systemd_available = EXCLUDED.systemd_available,
+    distro_family = EXCLUDED.distro_family,
+    distro_like = EXCLUDED.distro_like,
+    support_state = EXCLUDED.support_state,
+    support_reason = EXCLUDED.support_reason,
     source = EXCLUDED.source,
     collected_at = EXCLUDED.collected_at,
     updated_at = now()`
@@ -42,7 +47,8 @@ func (s *PGStore) UpsertFacts(ctx context.Context, f *SystemFacts) error {
 	_, err := s.pool.Exec(ctx, factsUpsert,
 		f.NodeID, f.OSID, f.OSVersionID, f.OSPrettyName, f.OSHomeURL,
 		f.KernelRelease, f.Arch, f.SystemdVersion, f.PackageManager,
-		f.SystemdAvailable, f.Source, f.CollectedAt)
+		f.SystemdAvailable, f.DistroFamily, f.DistroLike, f.SupportState,
+		f.SupportReason, f.Source, f.CollectedAt)
 	if err != nil {
 		return fmt.Errorf("telemetry facts upsert: %w", err)
 	}
@@ -51,7 +57,8 @@ func (s *PGStore) UpsertFacts(ctx context.Context, f *SystemFacts) error {
 
 const factsSelect = `
 SELECT node_id, os_id, os_version_id, os_pretty_name, os_home_url, kernel_release,
-       arch, systemd_version, package_manager, systemd_available, source, collected_at
+       arch, systemd_version, package_manager, systemd_available,
+       distro_family, distro_like, support_state, support_reason, source, collected_at
 FROM node_system_facts WHERE node_id = $1`
 
 // GetFacts returns the stored facts; ErrNotFound when absent.
@@ -60,7 +67,8 @@ func (s *PGStore) GetFacts(ctx context.Context, nodeID string) (*SystemFacts, er
 	err := s.pool.QueryRow(ctx, factsSelect, nodeID).Scan(
 		&f.NodeID, &f.OSID, &f.OSVersionID, &f.OSPrettyName, &f.OSHomeURL,
 		&f.KernelRelease, &f.Arch, &f.SystemdVersion, &f.PackageManager,
-		&f.SystemdAvailable, &f.Source, &f.CollectedAt)
+		&f.SystemdAvailable, &f.DistroFamily, &f.DistroLike, &f.SupportState,
+		&f.SupportReason, &f.Source, &f.CollectedAt)
 	if err == pgx.ErrNoRows {
 		return nil, ErrNotFound
 	}

@@ -92,6 +92,10 @@ type SystemFacts struct {
 	SystemdVersion   string    `json:"systemd_version"`
 	PackageManager   string    `json:"package_manager"`
 	SystemdAvailable bool      `json:"systemd_available"`
+	DistroFamily     string    `json:"distro_family"`  // Faz 06
+	DistroLike       string    `json:"distro_like"`    // Faz 06
+	SupportState     string    `json:"support_state"`  // Faz 06: supported|untested|unknown
+	SupportReason    string    `json:"support_reason"` // Faz 06
 	Source           string    `json:"source"`
 	CollectedAt      time.Time `json:"collected_at"`
 }
@@ -154,6 +158,10 @@ func (svc *Service) UpsertFacts(ctx context.Context, f *SystemFacts) error {
 	f.Arch = bound(f.Arch, 32)
 	f.SystemdVersion = bound(f.SystemdVersion, 32)
 	f.PackageManager = bound(f.PackageManager, 32)
+	f.DistroFamily = bound(f.DistroFamily, 32)
+	f.DistroLike = bound(f.DistroLike, 128)
+	f.SupportState = bound(f.SupportState, 16)
+	f.SupportReason = bound(f.SupportReason, 256)
 	f.Source = bound(f.Source, 128)
 	if f.CollectedAt.IsZero() {
 		f.CollectedAt = time.Now().UTC()

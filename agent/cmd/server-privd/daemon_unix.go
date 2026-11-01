@@ -17,6 +17,8 @@ import (
 	"syscall"
 
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/broker"
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/fwops"
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/pkgops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/svcops"
 )
 
@@ -70,6 +72,8 @@ func run(logger *slog.Logger, cfg daemonConfig) error {
 		MaxConcurrent: cfg.maxConc,
 		ExecTimeout:   timeoutDuration(cfg.timeout),
 		Systemd:       &svcops.Manager{},
+		Pkg:           &pkgops.Runner{}, // Faz 06: salt-okuma paket envanteri
+		Firewall:      &fwops.Runner{},  // Faz 06: firewall tespit + salt-okuma liste
 		Audit:         sink,
 		Logger:        logger,
 	})

@@ -18,6 +18,8 @@ import (
 	"fmt"
 	"regexp"
 
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/fwops"
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/pkgops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/winops"
 )
 
@@ -33,6 +35,12 @@ const (
 	OpServiceStart   = "linux.systemd.service.start"
 	OpServiceStop    = "linux.systemd.service.stop"
 	OpServiceRestart = "linux.systemd.service.restart"
+
+	// Faz 06: read-only package inventory + firewall survey/preview.
+	OpLinuxPkgList             = pkgops.OpLinuxPkgList
+	OpLinuxFirewallStatus      = fwops.OpLinuxFirewallStatus
+	OpLinuxFirewallRulesList   = fwops.OpLinuxFirewallRulesList
+	OpLinuxFirewallRulePreview = fwops.OpLinuxFirewallRulePreview
 
 	OpWinServiceList    = winops.OpWinServiceList
 	OpWinServiceStatus  = winops.OpWinServiceStatus
@@ -102,49 +110,67 @@ type ListParams struct {
 const maxRequestBytes = 16 << 10
 
 // validateRequest enforces the allowlist + payload schema for one request.
-// It returns (unit, listLimit) and an error with a stable category.
-func validateRequest(req *Request) (target string, listLimit int, err error) {
+// It returns (target, listLimit, preview) and an error with a stable category.
+func validateRequest(req *Request) (target string, listLimit int, preview fwops.PreviewParams, err error) {
 	if req == nil {
-		return "", 0, reject(CatInvalidRequest, "boş istek")
+		return "", 0, fwops.PreviewParams{}, reject(CatInvalidRequest, "boş istek")
 	}
 	if req.V != ProtocolV1 {
-		return "", 0, reject(CatInvalidRequest, "desteklenmeyen protokol sürümü")
+		return "", 0, fwops.PreviewParams{}, reject(CatInvalidRequest, "desteklenmeyen protokol sürümü")
 	}
 	switch req.Operation {
 	case OpServiceStatus, OpServiceStart, OpServiceStop, OpServiceRestart:
 		var p UnitParams
 		if err := strictDecode(req.Params, &p); err != nil {
-			return "", 0, reject(CatInvalidParams, "unit şeması uyumsuz")
+			return "", 0, fwops.PreviewParams{}, reject(CatInvalidParams, "unit şeması uyumsuz")
 		}
 		if err := winops.ValidateLinuxUnit(p.Unit); err != nil {
-			return "", 0, reject(CatInvalidParams, err.Error())
+			return "", 0, fwops.PreviewParams{}, reject(CatInvalidParams, err.Error())
 		}
-		return p.Unit, 0, nil
+		return p.Unit, 0, fwops.PreviewParams{}, nil
 	case OpWinServiceStatus, OpWinServiceStart, OpWinServiceStop, OpWinServiceRestart:
 		var p ServiceParams
 		if err := strictDecode(req.Params, &p); err != nil {
-			return "", 0, reject(CatInvalidParams, "service şeması uyumsuz")
+			return "", 0, fwops.PreviewParams{}, reject(CatInvalidParams, "service şeması uyumsuz")
 		}
 		if err := winops.ValidateServiceName(p.Service); err != nil {
-			return "", 0, reject(CatInvalidParams, err.Error())
+			return "", 0, fwops.PreviewParams{}, reject(CatInvalidParams, err.Error())
 		}
-		return p.Service, 0, nil
-	case OpServiceList, OpWinServiceList:
+		return p.Service, 0, fwops.PreviewParams{}, nil
+	case OpServiceList, OpWinServiceList, OpLinuxPkgList, OpLinuxFirewallRulesList:
 		var p ListParams
 		if len(req.Params) == 0 {
 			req.Params = []byte("{}")
 		}
 		if err := strictDecode(req.Params, &p); err != nil || p.Limit < 0 || p.Limit > 500 {
-			return "", 0, reject(CatInvalidParams, "list şeması uyumsuz")
+			return "", 0, fwops.PreviewParams{}, reject(CatInvalidParams, "list şeması uyumsuz")
 		}
 		if p.Limit == 0 {
 			p.Limit = 200
 		}
-		return "", p.Limit, nil
+		return "", p.Limit, fwops.PreviewParams{}, nil
+	case OpLinuxFirewallStatus:
+		var p struct{}
+		if len(req.Params) == 0 {
+			req.Params = []byte("{}")
+		}
+		if err := strictDecode(req.Params, &p); err != nil {
+			return "", 0, fwops.PreviewParams{}, reject(CatInvalidParams, "status şeması uyumsuz (boş obje beklenir)")
+		}
+		return "", 0, fwops.PreviewParams{}, nil
+	case OpLinuxFirewallRulePreview:
+		var p fwops.PreviewParams
+		if err := strictDecode(req.Params, &p); err != nil {
+			return "", 0, fwops.PreviewParams{}, reject(CatInvalidParams, "preview şeması uyumsuz")
+		}
+		if err := fwops.ValidatePreviewParams(p); err != nil {
+			return "", 0, fwops.PreviewParams{}, reject(CatInvalidParams, err.Error())
+		}
+		return "", 0, p, nil
 	case "":
-		return "", 0, reject(CatInvalidRequest, "operasyon boş")
+		return "", 0, fwops.PreviewParams{}, reject(CatInvalidRequest, "operasyon boş")
 	default:
-		return "", 0, reject(CatUnsupportedOp, "operasyon allowlist dışı")
+		return "", 0, fwops.PreviewParams{}, reject(CatUnsupportedOp, "operasyon allowlist dışı")
 	}
 }
 

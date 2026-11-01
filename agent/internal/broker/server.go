@@ -174,7 +174,7 @@ func (s *Server) handleCreds(conn net.Conn, ident PeerIdentity) {
 	entry.RequestID = sanitizeID(req.RequestID)
 	entry.CorrelationID = sanitizeID(req.CorrID)
 
-	unit, listLimit, verr := validateRequest(&req)
+	unit, listLimit, preview, verr := validateRequest(&req)
 	if verr != nil {
 		res := &Response{V: ProtocolV1, Operation: req.Operation, RequestID: sanitizeID(req.RequestID),
 			Status: StatusRejected, ErrorCategory: Category(verr), Output: verr.Error()}
@@ -182,7 +182,7 @@ func (s *Server) handleCreds(conn net.Conn, ident PeerIdentity) {
 		return
 	}
 	entry.Target = unit
-	res := s.execute(&req, unit, listLimit)
+	res := s.execute(&req, unit, listLimit, preview)
 	res.V = ProtocolV1
 	res.Operation = req.Operation
 	res.RequestID = sanitizeID(req.RequestID)

@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const shotDir = path.resolve(here, "../../docs/reviews/screenshots/phase-02");
+const realBackend = process.env.E2E_REAL === "1";
 
 const ADMIN = "admin";
 const PASSWORD = "guclu-parola-12345";
@@ -39,6 +40,11 @@ test("giriş sayfası ve oturum açma akışı", async ({ page }) => {
 });
 
 test("sunucu oluşturma ve listeleme", async ({ page }) => {
+  // Açık önkoşul: boş node listesi. Spec sırasından bağımsız olması için
+  // mock durumunu sıfırla (yalnız MOCK modda; gerçek modda sıfırlama yok).
+  if (!realBackend) {
+    await page.request.post("/e2e/reset");
+  }
   await login(page);
   await page.getByRole("button", { name: /Sunucular/ }).click();
 

@@ -30,6 +30,12 @@ const (
 	// Faz 05: Windows Event Log okuma (yalnız allowlist'li kanallar;
 	// Security kanalı tasarımdan hariçtir — ADR-0009).
 	PermEventlogRead = "eventlog:read"
+
+	// Faz 06: Linux dağıtım adaptörleri — paket envanteri ve firewall
+	// sörveyi/önizlemesi. Her ikisi salt-okuma risk sınıfıdır; kural
+	// değişikliği yüzeyi bu fazda YOKTUR (ADR-0010).
+	PermPkgRead      = "pkg:read"
+	PermFirewallRead = "firewall:read"
 )
 
 // AllPermissions lists the seeded catalog in one place.
@@ -40,6 +46,7 @@ var AllPermissions = []string{
 	PermAuditRead,
 	PermServiceRead, PermServiceControl,
 	PermEventlogRead,
+	PermPkgRead, PermFirewallRead,
 }
 
 // Scope types.

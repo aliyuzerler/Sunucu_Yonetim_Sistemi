@@ -43,6 +43,22 @@ const ALL_SERVICE_OPS = [...LINUX_SERVICE_OPS, ...WINDOWS_SERVICE_OPS];
 
 type ServiceOp = (typeof ALL_SERVICE_OPS)[number];
 
+// Faz 06: salt-okuma dağıtım işlemleri (paket envanteri + firewall sörveyi
+// ve önizleme). Önizleme hiçbir komut çalıştırmaz (ADR-0010); UI'da da
+// açıkça etiketlenir.
+const SURVEY_OPS = [
+  "linux.pkg.list",
+  "linux.firewall.status",
+  "linux.firewall.rules.list",
+  "linux.firewall.rule.preview",
+] as const;
+type SurveyOp = (typeof SURVEY_OPS)[number];
+
+// FW_ZONE_PATTERN mirrors agent/internal/fwops + backend validator.
+const FW_ZONE_PATTERN = /^[A-Za-z0-9_.-]{0,32}$/;
+const FW_ACTIONS = ["allow", "revoke"] as const;
+type FwAction = (typeof FW_ACTIONS)[number];
+
 // EVENTLOG_CHANNELS: kapalı enum — Security kanalı tasarımdan hariçtir
 // (ADR-0009); gerçek kural sunucu + agent tarafında zorlanır.
 const EVENTLOG_CHANNELS = ["Application", "System", "Setup"] as const;
@@ -93,6 +109,15 @@ export function NodeDetail({ node, onBack }: { node: NodeRecord; onBack: () => v
   const [evCount, setEvCount] = useState(50);
   const [evError, setEvError] = useState<string | null>(null);
   const [evPending, setEvPending] = useState(false);
+  // Faz 06: dağıtım işlemleri (yalnız linux node'larında görünür).
+  const [pkgLimit, setPkgLimit] = useState(200);
+  const [pkgError, setPkgError] = useState<string | null>(null);
+  const [fwPending, setFwPending] = useState<string | null>(null);
+  const [fwZone, setFwZone] = useState("");
+  const [fwPort, setFwPort] = useState(8080);
+  const [fwProto, setFwProto] = useState<"tcp" | "udp">("tcp");
+  const [fwAction, setFwAction] = useState<FwAction>("allow");
+  const [fwError, setFwError] = useState<string | null>(null);
 
   const reload = useCallback(() => setReloadKey((k) => k + 1), []);
 
@@ -130,7 +155,7 @@ export function NodeDetail({ node, onBack }: { node: NodeRecord; onBack: () => v
           `/api/v1/tasks?node_id=${encodeURIComponent(node.id)}&limit=20`,
         );
         if (cancelled) return;
-        setTasks(page.tasks.filter((x) => (ALL_SERVICE_OPS as readonly string[]).includes(x.operation)).slice(0, 10));
+        setTasks(page.tasks.filter((x) => (ALL_SERVICE_OPS as readonly string[]).includes(x.operation) || (SURVEY_OPS as readonly string[]).includes(x.operation)).slice(0, 10));
       } catch {
         // Görev listesi isteğe bağlıdır; hata görünümü bozmaz.
       }
@@ -223,6 +248,63 @@ export function NodeDetail({ node, onBack }: { node: NodeRecord; onBack: () => v
     }
   }
 
+  // Faz 06: salt-okuma dağıtım işlemleri (paket listesi + firewall
+  // sörveyi + kural önizlemesi — önizleme asla çalıştırmaz, ADR-0010).
+  type SurveyErrorKey = "nodedetail.survey.limitInvalid" | "nodedetail.survey.zoneInvalid" | "nodedetail.survey.portInvalid";
+  async function submitSurveyOp(op: SurveyOp, payload: Record<string, unknown>, errorKey: SurveyErrorKey | null, setError: (v: string | null) => void, setPending: (v: string | null) => void) {
+    if (errorKey) {
+      setError(t(errorKey));
+      return;
+    }
+    setError(null);
+    setPending(op);
+    try {
+      const created = await apiFetch<TaskRecord>("/api/v1/tasks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ operation: op, node_id: node.id, payload }),
+      });
+      setLastTaskId(created.id);
+      setPending(null);
+      reload();
+    } catch (err) {
+      setPending(null);
+      setError(isApiError(err) ? err.message : t("common.error.generic"));
+    }
+  }
+
+  function submitPkgList() {
+    const limit = pkgLimit || 200;
+    if (limit < 1 || limit > 500) {
+      void submitSurveyOp("linux.pkg.list", {}, "nodedetail.survey.limitInvalid", setPkgError, setFwPending);
+      return;
+    }
+    void submitSurveyOp("linux.pkg.list", { limit }, null, setPkgError, setFwPending);
+  }
+
+  function submitFirewall(op: "linux.firewall.status" | "linux.firewall.rules.list" | "linux.firewall.rule.preview") {
+    if (op === "linux.firewall.rule.preview") {
+      const zone = fwZone.trim();
+      if (!FW_ZONE_PATTERN.test(zone)) {
+        void submitSurveyOp(op, {}, "nodedetail.survey.zoneInvalid", setFwError, setFwPending);
+        return;
+      }
+      const port = fwPort;
+      if (!Number.isInteger(port) || port < 1 || port > 65535) {
+        void submitSurveyOp(op, {}, "nodedetail.survey.portInvalid", setFwError, setFwPending);
+        return;
+      }
+      void submitSurveyOp(op, { zone, port, protocol: fwProto, action: fwAction }, null, setFwError, setFwPending);
+      return;
+    }
+    const limit = pkgLimit || 200;
+    if (limit < 1 || limit > 500) {
+      void submitSurveyOp(op, {}, "nodedetail.survey.limitInvalid", setFwError, setFwPending);
+      return;
+    }
+    void submitSurveyOp(op, { limit }, null, setFwError, setFwPending);
+  }
+
   const taskBadge: Record<TaskRecord["status"], BadgeVariant> = {
     queued: "info",
     dispatched: "info",
@@ -281,6 +363,12 @@ export function NodeDetail({ node, onBack }: { node: NodeRecord; onBack: () => v
               value={facts.systemd_available ? facts.systemd_version || "✓" : t("nodedetail.facts.systemdNo")}
             />
             <Fact label={t("nodedetail.facts.pkgManager")} value={facts.package_manager || "—"} />
+            <Fact label={t("nodedetail.facts.distroFamily")} value={facts.distro_family || "—"} />
+            <Fact
+              label={t("nodedetail.facts.support")}
+              value={supportStateLabel(facts.support_state, t)}
+              hint={facts.support_reason ? facts.support_reason : undefined}
+            />
             <Fact label={t("nodedetail.facts.source")} value={facts.source || "—"} />
             <Fact label={t("nodedetail.facts.collectedAt")} value={new Date(facts.collected_at).toLocaleString(locale === "tr" ? "tr-TR" : "en-US")} />
           </dl>
@@ -482,6 +570,139 @@ export function NodeDetail({ node, onBack }: { node: NodeRecord; onBack: () => v
         )}
       </section>
 
+      {/* Faz 06: salt-okuma dağıtım işlemleri (yalnız linux node'ları) */}
+      {!isWindows && (
+        <section aria-label={t("nodedetail.survey.title")} className="rounded-xl border border-border bg-panel p-4 shadow-sm">
+          <h3 className="text-sm font-semibold text-ink">{t("nodedetail.survey.title")}</h3>
+          <p className="mt-1 text-[11px] text-ink-soft">{t("nodedetail.survey.note")}</p>
+
+          {/* Paket envanteri */}
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              submitPkgList();
+            }}
+            className="mt-3 flex flex-wrap items-end gap-2"
+          >
+            <label className="flex flex-col gap-1">
+              <span className="text-xs font-medium text-ink">{t("nodedetail.survey.pkgLimit")}</span>
+              <input
+                type="number"
+                value={pkgLimit}
+                onChange={(e) => {
+                  setPkgLimit(Number(e.target.value));
+                  setPkgError(null);
+                }}
+                className="w-24 rounded-lg border border-border bg-surface px-3 py-1.5 text-sm text-ink focus-visible:outline-2 focus-visible:outline-accent"
+              />
+            </label>
+            <button
+              type="submit"
+              disabled={fwPending !== null}
+              className="rounded-lg border border-border bg-surface px-3 py-1.5 text-xs font-medium text-ink hover:bg-neutral-soft disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-accent"
+            >
+              {t("nodedetail.survey.pkgList")}
+            </button>
+          </form>
+          {pkgError && (
+            <p role="alert" className="mt-2 text-xs text-err">
+              {pkgError}
+            </p>
+          )}
+
+          {/* Firewall sörveyi + kural önizlemesi */}
+          <div className="mt-4 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => submitFirewall("linux.firewall.status")}
+              disabled={fwPending !== null}
+              className="rounded-lg border border-border bg-surface px-3 py-1.5 text-xs font-medium text-ink hover:bg-neutral-soft disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-accent"
+            >
+              {t("nodedetail.survey.fwStatus")}
+            </button>
+            <button
+              type="button"
+              onClick={() => submitFirewall("linux.firewall.rules.list")}
+              disabled={fwPending !== null}
+              className="rounded-lg border border-border bg-surface px-3 py-1.5 text-xs font-medium text-ink hover:bg-neutral-soft disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-accent"
+            >
+              {t("nodedetail.survey.fwRules")}
+            </button>
+          </div>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              submitFirewall("linux.firewall.rule.preview");
+            }}
+            className="mt-3 flex flex-wrap items-end gap-2"
+          >
+            <label className="flex flex-col gap-1">
+              <span className="text-xs font-medium text-ink">{t("nodedetail.survey.fwZone")}</span>
+              <input
+                value={fwZone}
+                onChange={(e) => {
+                  setFwZone(e.target.value);
+                  setFwError(null);
+                }}
+                placeholder="public"
+                aria-invalid={fwError !== null}
+                className="w-32 rounded-lg border border-border bg-surface px-3 py-1.5 text-sm text-ink focus-visible:outline-2 focus-visible:outline-accent"
+              />
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-xs font-medium text-ink">{t("nodedetail.survey.fwPort")}</span>
+              <input
+                type="number"
+                value={fwPort}
+                onChange={(e) => {
+                  setFwPort(Number(e.target.value));
+                  setFwError(null);
+                }}
+                className="w-24 rounded-lg border border-border bg-surface px-3 py-1.5 text-sm text-ink focus-visible:outline-2 focus-visible:outline-accent"
+              />
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-xs font-medium text-ink">{t("nodedetail.survey.fwProto")}</span>
+              <select
+                value={fwProto}
+                onChange={(e) => setFwProto(e.target.value as "tcp" | "udp")}
+                className="rounded-lg border border-border bg-surface px-3 py-1.5 text-sm text-ink focus-visible:outline-2 focus-visible:outline-accent"
+              >
+                <option value="tcp">tcp</option>
+                <option value="udp">udp</option>
+              </select>
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-xs font-medium text-ink">{t("nodedetail.survey.fwAction")}</span>
+              <select
+                value={fwAction}
+                onChange={(e) => setFwAction(e.target.value as FwAction)}
+                className="rounded-lg border border-border bg-surface px-3 py-1.5 text-sm text-ink focus-visible:outline-2 focus-visible:outline-accent"
+              >
+                {FW_ACTIONS.map((a) => (
+                  <option key={a} value={a}>
+                    {a}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              type="submit"
+              disabled={fwPending !== null}
+              className="rounded-lg border border-warn/40 bg-warn-soft px-3 py-1.5 text-xs font-medium text-warn hover:bg-warn/20 disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-accent"
+            >
+              {t("nodedetail.survey.fwPreview")}
+            </button>
+          </form>
+          <p className="mt-2 text-[11px] text-ink-soft">{t("nodedetail.survey.previewNote")}</p>
+          {fwError && (
+            <p role="alert" className="mt-2 text-xs text-err">
+              {fwError}
+            </p>
+          )}
+        </section>
+      )}
+
       {/* Faz 05: Windows Event Log okuma (yalnız windows node'ları) */}
       {isWindows && (
         <section aria-label={t("nodedetail.eventlog.title")} className="rounded-xl border border-border bg-panel p-4 shadow-sm">
@@ -556,11 +777,21 @@ export function NodeDetail({ node, onBack }: { node: NodeRecord; onBack: () => v
   );
 }
 
-function Fact({ label, value }: { label: string; value: string }) {
+// supportStateLabel maps the agent-reported state to a closed i18n key
+// (unknown values fall back to the unknown label — never a false claim).
+function supportStateLabel(state: string, t: ReturnType<typeof useI18n>["t"]): string {
+  if (state === "supported") return t("nodedetail.facts.support.supported");
+  if (state === "untested") return t("nodedetail.facts.support.untested");
+  if (state === "") return "—";
+  return t("nodedetail.facts.support.unknown");
+}
+
+function Fact({ label, value, hint }: { label: string; value: string; hint?: string | undefined }) {
   return (
     <div>
       <dt className="text-[10px] uppercase tracking-wide text-ink-soft">{label}</dt>
-      <dd className="truncate text-ink" title={value}>{value}</dd>
+      <dd className="truncate text-ink" title={hint ? `${value} — ${hint}` : value}>{value}</dd>
+      {hint && <dd className="truncate text-[10px] text-ink-soft" title={hint}>{hint}</dd>}
     </div>
   );
 }

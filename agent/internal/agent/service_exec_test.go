@@ -107,8 +107,9 @@ func TestCapabilityProbing(t *testing.T) {
 	}
 	env := capabilityEnvelope(context.Background(), "node-1", reg)
 	caps := env.GetCapabilityReport().GetCapabilities()
-	if len(caps) != 6 {
-		t.Fatalf("6 capability: %d", len(caps))
+	// Faz 06: echo + 5 systemd + pkg.list + 3 firewall = 10.
+	if len(caps) != 10 {
+		t.Fatalf("10 capability: %d", len(caps))
 	}
 	for _, c := range caps {
 		if !c.GetAvailable() {
