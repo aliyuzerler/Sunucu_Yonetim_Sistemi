@@ -211,10 +211,10 @@ func TestRegistryValidation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("varsayılan kayıt defteri: %v", err)
 	}
-	// Faz 04+05+06: echo/noop/tag + 5 systemd + 5 SCM + eventlog
-	// + pkg.list + 3 firewall = 18.
-	if len(reg.Names()) != 18 {
-		t.Fatalf("18 operasyon bekleniyordu: %v", reg.Names())
+	// Faz 04+05+06+07: echo/noop/tag + 5 systemd + 5 SCM + eventlog
+	// + pkg.list + 3 firewall + 15 docker/compose = 33.
+	if len(reg.Names()) != 33 {
+		t.Fatalf("33 operasyon bekleniyordu: %v", reg.Names())
 	}
 	// Faz 05: Windows ailesi RBAC katmanı — SCM okuma service:read,
 	// SCM kontrol service:control, eventlog eventlog:read.

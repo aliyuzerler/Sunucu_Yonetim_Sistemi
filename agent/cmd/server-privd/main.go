@@ -53,10 +53,11 @@ type daemonConfig struct {
 
 // platformFlags carries the per-OS flag values (daemon_unix/daemon_windows).
 var platformFlags struct {
-	endpoint string
-	identity string // --allow-uid (unix) / --allow-sid (windows)
-	group    string // unix only
-	sddl     string // windows only
+	endpoint     string
+	identity     string // --allow-uid (unix) / --allow-sid (windows)
+	group        string // unix only
+	sddl         string // windows only
+	dockerSocket string // unix only (Faz 07)
 }
 
 func auditSinkOrDie(logger *slog.Logger, path string) (*broker.JSONLSink, error) {

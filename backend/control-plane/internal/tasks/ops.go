@@ -319,6 +319,9 @@ func BuildDefaultRegistry(tagSetter TagSetter) (*Registry, error) {
 	// Faz 06: Linux dağıtım adaptörleri (paket envanteri + firewall
 	// sörvey/önizleme) ayrı dosyada: ops_faz06.go.
 	specs = append(specs, buildFaz06Registry()...)
+	// Faz 07: Docker Engine + Compose yönetimi ayrı dosyada: ops_faz07.go
+	// (remove ailesi preview-only — ADR-0011).
+	specs = append(specs, buildFaz07Registry()...)
 	return NewRegistry(specs...)
 }
 

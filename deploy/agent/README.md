@@ -17,6 +17,12 @@ Güvenlik modeli (docs/architecture/agent-architecture.md, ADR-0003):
   `^[A-Za-z0-9][A-Za-z0-9@._-]{0,246}\.service$` allowlist'i ile doğrulanır.
 - Her broker isteği (reddedilenler dahil) `/var/log/server-control/privd-audit.jsonl`
   dosyasına (0600) JSONL olarak yazılır.
+- Faz 07 (opsiyonel): `server-privd --docker-socket /var/run/docker.sock` ile
+  Docker Engine ailesi açılır. Daemon soketine erişim yalnız bu broker'dadır
+  (unix; TCP yok — ADR-0011). remove/compose.deploy işlemleri PREVIEW-ONLY'dir:
+  hiçbir silme/deploy yürütülmez, yalnız Engine çağrısı metin olarak döner.
+  Bayrak boş geçilirse docker ailesi kapalıdır (operasyonlar
+  `unsupported_operation` döner, kabiliyet beyan edilmez).
 
 ## Kurulum adımları (disposable VM'de doğrulayın)
 

@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/broker"
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/composeops"
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/dockerx"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/fwops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/winops"
 	agentv1 "github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/gen/proto/servercontrol/agent/v1"
@@ -409,6 +411,212 @@ func (s *SurveyExecutor) Execute(ctx context.Context, payload []byte) ([]byte, s
 		return nil, res.Output, fmt.Errorf("broker reddetti: %s", res.ErrorCategory)
 	default:
 		return nil, res.Output, fmt.Errorf("broker işlemi başarısız: %s", res.ErrorCategory)
+	}
+}
+
+// ---- Faz 07: Docker Engine + Compose executor'ları ----
+
+// DockerExecutor executes one docker.* operation by forwarding the typed
+// request to the local privileged broker. The Engine socket is ONLY reachable
+// from the broker (root, unix socket; ADR-0011) — the agent never dials it.
+// The remove family is preview-only end to end.
+type DockerExecutor struct {
+	op           string
+	brokerPath   string
+	dockerSocket string // probe only (never dialed by the agent)
+}
+
+// NewDockerExecutor builds one broker-backed docker executor.
+func NewDockerExecutor(op, brokerPath, dockerSocket string) *DockerExecutor {
+	return &DockerExecutor{op: op, brokerPath: brokerPath, dockerSocket: dockerSocket}
+}
+
+// Info describes the capability; availability refined by ProbeAvailable.
+func (d *DockerExecutor) Info() *agentv1.Capability {
+	return &agentv1.Capability{
+		CapabilityId:   d.op,
+		Version:        "1.0.0",
+		Available:      false,
+		AdapterId:      "docker-broker",
+		AdapterVersion: Version,
+	}
+}
+
+// ProbeAvailable: docker socket var mı (varlık kontrolü — agent sokete
+// BAĞLANMAZ) ve broker ayakta mı.
+func (d *DockerExecutor) ProbeAvailable(ctx context.Context) (bool, string) {
+	if st, err := os.Stat(d.dockerSocket); err != nil || st.IsDir() {
+		return false, "docker socket bulunamadı (" + d.dockerSocket + ")"
+	}
+	cli := broker.NewClient(d.brokerPath)
+	probeCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	if ok, reason := cli.Ping(probeCtx); !ok {
+		return false, reason
+	}
+	return true, ""
+}
+
+// dockerListPayload is the shared {limit} schema of the docker list family.
+type dockerListPayload struct {
+	Limit int `json:"limit,omitempty"`
+}
+
+// dockerLogsPayload mirrors the broker log schema (validated BOTH sides).
+type dockerLogsPayload struct {
+	Ref  string `json:"ref"`
+	Tail int    `json:"tail,omitempty"`
+}
+
+// dockerActionPayload mirrors the broker stop/restart schema.
+type dockerActionPayload struct {
+	Ref     string `json:"ref"`
+	Timeout int    `json:"timeout,omitempty"`
+}
+
+// Execute validates the payload, forwards the typed request to the broker.
+func (d *DockerExecutor) Execute(ctx context.Context, payload []byte) ([]byte, string, error) {
+	req := &broker.Request{Operation: d.op}
+	switch {
+	case d.op == broker.OpDockerContainerList || d.op == broker.OpDockerImageList ||
+		d.op == broker.OpDockerNetworkList || d.op == broker.OpDockerVolumeList:
+		var p dockerListPayload
+		if len(payload) > 0 {
+			if err := decodeStrict(payload, &p); err != nil {
+				return nil, "", err
+			}
+		}
+		limit := p.Limit
+		if limit == 0 {
+			limit = 200
+		}
+		if err := dockerx.ValidateLimit(limit); err != nil {
+			return nil, "", err
+		}
+		req.Params, _ = json.Marshal(broker.ListParams{Limit: limit})
+	case d.op == broker.OpDockerContainerLogs:
+		var p dockerLogsPayload
+		if err := decodeStrict(payload, &p); err != nil {
+			return nil, "", err
+		}
+		if p.Tail == 0 {
+			p.Tail = 100
+		}
+		if !dockerx.ValidRef(p.Ref) || p.Tail < 1 || p.Tail > 500 {
+			return nil, "", fmt.Errorf("ref/tail geçersiz")
+		}
+		req.Params, _ = json.Marshal(struct {
+			Ref  string `json:"ref"`
+			Tail int    `json:"tail"`
+		}{p.Ref, p.Tail})
+	case d.op == broker.OpDockerContainerStop || d.op == broker.OpDockerContainerRestart:
+		var p dockerActionPayload
+		if err := decodeStrict(payload, &p); err != nil {
+			return nil, "", err
+		}
+		if p.Timeout == 0 {
+			p.Timeout = 10
+		}
+		if !dockerx.ValidRef(p.Ref) || p.Timeout < 1 || p.Timeout > 120 {
+			return nil, "", fmt.Errorf("ref/timeout geçersiz")
+		}
+		req.Params, _ = json.Marshal(struct {
+			Ref     string `json:"ref"`
+			Timeout int    `json:"timeout"`
+		}{p.Ref, p.Timeout})
+	case d.op == broker.OpDockerImageRemove:
+		var p dockerx.RemoveParams
+		if err := decodeStrict(payload, &p); err != nil {
+			return nil, "", err
+		}
+		if !dockerx.ValidImageRef(p.Ref) {
+			return nil, "", fmt.Errorf("%w: %q", dockerx.ErrInvalidRef, p.Ref)
+		}
+		req.Params, _ = json.Marshal(p)
+	default:
+		// inspect/start/remove(container|volume|network): {ref} ailesi.
+		var p dockerx.RemoveParams
+		if err := decodeStrict(payload, &p); err != nil {
+			return nil, "", err
+		}
+		if !dockerx.ValidRef(p.Ref) {
+			return nil, "", fmt.Errorf("%w: %q", dockerx.ErrInvalidRef, p.Ref)
+		}
+		req.Params, _ = json.Marshal(p)
+	}
+	res, err := broker.NewClient(d.brokerPath).Call(ctx, req)
+	if err != nil {
+		return nil, "", fmt.Errorf("broker erişilemiyor: %w", err)
+	}
+	switch res.Status {
+	case broker.StatusSucceeded:
+		return res.Result, "broker işlemi tamamlandı", nil
+	case broker.StatusRejected:
+		return nil, res.Output, fmt.Errorf("broker reddetti: %s", res.ErrorCategory)
+	default:
+		return nil, res.Output, fmt.Errorf("broker işlemi başarısız: %s", res.ErrorCategory)
+	}
+}
+
+// ComposeExecutor runs the agent-LOCAL compose analysis (docker.compose.validate
+// / docker.compose.deploy). Pure analysis: no daemon, no broker, no execution;
+// the deploy op returns a plan with the Executed=false invariant (ADR-0011).
+type ComposeExecutor struct {
+	op string
+}
+
+// NewComposeExecutor builds one compose analysis executor.
+func NewComposeExecutor(op string) *ComposeExecutor {
+	return &ComposeExecutor{op: op}
+}
+
+// Info describes the capability (always available: pure analysis).
+func (c *ComposeExecutor) Info() *agentv1.Capability {
+	return &agentv1.Capability{
+		CapabilityId:   c.op,
+		Version:        "1.0.0",
+		Available:      false,
+		AdapterId:      "builtin-compose",
+		AdapterVersion: Version,
+	}
+}
+
+// ProbeAvailable: compose analizi saf işlevdir — her zaman kullanılabilir.
+func (c *ComposeExecutor) ProbeAvailable(context.Context) (bool, string) {
+	return true, ""
+}
+
+// composePayload is the agent-side mirror of the compose envelope.
+type composePayload struct {
+	Compose string `json:"compose"`
+}
+
+// Execute validates the envelope and runs the pure analysis.
+func (c *ComposeExecutor) Execute(_ context.Context, payload []byte) ([]byte, string, error) {
+	var p composePayload
+	if err := decodeStrict(payload, &p); err != nil {
+		return nil, "", err
+	}
+	if err := composeops.ValidatePayload(composeops.ComposePayload{Compose: p.Compose}); err != nil {
+		return nil, "", err
+	}
+	switch c.op {
+	case composeops.OpDockerComposeValidate:
+		rep := composeops.Validate(p.Compose)
+		b, err := json.Marshal(rep)
+		if err != nil {
+			return nil, "", err
+		}
+		return b, "compose analizi tamamlandı", nil
+	case composeops.OpDockerComposeDeploy:
+		plan := composeops.BuildDeployPlan(p.Compose)
+		b, err := json.Marshal(plan)
+		if err != nil {
+			return nil, "", err
+		}
+		return b, "compose planı üretildi (yürütülmedi — ADR-0011)", nil
+	default:
+		return nil, "", fmt.Errorf("compose executor izin dışı operasyon: %s", c.op)
 	}
 }
 

@@ -16,6 +16,7 @@ Doğrulama tarihi: **2026-11-01** (sürümler güncel stable çizgiler; kit taba
 | `golang.org/x/sys` | v0.48.0 | go.googlesource.com/sys | BSD-3-Clause | Faz 04: broker SO_PEERCRED (unix.GetsockoptUcred); Faz 05: Windows yüzeyi (svc/mgr SCM, registry, LazyProc Win32/iphlpapi/advapi32); Faz 06: yeni doğrudan bağımlılık YOK (pkgops/fwops stdlib exec + x/sys olmayan saf argv/parse) — doğrudan bağımlılık (önceden indirect'ti) |
 | `google.golang.org/grpc` | v1.85.0 | go.googlesource.com/grpc | Apache-2.0 | Agent transport (ADR-0008) |
 | `google.golang.org/protobuf` | v1.36.12 | go.googlesource.com/protobuf | BSD-3-Clause | Protobuf runtime |
+| `gopkg.in/yaml.v3` | v3.0.1 | github.com/go-yaml/yaml (gopkg.in yönlendirmesi) | MIT | Faz 07: compose dosyası ayrıştırma (agent-local saf analiz — composeops); girdi ≤64 KiB + services ≤64 + findings ≤100 sınırlı; yaml.v3 alias/billion-laughs koruması + bakımcı durumu: bakım modunda ama de-facto endüstri standardı, son güvenlik danışmanlığı işlendi (GO-2022-0603 düzeltmesi v3.0.1 içinde) |
 | `gen/proto` (üretim kodu) | pinli buf v1.75.0 + protoc-gen-go v1.36.12 + protoc-gen-go-grpc v1.6.1 | buf.build / go.googlesource.com | Apache-2.0 / BSD-3-Clause | `make proto-tools` ile Go proxy checksum'lu kurulum; üretim CI'da diff kapısıyla doğrulanır |
 | `github.com/jackc/pgx/v5` | v5.12.0 | github.com/jackc/pgx | MIT | PostgreSQL erişimi (pgxpool) |
 | `golang.org/x/text` | v0.41.0 | go.googlesource.com/text | BSD-3-Clause | pgx geçiş bağımlılığı |

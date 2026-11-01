@@ -17,6 +17,7 @@ import (
 	"syscall"
 
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/broker"
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/dockerx"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/fwops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/pkgops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/svcops"
@@ -25,6 +26,7 @@ import (
 const (
 	defaultEndpoint   = "/run/server-control/privd.sock"
 	defaultAuditPathV = "/var/log/server-control/privd-audit.jsonl"
+	defaultDockerSock = dockerx.DefaultSocket
 )
 
 func defaultAuditPath() string { return defaultAuditPathV }
@@ -34,6 +36,7 @@ func registerPlatformFlags() {
 	flag.StringVar(&platformFlags.endpoint, "socket", defaultEndpoint, "dinlenecek Unix socket yolu")
 	flag.StringVar(&platformFlags.identity, "allow-uid", "", "izinli UID listesi, virgüllerle (zorunlu)")
 	flag.StringVar(&platformFlags.group, "group", "server-agent", "socket grubu (agent kullanıcısının grubu)")
+	flag.StringVar(&platformFlags.dockerSocket, "docker-socket", defaultDockerSock, "Docker Engine unix soketi (boş = docker ailesi kapalı)")
 }
 
 func run(logger *slog.Logger, cfg daemonConfig) error {
@@ -72,8 +75,9 @@ func run(logger *slog.Logger, cfg daemonConfig) error {
 		MaxConcurrent: cfg.maxConc,
 		ExecTimeout:   timeoutDuration(cfg.timeout),
 		Systemd:       &svcops.Manager{},
-		Pkg:           &pkgops.Runner{}, // Faz 06: salt-okuma paket envanteri
-		Firewall:      &fwops.Runner{},  // Faz 06: firewall tespit + salt-okuma liste
+		Pkg:           &pkgops.Runner{},                               // Faz 06: salt-okuma paket envanteri
+		Firewall:      &fwops.Runner{},                                // Faz 06: firewall tespit + salt-okuma liste
+		Docker:        dockerRunnerOrZero(platformFlags.dockerSocket), // Faz 07: Engine API (unix soket; ADR-0011)
 		Audit:         sink,
 		Logger:        logger,
 	})
@@ -88,6 +92,15 @@ func run(logger *slog.Logger, cfg daemonConfig) error {
 	logger.Info("server-privd durdu")
 	_ = os.Remove(platformFlags.endpoint)
 	return err
+}
+
+// dockerRunnerOrZero wires the Faz 07 Engine API runner; empty flag disables
+// the docker family (ops rejected unsupported, capabilities unavailable).
+func dockerRunnerOrZero(socket string) *dockerx.Client {
+	if socket == "" {
+		return nil
+	}
+	return &dockerx.Client{Socket: socket}
 }
 
 func parseUIDs(s string) ([]uint32, error) {

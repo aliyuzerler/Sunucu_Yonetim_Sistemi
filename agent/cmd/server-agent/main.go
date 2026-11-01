@@ -56,7 +56,7 @@ func dispatch(cmd string, args []string) error {
 	case "run":
 		opts := parseFlags(args)
 		store := &agent.Store{Dir: opts.dir}
-		executors, err := agent.DefaultRegistry(opts.brokerSocket)
+		executors, err := agent.DefaultRegistry(opts.brokerSocket, opts.dockerSocket)
 		if err != nil {
 			return err
 		}
@@ -64,6 +64,7 @@ func dispatch(cmd string, args []string) error {
 		defer stop()
 		fmt.Println("server-agent çalışıyor (outbound mTLS):", opts.server)
 		fmt.Println("  broker socket:", opts.brokerSocket)
+		fmt.Println("  docker socket:", opts.dockerSocket, "(yalnız broker erişir)")
 		return agent.Run(ctx, store, opts.server, executors, agent.RunOptions{FactsRoot: ""})
 	default:
 		usage()
@@ -77,10 +78,11 @@ type options struct {
 	dir          string
 	name         string
 	brokerSocket string
+	dockerSocket string
 }
 
 func parseFlags(args []string) options {
-	o := options{dir: defaultAgentDir(), brokerSocket: defaultBrokerEndpoint()}
+	o := options{dir: defaultAgentDir(), brokerSocket: defaultBrokerEndpoint(), dockerSocket: agent.DefaultDockerSocket}
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "--server":
@@ -107,6 +109,11 @@ func parseFlags(args []string) options {
 			i++
 			if i < len(args) {
 				o.brokerSocket = args[i]
+			}
+		case "--docker-socket":
+			i++
+			if i < len(args) {
+				o.dockerSocket = args[i]
 			}
 		}
 	}

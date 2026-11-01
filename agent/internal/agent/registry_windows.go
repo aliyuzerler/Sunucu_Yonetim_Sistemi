@@ -16,7 +16,11 @@ import (
 // the five SCM service operations (broker-backed over the named pipe, the
 // broker runs as LocalSystem) and the DIRECT event-log reader (no privilege
 // needed for the allowlisted channels — Security is excluded by design).
-func DefaultRegistry(brokerPath string) (*ExecutorRegistry, error) {
+// dockerSocket is accepted for signature parity with the unix registry but
+// is UNUSED on windows: the Docker Engine family is unix-broker-only
+// (ADR-0011) and windows nodes never report docker capabilities.
+func DefaultRegistry(brokerPath, dockerSocket string) (*ExecutorRegistry, error) {
+	_ = dockerSocket
 	reader := &winevent.Reader{}
 	return NewRegistry(
 		EchoExecutor{},

@@ -17,6 +17,11 @@ import (
 	"google.golang.org/grpc/credentials"
 )
 
+// DefaultDockerSocket is the local Engine API endpoint used as the default
+// value of the agent's --docker-socket flag (probe path only; the agent
+// never dials the socket itself — ADR-0011).
+const DefaultDockerSocket = "/var/run/docker.sock"
+
 // Enroll exchanges the token + locally-generated CSR for a node certificate.
 // The private key never leaves this process.
 func Enroll(ctx context.Context, store *Store, serverAddr, token, displayName string) (string, error) {

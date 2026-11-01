@@ -18,6 +18,8 @@ import (
 	"fmt"
 	"regexp"
 
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/composeops"
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/dockerx"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/fwops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/pkgops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/winops"
@@ -41,6 +43,28 @@ const (
 	OpLinuxFirewallStatus      = fwops.OpLinuxFirewallStatus
 	OpLinuxFirewallRulesList   = fwops.OpLinuxFirewallRulesList
 	OpLinuxFirewallRulePreview = fwops.OpLinuxFirewallRulePreview
+
+	// Faz 07: Docker Engine ailesi. Daemon soketine erişim YALNIZ bu
+	// broker'dadır (unix socket; TCP yok — ADR-0011). remove ailesi
+	// PREVIEW-ONLY'dir: yürütme yolu hiç yoktur.
+	OpDockerContainerList    = dockerx.OpDockerContainerList
+	OpDockerContainerInspect = dockerx.OpDockerContainerInspect
+	OpDockerContainerLogs    = dockerx.OpDockerContainerLogs
+	OpDockerContainerStart   = dockerx.OpDockerContainerStart
+	OpDockerContainerStop    = dockerx.OpDockerContainerStop
+	OpDockerContainerRestart = dockerx.OpDockerContainerRestart
+	OpDockerContainerRemove  = dockerx.OpDockerContainerRemove
+	OpDockerImageList        = dockerx.OpDockerImageList
+	OpDockerImageRemove      = dockerx.OpDockerImageRemove
+	OpDockerNetworkList      = dockerx.OpDockerNetworkList
+	OpDockerNetworkRemove    = dockerx.OpDockerNetworkRemove
+	OpDockerVolumeList       = dockerx.OpDockerVolumeList
+	OpDockerVolumeRemove     = dockerx.OpDockerVolumeRemove
+
+	// Faz 07: Compose analizi — broker'dan geçmez (agent-local saf
+	// analiz); ad sabitleri dışa açılır.
+	OpDockerComposeValidate = composeops.OpDockerComposeValidate
+	OpDockerComposeDeploy   = composeops.OpDockerComposeDeploy
 
 	OpWinServiceList    = winops.OpWinServiceList
 	OpWinServiceStatus  = winops.OpWinServiceStatus
@@ -109,69 +133,166 @@ type ListParams struct {
 // maxRequestBytes bounds a single request line.
 const maxRequestBytes = 16 << 10
 
+// dockerCall carries the Faz 07 docker-family parameters extracted at
+// validation time (ref/tail/timeout/remove-kind).
+type dockerCall struct {
+	kind    string // remove-preview kind: container|image|volume|network
+	ref     string
+	tail    int
+	timeout int
+	force   bool
+	link    bool
+	v       bool
+	prune   bool
+}
+
+// validatedCall is the typed outcome of request validation.
+type validatedCall struct {
+	target    string              // unit/service name (service families)
+	listLimit int                 // list family bound
+	preview   fwops.PreviewParams // firewall preview payload
+	docker    dockerCall          // docker family payload
+}
+
 // validateRequest enforces the allowlist + payload schema for one request.
-// It returns (target, listLimit, preview) and an error with a stable category.
-func validateRequest(req *Request) (target string, listLimit int, preview fwops.PreviewParams, err error) {
+// It returns a validatedCall and an error with a stable category.
+func validateRequest(req *Request) (validatedCall, error) {
+	empty := validatedCall{}
 	if req == nil {
-		return "", 0, fwops.PreviewParams{}, reject(CatInvalidRequest, "boş istek")
+		return empty, reject(CatInvalidRequest, "boş istek")
 	}
 	if req.V != ProtocolV1 {
-		return "", 0, fwops.PreviewParams{}, reject(CatInvalidRequest, "desteklenmeyen protokol sürümü")
+		return empty, reject(CatInvalidRequest, "desteklenmeyen protokol sürümü")
 	}
 	switch req.Operation {
 	case OpServiceStatus, OpServiceStart, OpServiceStop, OpServiceRestart:
 		var p UnitParams
 		if err := strictDecode(req.Params, &p); err != nil {
-			return "", 0, fwops.PreviewParams{}, reject(CatInvalidParams, "unit şeması uyumsuz")
+			return empty, reject(CatInvalidParams, "unit şeması uyumsuz")
 		}
 		if err := winops.ValidateLinuxUnit(p.Unit); err != nil {
-			return "", 0, fwops.PreviewParams{}, reject(CatInvalidParams, err.Error())
+			return empty, reject(CatInvalidParams, err.Error())
 		}
-		return p.Unit, 0, fwops.PreviewParams{}, nil
+		return validatedCall{target: p.Unit}, nil
 	case OpWinServiceStatus, OpWinServiceStart, OpWinServiceStop, OpWinServiceRestart:
 		var p ServiceParams
 		if err := strictDecode(req.Params, &p); err != nil {
-			return "", 0, fwops.PreviewParams{}, reject(CatInvalidParams, "service şeması uyumsuz")
+			return empty, reject(CatInvalidParams, "service şeması uyumsuz")
 		}
 		if err := winops.ValidateServiceName(p.Service); err != nil {
-			return "", 0, fwops.PreviewParams{}, reject(CatInvalidParams, err.Error())
+			return empty, reject(CatInvalidParams, err.Error())
 		}
-		return p.Service, 0, fwops.PreviewParams{}, nil
-	case OpServiceList, OpWinServiceList, OpLinuxPkgList, OpLinuxFirewallRulesList:
+		return validatedCall{target: p.Service}, nil
+	case OpServiceList, OpWinServiceList, OpLinuxPkgList, OpLinuxFirewallRulesList,
+		OpDockerContainerList, OpDockerImageList, OpDockerNetworkList, OpDockerVolumeList:
 		var p ListParams
 		if len(req.Params) == 0 {
 			req.Params = []byte("{}")
 		}
 		if err := strictDecode(req.Params, &p); err != nil || p.Limit < 0 || p.Limit > 500 {
-			return "", 0, fwops.PreviewParams{}, reject(CatInvalidParams, "list şeması uyumsuz")
+			return empty, reject(CatInvalidParams, "list şeması uyumsuz")
 		}
 		if p.Limit == 0 {
 			p.Limit = 200
 		}
-		return "", p.Limit, fwops.PreviewParams{}, nil
+		return validatedCall{listLimit: p.Limit}, nil
 	case OpLinuxFirewallStatus:
 		var p struct{}
 		if len(req.Params) == 0 {
 			req.Params = []byte("{}")
 		}
 		if err := strictDecode(req.Params, &p); err != nil {
-			return "", 0, fwops.PreviewParams{}, reject(CatInvalidParams, "status şeması uyumsuz (boş obje beklenir)")
+			return empty, reject(CatInvalidParams, "status şeması uyumsuz (boş obje beklenir)")
 		}
-		return "", 0, fwops.PreviewParams{}, nil
+		return empty, nil
 	case OpLinuxFirewallRulePreview:
 		var p fwops.PreviewParams
 		if err := strictDecode(req.Params, &p); err != nil {
-			return "", 0, fwops.PreviewParams{}, reject(CatInvalidParams, "preview şeması uyumsuz")
+			return empty, reject(CatInvalidParams, "preview şeması uyumsuz")
 		}
 		if err := fwops.ValidatePreviewParams(p); err != nil {
-			return "", 0, fwops.PreviewParams{}, reject(CatInvalidParams, err.Error())
+			return empty, reject(CatInvalidParams, err.Error())
 		}
-		return "", 0, p, nil
+		return validatedCall{preview: p}, nil
+
+	// ---- Faz 07: docker ailesi ----
+	case OpDockerContainerInspect, OpDockerContainerStart:
+		var p dockerx.RemoveParams
+		if err := strictDecode(req.Params, &p); err != nil {
+			return empty, reject(CatInvalidParams, "ref şeması uyumsuz")
+		}
+		if err := dockerx.ValidateRemoveParams("container", p.Ref); err != nil {
+			return empty, reject(CatInvalidParams, err.Error())
+		}
+		return validatedCall{docker: dockerCall{ref: p.Ref}}, nil
+	case OpDockerContainerLogs:
+		var p struct {
+			Ref  string `json:"ref"`
+			Tail int    `json:"tail,omitempty"`
+		}
+		if err := strictDecode(req.Params, &p); err != nil {
+			return empty, reject(CatInvalidParams, "log şeması uyumsuz")
+		}
+		if err := dockerx.ValidateRemoveParams("container", p.Ref); err != nil {
+			return empty, reject(CatInvalidParams, err.Error())
+		}
+		if p.Tail == 0 {
+			p.Tail = 100
+		}
+		if p.Tail < 1 || p.Tail > 500 {
+			return empty, reject(CatInvalidParams, "tail 1..500 olmalı")
+		}
+		return validatedCall{docker: dockerCall{ref: p.Ref, tail: p.Tail}}, nil
+	case OpDockerContainerStop, OpDockerContainerRestart:
+		var p struct {
+			Ref     string `json:"ref"`
+			Timeout int    `json:"timeout,omitempty"`
+		}
+		if err := strictDecode(req.Params, &p); err != nil {
+			return empty, reject(CatInvalidParams, "action şeması uyumsuz")
+		}
+		if err := dockerx.ValidateRemoveParams("container", p.Ref); err != nil {
+			return empty, reject(CatInvalidParams, err.Error())
+		}
+		if p.Timeout == 0 {
+			p.Timeout = 10
+		}
+		if p.Timeout < 1 || p.Timeout > 120 {
+			return empty, reject(CatInvalidParams, "timeout 1..120 olmalı")
+		}
+		return validatedCall{docker: dockerCall{ref: p.Ref, timeout: p.Timeout}}, nil
+	case OpDockerContainerRemove, OpDockerImageRemove, OpDockerVolumeRemove, OpDockerNetworkRemove:
+		kind := removeKind(req.Operation)
+		var p dockerx.RemoveParams
+		if err := strictDecode(req.Params, &p); err != nil {
+			return empty, reject(CatInvalidParams, "remove şeması uyumsuz")
+		}
+		if err := dockerx.ValidateRemoveParams(kind, p.Ref); err != nil {
+			return empty, reject(CatInvalidParams, err.Error())
+		}
+		// PREVIEW-ONLY (ADR-0011): yalnız render edilecek veri taşınır; broker
+		// bu aile için hiçbir DELETE yürütme yolu içermez.
+		return validatedCall{docker: dockerCall{kind: kind, ref: p.Ref, force: p.Force, link: p.Link, v: p.V, prune: p.Prune}}, nil
 	case "":
-		return "", 0, fwops.PreviewParams{}, reject(CatInvalidRequest, "operasyon boş")
+		return empty, reject(CatInvalidRequest, "operasyon boş")
 	default:
-		return "", 0, fwops.PreviewParams{}, reject(CatUnsupportedOp, "operasyon allowlist dışı")
+		return empty, reject(CatUnsupportedOp, "operasyon allowlist dışı")
 	}
+}
+
+// removeKind maps a preview-only remove op to its resource kind.
+func removeKind(op string) string {
+	switch op {
+	case OpDockerContainerRemove:
+		return "container"
+	case OpDockerImageRemove:
+		return "image"
+	case OpDockerVolumeRemove:
+		return "volume"
+	case OpDockerNetworkRemove:
+		return "network"
+	}
+	return ""
 }
 
 // strictDecode decodes JSON disallowing unknown fields and trailing data.

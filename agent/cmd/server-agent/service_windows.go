@@ -57,7 +57,7 @@ func (s *agentService) Execute(_ []string, req <-chan svc.ChangeRequest, changes
 	changes <- svc.Status{State: svc.StartPending}
 	opts := parseFlags(s.args)
 	store := &agent.Store{Dir: opts.dir}
-	executors, err := agent.DefaultRegistry(opts.brokerSocket)
+	executors, err := agent.DefaultRegistry(opts.brokerSocket, opts.dockerSocket)
 	if err != nil {
 		changes <- svc.Status{State: svc.Stopped, Win32ExitCode: 1}
 		return false, 1

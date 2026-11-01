@@ -66,6 +66,22 @@ const OPERATIONS = [
   { name: "linux.firewall.status", version: "1.0.0", class: "read_only", retry_safe: true, timeout_seconds: 60 },
   { name: "linux.firewall.rules.list", version: "1.0.0", class: "read_only", retry_safe: true, timeout_seconds: 60 },
   { name: "linux.firewall.rule.preview", version: "1.0.0", class: "read_only", retry_safe: true, timeout_seconds: 60 },
+  // Faz 07: Docker Engine ailesi (remove ailesi preview-only — ADR-0011).
+  { name: "docker.container.list", version: "1.0.0", class: "read_only", retry_safe: true, timeout_seconds: 60 },
+  { name: "docker.container.inspect", version: "1.0.0", class: "read_only", retry_safe: true, timeout_seconds: 60 },
+  { name: "docker.container.logs", version: "1.0.0", class: "read_only", retry_safe: true, timeout_seconds: 90 },
+  { name: "docker.container.start", version: "1.0.0", class: "idempotent_desired_state", retry_safe: true, timeout_seconds: 120 },
+  { name: "docker.container.stop", version: "1.0.0", class: "idempotent_desired_state", retry_safe: true, timeout_seconds: 120 },
+  { name: "docker.container.restart", version: "1.0.0", class: "non_idempotent", retry_safe: false, timeout_seconds: 180 },
+  { name: "docker.container.remove", version: "1.0.0", class: "read_only", retry_safe: true, timeout_seconds: 60 },
+  { name: "docker.image.list", version: "1.0.0", class: "read_only", retry_safe: true, timeout_seconds: 60 },
+  { name: "docker.image.remove", version: "1.0.0", class: "read_only", retry_safe: true, timeout_seconds: 60 },
+  { name: "docker.network.list", version: "1.0.0", class: "read_only", retry_safe: true, timeout_seconds: 60 },
+  { name: "docker.network.remove", version: "1.0.0", class: "read_only", retry_safe: true, timeout_seconds: 60 },
+  { name: "docker.volume.list", version: "1.0.0", class: "read_only", retry_safe: true, timeout_seconds: 60 },
+  { name: "docker.volume.remove", version: "1.0.0", class: "read_only", retry_safe: true, timeout_seconds: 60 },
+  { name: "docker.compose.validate", version: "1.0.0", class: "read_only", retry_safe: true, timeout_seconds: 60 },
+  { name: "docker.compose.deploy", version: "1.0.0", class: "read_only", retry_safe: true, timeout_seconds: 60 },
 ];
 
 // Faz 04 telemetri mock verisi: her node'a agent telemetrisi eklenir.
@@ -233,6 +249,47 @@ function attachRockyTelemetry(node) {
   ]);
 }
 
+// Faz 07: docker host şablonu — Engine ailesi kabiliyetleriyle
+// (remove ailesi + compose deploy preview-only; ADR-0011).
+function attachDockerTelemetry(node) {
+  const now = new Date().toISOString();
+  nodeFacts.set(node.id, {
+    node_id: node.id,
+    os_id: "ubuntu",
+    os_version_id: "24.04",
+    os_pretty_name: "Ubuntu 24.04.3 LTS (docker host)",
+    os_home_url: "https://www.ubuntu.com/",
+    kernel_release: "6.8.0-49-generic",
+    arch: "amd64",
+    systemd_version: "255",
+    package_manager: "apt",
+    systemd_available: true,
+    source: "os-release+procfs+systemctl",
+    collected_at: now,
+  });
+  nodeMetrics.set(node.id, {
+    collected_at: now,
+    source: "procfs+statfs",
+    cpu: { percent: 31.7, logical_cores: 8, load_1m: 1.2, load_5m: 0.9, load_15m: 0.7 },
+    memory: { total_bytes: 16 * 1024 ** 3, available_bytes: 6 * 1024 ** 3, used_bytes: 10 * 1024 ** 3, used_percent: 62.5 },
+    disks: [{ device: "/dev/vda1", mount_point: "/", fs_type: "ext4", total_bytes: 80 * 1024 ** 3, used_bytes: 34 * 1024 ** 3, available_bytes: 46 * 1024 ** 3 }],
+    networks: [{ interface: "eth0", rx_bytes: 777777777, tx_bytes: 555555555 }],
+    uptime_seconds: 172800,
+  });
+  const caps = [];
+  for (const c of [
+    "docker.container.list", "docker.container.inspect", "docker.container.logs",
+    "docker.container.start", "docker.container.stop", "docker.container.restart", "docker.container.remove",
+    "docker.image.list", "docker.image.remove",
+    "docker.network.list", "docker.network.remove",
+    "docker.volume.list", "docker.volume.remove",
+    "docker.compose.validate", "docker.compose.deploy",
+  ]) {
+    caps.push({ node_id: node.id, capability_id: c, version: "1.0.0", available: true, adapter_id: c.startsWith("docker.compose.") ? "builtin-compose" : "docker-broker" });
+  }
+  nodeCapabilities.set(node.id, caps);
+}
+
 function json(res, status, body) {
   const data = JSON.stringify(body);
   res.writeHead(status, { "Content-Type": "application/json; charset=utf-8" });
@@ -254,6 +311,38 @@ setInterval(() => {
     } else if (t.status === "dispatched") {
       t.status = "succeeded";
       t.result = { ok: true };
+      if (t.operation === "docker.compose.validate" || t.operation === "docker.compose.deploy") {
+        // Sahte compose analizi: policy bulguları + (deploy için) plan.
+        const report = {
+          valid: true,
+          services: 2,
+          findings: [
+            { severity: "high", rule: "privileged", service: "worker", message: "privileged mod — host çekirdeğine tam erişim riski" },
+            { severity: "medium", rule: "public-port", service: "web", message: "port tüm arayüzlerde açılır: 8080:80" },
+          ],
+        };
+        if (t.operation === "docker.compose.deploy") {
+          report.actions = [
+            "container oluştur: web (image=nginx:1.25)",
+            "container oluştur: worker (image=worker:2)",
+            "container başlat: web",
+            "container başlat: worker",
+          ];
+          report.executed = false;
+          report.note = "PLAN — hiçbir kaynak oluşturulmadı (ADR-0011).";
+        }
+        t.result = report;
+      }
+      if (t.operation === "docker.container.remove" || t.operation === "docker.image.remove" ||
+          t.operation === "docker.volume.remove" || t.operation === "docker.network.remove") {
+        t.result = {
+          kind: t.operation.split(".")[1],
+          ref: (t.payload && t.payload.ref) || "hedef",
+          executed: false,
+          note: "ÖNİZLEME — hiçbir şey silinmedi (ADR-0011).",
+          api_path: "/v1.47/" + t.operation.split(".")[1] + "s/" + ((t.payload && t.payload.ref) || "hedef"),
+        };
+      }
       logAudit("system", "task.complete", "task", t.id, "success");
     }
   }
@@ -429,6 +518,8 @@ const server = createServer(async (req, res) => {
       attachWindowsTelemetry(node);
     } else if (body.os_family === "rocky" || String(body.display_name || "").startsWith("rocky-") || String(body.display_name || "").startsWith("alma-")) {
       attachRockyTelemetry(node);
+    } else if (String(body.display_name || "").startsWith("docker-") || body.os_family === "docker") {
+      attachDockerTelemetry(node);
     } else {
       attachMockTelemetry(node);
     }
@@ -485,6 +576,16 @@ const server = createServer(async (req, res) => {
   }
   if (method === "GET" && path === "/api/v1/tasks") {
     json(res, 200, { tasks, has_more: false });
+    return;
+  }
+  const taskMatch = /^\/api\/v1\/tasks\/([^/]+)$/.exec(path);
+  if (method === "GET" && taskMatch) {
+    const t = tasks.find((x) => x.id === taskMatch[1]);
+    if (!t) {
+      json(res, 404, errorBody("not_found", "Görev bulunamadı.", 404));
+      return;
+    }
+    json(res, 200, t);
     return;
   }
   if (method === "POST" && path === "/api/v1/tasks") {

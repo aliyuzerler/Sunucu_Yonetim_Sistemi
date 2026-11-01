@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -101,36 +102,60 @@ func TestServiceExecutorViaBroker(t *testing.T) {
 // available; with a dead socket they are NOT (with a stable reason).
 func TestCapabilityProbing(t *testing.T) {
 	sock := startTestBroker(t)
-	reg, err := DefaultRegistry(sock)
+	reg, err := DefaultRegistry(sock, agentDefaultDockerForTest)
 	if err != nil {
 		t.Fatal(err)
 	}
 	env := capabilityEnvelope(context.Background(), "node-1", reg)
 	caps := env.GetCapabilityReport().GetCapabilities()
-	// Faz 06: echo + 5 systemd + pkg.list + 3 firewall = 10.
-	if len(caps) != 10 {
-		t.Fatalf("10 capability: %d", len(caps))
+	// Faz 06+07: echo + 5 systemd + pkg.list + 3 firewall + 2 compose = 11
+	// available; 12 docker op'unun probe'u /var/run/docker.sock varlığına
+	// bakar (test hostunda yok → dürüstçe unavailable).
+	if len(caps) != 25 {
+		t.Fatalf("25 capability: %d", len(caps))
 	}
+	avail := map[string]bool{}
 	for _, c := range caps {
-		if !c.GetAvailable() {
-			t.Fatalf("canlı broker ile %s available olmalı (%s)", c.GetCapabilityId(), c.GetReasonUnavailable())
+		avail[c.GetCapabilityId()] = c.GetAvailable()
+	}
+	for _, name := range []string{"agent.echo", "linux.systemd.service.list", "linux.systemd.service.status",
+		"linux.systemd.service.start", "linux.systemd.service.stop", "linux.systemd.service.restart",
+		"linux.pkg.list", "linux.firewall.status", "linux.firewall.rules.list", "linux.firewall.rule.preview",
+		"docker.compose.validate", "docker.compose.deploy"} {
+		if !avail[name] {
+			t.Fatalf("canlı broker ile %s available olmalı", name)
 		}
 	}
 
-	dead, err := DefaultRegistry(filepath.Join(t.TempDir(), "yok.sock"))
+	dead, err := DefaultRegistry(filepath.Join(t.TempDir(), "yok.sock"), agentDefaultDockerForTest)
 	if err != nil {
 		t.Fatal(err)
 	}
 	env = capabilityEnvelope(context.Background(), "node-1", dead)
 	for _, c := range env.GetCapabilityReport().GetCapabilities() {
-		if c.GetCapabilityId() == "agent.echo" {
+		if c.GetCapabilityId() == "agent.echo" || strings.HasPrefix(c.GetCapabilityId(), "docker.compose.") {
+			// echo yerleşik kanıt; compose saf analiz — ikisi de her zaman available.
 			if !c.GetAvailable() {
-				t.Fatalf("echo her zaman available")
+				t.Fatalf("%s her zaman available olmalı", c.GetCapabilityId())
 			}
 			continue
 		}
-		if c.GetAvailable() || c.GetReasonUnavailable() != "broker_unreachable" {
+		if c.GetAvailable() {
 			t.Fatalf("ölü broker ile unavailable olmalı: %+v", c)
+		}
+		// Docker ailesi önce socket varlığına bakar (farklı dürüst gerekçe);
+		// diğer her şey broker_unreachable döner.
+		if strings.HasPrefix(c.GetCapabilityId(), "docker.container.") ||
+			strings.HasPrefix(c.GetCapabilityId(), "docker.image.") ||
+			strings.HasPrefix(c.GetCapabilityId(), "docker.network.") ||
+			strings.HasPrefix(c.GetCapabilityId(), "docker.volume.") {
+			if !strings.Contains(c.GetReasonUnavailable(), "docker socket") {
+				t.Fatalf("docker ailesi socket gerekçesi beklenir: %+v", c)
+			}
+			continue
+		}
+		if c.GetReasonUnavailable() != "broker_unreachable" {
+			t.Fatalf("broker_unreachable beklenir: %+v", c)
 		}
 	}
 }

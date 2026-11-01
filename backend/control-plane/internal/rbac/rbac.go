@@ -36,6 +36,12 @@ const (
 	// değişikliği yüzeyi bu fazda YOKTUR (ADR-0010).
 	PermPkgRead      = "pkg:read"
 	PermFirewallRead = "firewall:read"
+
+	// Faz 07: Docker Engine ve Compose yönetimi. read: liste/inspect/logs/
+	// önizlemeler/compose analizi; control: container yaşam döngüsü
+	// (start/stop/restart). Silme yüzeyi Faz 07'de yoktur (ADR-0011).
+	PermDockerRead    = "docker:read"
+	PermDockerControl = "docker:control"
 )
 
 // AllPermissions lists the seeded catalog in one place.
@@ -47,6 +53,7 @@ var AllPermissions = []string{
 	PermServiceRead, PermServiceControl,
 	PermEventlogRead,
 	PermPkgRead, PermFirewallRead,
+	PermDockerRead, PermDockerControl,
 }
 
 // Scope types.

@@ -12,6 +12,10 @@ import (
 	agentv1 "github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/gen/proto/servercontrol/agent/v1"
 )
 
+// agentDefaultDockerForTest is the probe path used by the default registry
+// tests (unix); the agent never dials this socket itself.
+const agentDefaultDockerForTest = "/var/run/docker.sock"
+
 func TestStoreKeyPermissionsAndPersistence(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "agentdata")
 	store := &Store{Dir: dir}
@@ -103,17 +107,21 @@ func TestEchoExecutor(t *testing.T) {
 }
 
 func TestRegistryDefaultDeny(t *testing.T) {
-	reg, err := DefaultRegistry("")
+	reg, err := DefaultRegistry("", agentDefaultDockerForTest)
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Faz 04+06: echo + 5 systemd + pkg.list + 3 firewall = 10 capability.
-	if len(reg.Capabilities()) != 10 {
-		t.Fatalf("10 capability bekleniyordu: %d", len(reg.Capabilities()))
+	// Faz 04+06+07: echo + 5 systemd + pkg.list + 3 firewall + 13 docker + 2 compose = 25.
+	if len(reg.Capabilities()) != 25 {
+		t.Fatalf("25 capability bekleniyordu: %d", len(reg.Capabilities()))
 	}
 	for _, name := range []string{"agent.echo", "linux.systemd.service.list", "linux.systemd.service.status",
 		"linux.systemd.service.start", "linux.systemd.service.stop", "linux.systemd.service.restart",
-		"linux.pkg.list", "linux.firewall.status", "linux.firewall.rules.list", "linux.firewall.rule.preview"} {
+		"linux.pkg.list", "linux.firewall.status", "linux.firewall.rules.list", "linux.firewall.rule.preview",
+		"docker.container.list", "docker.container.inspect", "docker.container.logs",
+		"docker.container.start", "docker.container.stop", "docker.container.restart", "docker.container.remove",
+		"docker.image.list", "docker.image.remove", "docker.network.list", "docker.network.remove",
+		"docker.volume.list", "docker.volume.remove", "docker.compose.validate", "docker.compose.deploy"} {
 		if _, ok := reg.Lookup(name); !ok {
 			t.Fatalf("registry %s içermeli", name)
 		}

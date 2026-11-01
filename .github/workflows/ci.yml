@@ -283,6 +283,41 @@ jobs:
         if: always()
         run: docker rm -f rhel-test || true
 
+  agent-docker:
+    name: Agent (gerçek Docker — dind lifecycle)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Faz 07: GERÇEK Docker Engine kanıtı — runner'ın kendi daemon'ı üzerinde
+    # disposable busybox container'ı ile tam lifecycle (list/inspect/logs/
+    # stop/start/restart). EXPECTED_DOCKER=1 gate'i CI-17 dersi gereği SESSİZ
+    # ATLANMAZ: daemon erişilemezse test BAŞARISIZ olur. Daemon yalnız unix
+    # soketinden erişilir (TCP yok — ADR-0011).
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Setup Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: agent/go.mod
+          cache-dependency-path: agent/go.sum
+      - name: Dockerx test ikilisini derle
+        run: |
+          cd agent
+          go test -c -buildvcs=false -o /tmp/dockerx.test ./internal/dockerx/
+      - name: Daemon hazır mı (ping kanıtı)
+        run: docker version --format '{{.Server.APIVersion}} {{.Server.Version}}'
+      - name: Disposable container başlat (busybox sleep)
+        run: |
+          docker pull -q busybox:1.36
+          docker run -d --name srvctl-ci-docker busybox:1.36 sh -c 'echo srvctl-canvas-life && sleep 600'
+          docker ps --filter name=srvctl-ci-docker --format '{{.Names}} {{.Status}}'
+      - name: Engine adapter gerçek lifecycle kanıtı
+        run: |
+          EXPECTED_DOCKER=1 DOCKER_TEST_CONTAINER=srvctl-ci-docker /tmp/dockerx.test -test.run 'TestRealDockerSmoke|TestRealDockerLifecycle' -test.v
+      - name: Temizlik
+        if: always()
+        run: docker rm -f srvctl-ci-docker || true
+
   agent-windows:
     name: Agent (Go, windows-2025)
     runs-on: windows-2025

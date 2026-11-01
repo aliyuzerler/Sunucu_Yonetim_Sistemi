@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/dockerx"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/fwops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/pkgops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/svcops"
@@ -26,6 +27,11 @@ type Config struct {
 	Pkg PkgRunner
 	// Faz 06: firewall survey + preview-only rendering.
 	Firewall FirewallRunner
+	// Faz 07: Docker Engine runner (nil = docker family rejected as
+	// unsupported; capabilities report unavailable). Socket path is
+	// DockerSocket; empty defaults to /var/run/docker.sock.
+	Docker       DockerRunner
+	DockerSocket string
 	// Audit receives one entry per handled request (incl. rejections).
 	Audit  AuditSink
 	Logger *slog.Logger
@@ -54,3 +60,23 @@ type FirewallRunner interface {
 	Probe(ctx context.Context) fwops.Status
 	Rules(ctx context.Context, limit int) (fwops.Ruleset, error)
 }
+
+// DockerRunner executes the Faz 07 Docker Engine operations over the local
+// unix socket. *dockerx.Client implements it. PREVIEW-ONLY invariant
+// (ADR-0011): the interface has NO remove/delete method — the remove family
+// never executes (rendered as data by dockerx.RenderRemovePreview).
+type DockerRunner interface {
+	Ping(ctx context.Context) (dockerx.PingInfo, error)
+	ContainersList(ctx context.Context, limit int) ([]dockerx.ContainerSummary, error)
+	ContainerInspect(ctx context.Context, id string) (dockerx.ContainerDetail, error)
+	ContainerLogs(ctx context.Context, id string, tail int) (dockerx.LogChunk, error)
+	ContainerStart(ctx context.Context, id string) error
+	ContainerStop(ctx context.Context, id string, timeout int) error
+	ContainerRestart(ctx context.Context, id string, timeout int) error
+	ImagesList(ctx context.Context, limit int) ([]dockerx.ImageSummary, error)
+	NetworksList(ctx context.Context, limit int) ([]dockerx.NetworkSummary, error)
+	VolumesList(ctx context.Context, limit int) ([]dockerx.VolumeInfo, error)
+}
+
+// compile-time: the real client satisfies the runner surface.
+var _ DockerRunner = (*dockerx.Client)(nil)

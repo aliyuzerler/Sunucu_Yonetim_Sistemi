@@ -264,18 +264,72 @@ func TestExecutorTimeoutMapsToTimeoutCategory(t *testing.T) {
 }
 
 func TestValidateRequestDirectly(t *testing.T) {
-	if _, _, _, err := validateRequest(&Request{V: 2, Operation: OpServiceList}); err == nil {
+	if _, err := validateRequest(&Request{V: 2, Operation: OpServiceList}); err == nil {
 		t.Fatalf("yanlış sürüm reddedilmeli")
 	}
-	unit, limit, _, err := validateRequest(&Request{V: ProtocolV1, Operation: OpServiceList})
-	if err != nil || limit != 200 || unit != "" {
-		t.Fatalf("list varsayılan limit 200: %v %d %v", err, limit, unit)
+	call, err := validateRequest(&Request{V: ProtocolV1, Operation: OpServiceList})
+	if err != nil || call.listLimit != 200 || call.target != "" {
+		t.Fatalf("list varsayılan limit 200: %v %d %v", err, call.listLimit, call.target)
 	}
-	if _, _, _, err = validateRequest(&Request{V: ProtocolV1, Operation: OpServiceList, Params: []byte(`{"limit":501}`)}); err == nil {
+	if _, err = validateRequest(&Request{V: ProtocolV1, Operation: OpServiceList, Params: []byte(`{"limit":501}`)}); err == nil {
 		t.Fatalf("limit 501 reddedilmeli")
 	}
-	if _, _, _, err = validateRequest(nil); err == nil {
+	if _, err = validateRequest(nil); err == nil {
 		t.Fatalf("nil istek reddedilmeli")
+	}
+}
+
+func TestValidateRequestDockerFamily(t *testing.T) {
+	// Faz 07: docker ailesi şemaları — pozitif ve negatif setler.
+	ok := []struct {
+		op   string
+		body string
+	}{
+		{OpDockerContainerList, `{}`},
+		{OpDockerContainerList, `{"limit":100}`},
+		{OpDockerContainerInspect, `{"ref":"abc123def4567890"}`},
+		{OpDockerContainerLogs, `{"ref":"web-01","tail":50}`},
+		{OpDockerContainerStop, `{"ref":"web-01","timeout":30}`},
+		{OpDockerContainerRemove, `{"ref":"web-01","force":true,"v":true}`},
+		{OpDockerImageRemove, `{"ref":"nginx:1.25","force":true}`},
+		{OpDockerVolumeRemove, `{"ref":"app-data"}`},
+		{OpDockerNetworkRemove, `{"ref":"app-net","force":true}`},
+	}
+	for _, c := range ok {
+		call, err := validateRequest(&Request{V: ProtocolV1, Operation: c.op, Params: []byte(c.body)})
+		if err != nil {
+			t.Errorf("%s %s reddedildi: %v", c.op, c.body, err)
+			continue
+		}
+		if c.op == OpDockerContainerRemove && call.docker.kind != "container" {
+			t.Errorf("remove kind: %q", call.docker.kind)
+		}
+		if c.op == OpDockerImageRemove && call.docker.kind != "image" {
+			t.Errorf("remove kind: %q", call.docker.kind)
+		}
+	}
+	bad := []struct {
+		op   string
+		body string
+	}{
+		{OpDockerContainerInspect, `{"ref":"-flag"}`},
+		{OpDockerContainerInspect, `{"ref":"../etc"}`},
+		{OpDockerContainerInspect, `{"ref":"ok01","extra":1}`},  // bilinmeyen alan
+		{OpDockerContainerLogs, `{"ref":"ok01","tail":501}`},    // tail sınırı
+		{OpDockerContainerStop, `{"ref":"ok01","timeout":121}`}, // timeout sınırı
+		{OpDockerImageRemove, `{"ref":"a..b"}`},                 // traversal
+		{OpDockerVolumeRemove, `{"ref":"ok01","ref2":"x"}`},     // bilinmeyen alan
+		{"docker.container.destroy", `{"ref":"ok01"}`},          // allowlist dışı
+	}
+	for _, c := range bad {
+		if _, err := validateRequest(&Request{V: ProtocolV1, Operation: c.op, Params: []byte(c.body)}); err == nil {
+			t.Errorf("%s %s KABUL EDİLDİ (reddedilmeli)", c.op, c.body)
+		}
+	}
+	// timeout=0 → varsayılan 10.
+	call, err := validateRequest(&Request{V: ProtocolV1, Operation: OpDockerContainerStop, Params: []byte(`{"ref":"ok01"}`)})
+	if err != nil || call.docker.timeout != 10 {
+		t.Fatalf("timeout varsayılan 10: %v %d", err, call.docker.timeout)
 	}
 }
 

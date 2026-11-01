@@ -59,6 +59,54 @@ const FW_ZONE_PATTERN = /^[A-Za-z0-9_.-]{0,32}$/;
 const FW_ACTIONS = ["allow", "revoke"] as const;
 type FwAction = (typeof FW_ACTIONS)[number];
 
+// Faz 07: Docker Engine ailesi (broker-tekil erişim; remove ailesi ve
+// compose.deploy PREVIEW-ONLY'dir — ADR-0011; UI da "çalıştırmaz" etiketli).
+const DOCKER_LIST_OPS = [
+  "docker.container.list",
+  "docker.image.list",
+  "docker.network.list",
+  "docker.volume.list",
+] as const;
+const DOCKER_ACTION_OPS = [
+  "docker.container.start",
+  "docker.container.stop",
+  "docker.container.restart",
+] as const;
+const DOCKER_REMOVE_OPS = [
+  "docker.container.remove",
+  "docker.image.remove",
+  "docker.volume.remove",
+  "docker.network.remove",
+] as const;
+const COMPOSE_OPS = ["docker.compose.validate", "docker.compose.deploy"] as const;
+const ALL_DOCKER_OPS = [...DOCKER_LIST_OPS, ...DOCKER_ACTION_OPS, ...DOCKER_REMOVE_OPS, ...COMPOSE_OPS] as const;
+type DockerListOp = (typeof DOCKER_LIST_OPS)[number];
+type DockerRemoveOp = (typeof DOCKER_REMOVE_OPS)[number];
+type ComposeOp = (typeof COMPOSE_OPS)[number];
+
+// DOCKER_REF/IMAGE_REF patterns mirror agent/internal/dockerx + backend.
+const DOCKER_REF_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/;
+const DOCKER_IMAGE_REF_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.:@/-]{0,199}$/;
+function validDockerRef(ref: string, image?: boolean): boolean {
+  const base = (image ?? false) ? DOCKER_IMAGE_REF_PATTERN : DOCKER_REF_PATTERN;
+  if (!base.test(ref)) return false;
+  return !ref.includes("..");
+}
+const REMOVE_KINDS = ["container", "image", "volume", "network"] as const;
+type RemoveKind = (typeof REMOVE_KINDS)[number];
+
+// Compose analizi sonucu (agent composeops raporu — task result içinden).
+interface ComposeFinding { severity: string; rule: string; service?: string; message: string }
+interface ComposeReport {
+  valid: boolean;
+  errors?: string[];
+  findings?: ComposeFinding[];
+  services?: number;
+  actions?: string[];
+  executed?: boolean;
+  note?: string;
+}
+
 // EVENTLOG_CHANNELS: kapalı enum — Security kanalı tasarımdan hariçtir
 // (ADR-0009); gerçek kural sunucu + agent tarafında zorlanır.
 const EVENTLOG_CHANNELS = ["Application", "System", "Setup"] as const;
@@ -118,6 +166,21 @@ export function NodeDetail({ node, onBack }: { node: NodeRecord; onBack: () => v
   const [fwProto, setFwProto] = useState<"tcp" | "udp">("tcp");
   const [fwAction, setFwAction] = useState<FwAction>("allow");
   const [fwError, setFwError] = useState<string | null>(null);
+  // Faz 07: docker işlemleri (yalnız docker capability'li node'larda).
+  const [dockerLimit, setDockerLimit] = useState(100);
+  const [dockerContainerRef, setDockerContainerRef] = useState("");
+  const [dockerLogTail, setDockerLogTail] = useState(100);
+  const [dockerStopTimeout, setDockerStopTimeout] = useState(10);
+  const [dockerPending, setDockerPending] = useState<string | null>(null);
+  const [dockerError, setDockerError] = useState<string | null>(null);
+  const [removeKind, setRemoveKind] = useState<RemoveKind>("container");
+  const [removeRef, setRemoveRef] = useState("");
+  const [removeForce, setRemoveForce] = useState(false);
+  // Compose: YAML metni + görev sonucu yoklaması (bulguları göstermek için).
+  const [composeYaml, setComposeYaml] = useState("");
+  const [composeTaskId, setComposeTaskId] = useState<string | null>(null);
+  const [composeReport, setComposeReport] = useState<ComposeReport | null>(null);
+  const [composeError, setComposeError] = useState<string | null>(null);
 
   const reload = useCallback(() => setReloadKey((k) => k + 1), []);
 
@@ -155,7 +218,7 @@ export function NodeDetail({ node, onBack }: { node: NodeRecord; onBack: () => v
           `/api/v1/tasks?node_id=${encodeURIComponent(node.id)}&limit=20`,
         );
         if (cancelled) return;
-        setTasks(page.tasks.filter((x) => (ALL_SERVICE_OPS as readonly string[]).includes(x.operation) || (SURVEY_OPS as readonly string[]).includes(x.operation)).slice(0, 10));
+        setTasks(page.tasks.filter((x) => (ALL_SERVICE_OPS as readonly string[]).includes(x.operation) || (SURVEY_OPS as readonly string[]).includes(x.operation) || (ALL_DOCKER_OPS as readonly string[]).includes(x.operation)).slice(0, 10));
       } catch {
         // Görev listesi isteğe bağlıdır; hata görünümü bozmaz.
       }
@@ -304,6 +367,132 @@ export function NodeDetail({ node, onBack }: { node: NodeRecord; onBack: () => v
     }
     void submitSurveyOp(op, { limit }, null, setFwError, setFwPending);
   }
+
+  // Faz 07: docker capability tespiti.
+  const isDocker = capabilities.some((c) => c.capability_id.startsWith("docker.container."));
+
+  async function submitTask(op: string, payload: Record<string, unknown>): Promise<TaskRecord | null> {
+    try {
+      const created = await apiFetch<TaskRecord>("/api/v1/tasks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ operation: op, node_id: node.id, payload }),
+      });
+      setLastTaskId(created.id);
+      reload();
+      return created;
+    } catch (err) {
+      setError(isApiError(err) ? err.message : t("common.error.generic"));
+      return null;
+    }
+  }
+
+  // docker list ailesi: {limit}
+  async function submitDockerList(op: DockerListOp) {
+    const limit = dockerLimit || 100;
+    if (limit < 1 || limit > 500) {
+      setDockerError(t("nodedetail.docker.limitInvalid"));
+      return;
+    }
+    setDockerError(null);
+    setDockerPending(op);
+    await submitTask(op, { limit });
+    setDockerPending(null);
+  }
+
+  // docker ref ailesi: inspect/{ref}, logs/{ref,tail}, start/stop/restart
+  async function submitDockerContainer(op: string) {
+    const ref = dockerContainerRef.trim();
+    if (!validDockerRef(ref)) {
+      setDockerError(t("nodedetail.docker.refInvalid"));
+      return;
+    }
+    setDockerError(null);
+    setDockerPending(op);
+    if (op === "docker.container.inspect") {
+      await submitTask(op, { ref });
+    } else if (op === "docker.container.logs") {
+      const tail = dockerLogTail || 100;
+      if (tail < 1 || tail > 500) {
+        setDockerError(t("nodedetail.docker.limitInvalid"));
+        setDockerPending(null);
+        return;
+      }
+      await submitTask(op, { ref, tail });
+    } else {
+      const timeout = dockerStopTimeout || 10;
+      if (timeout < 1 || timeout > 120) {
+        setDockerError(t("nodedetail.docker.timeoutInvalid"));
+        setDockerPending(null);
+        return;
+      }
+      await submitTask(op, { ref, timeout });
+    }
+    setDockerPending(null);
+  }
+
+  // PREVIEW-ONLY: remove ailesi komutu DATA olarak üretir — çalıştırmaz (ADR-0011).
+  async function submitDockerRemove(op: DockerRemoveOp) {
+    const ref = removeRef.trim();
+    if (!validDockerRef(ref, removeKind === "image")) {
+      setDockerError(t("nodedetail.docker.refInvalid"));
+      return;
+    }
+    setDockerError(null);
+    setDockerPending(op);
+    const payload: Record<string, unknown> = { ref };
+    if (removeForce) payload.force = true;
+    if (removeKind === "container" && removeForce) payload.v = true;
+    await submitTask(op, payload);
+    setDockerPending(null);
+  }
+
+  // Compose analizi: görev sonucu poll edilir ve bulgular UI'da gösterilir
+  // (kriter: deploy öncesi riskler GÖSTERİLMELİ).
+  async function submitCompose(op: ComposeOp) {
+    if (!composeYaml.trim() || composeYaml.length > 65536) {
+      setComposeError(t("nodedetail.compose.sizeInvalid"));
+      return;
+    }
+    setComposeError(null);
+    setComposeReport(null);
+    setComposeTaskId(null);
+    setDockerPending(op);
+    const created = await submitTask(op, { compose: composeYaml });
+    setDockerPending(null);
+    if (!created) return;
+    setComposeTaskId(created.id);
+  }
+
+  useEffect(() => {
+    if (!composeTaskId) return;
+    let cancelled = false;
+    let attempts = 0;
+    const tick = async () => {
+      attempts += 1;
+      try {
+        const task = await apiFetch<TaskRecord>(`/api/v1/tasks/${encodeURIComponent(composeTaskId)}`);
+        if (cancelled) return;
+        if (task.status === "succeeded") {
+          setComposeReport((task.result ?? null) as ComposeReport | null);
+          return; // dur
+        }
+        if (task.status === "failed" || task.status === "cancelled" || task.status === "expired") {
+          setComposeError(task.error_category ?? t("common.error.generic"));
+          return; // dur
+        }
+        if (attempts < 12) {
+          window.setTimeout(() => void tick(), 1000);
+        }
+      } catch {
+        if (!cancelled && attempts < 12) window.setTimeout(() => void tick(), 1000);
+      }
+    };
+    window.setTimeout(() => void tick(), 800);
+    return () => {
+      cancelled = true;
+    };
+  }, [composeTaskId, t]);
 
   const taskBadge: Record<TaskRecord["status"], BadgeVariant> = {
     queued: "info",
@@ -698,6 +887,254 @@ export function NodeDetail({ node, onBack }: { node: NodeRecord; onBack: () => v
           {fwError && (
             <p role="alert" className="mt-2 text-xs text-err">
               {fwError}
+            </p>
+          )}
+        </section>
+      )}
+
+      {/* Faz 07: Docker işlemleri (yalnız docker capability'li node'lar).
+          Daemon erişimi yalnız broker'dadır; remove/compose.deploy
+          PREVIEW-ONLY'dir (ADR-0011) — UI da açıkça etiketler. */}
+      {isDocker && (
+        <section aria-label={t("nodedetail.docker.title")} className="rounded-xl border border-border bg-panel p-4 shadow-sm">
+          <h3 className="text-sm font-semibold text-ink">{t("nodedetail.docker.title")}</h3>
+          <p className="mt-1 text-[11px] text-ink-soft">{t("nodedetail.docker.note")}</p>
+
+          {/* list ailesi */}
+          <div className="mt-3 flex flex-wrap items-end gap-2">
+            <label className="flex flex-col gap-1">
+              <span className="text-xs font-medium text-ink">{t("nodedetail.docker.limit")}</span>
+              <input
+                type="number"
+                min={1}
+                max={500}
+                value={dockerLimit}
+                onChange={(e) => {
+                  setDockerLimit(Number(e.target.value));
+                  setDockerError(null);
+                }}
+                className="w-24 rounded-lg border border-border bg-surface px-3 py-1.5 text-sm text-ink focus-visible:outline-2 focus-visible:outline-accent"
+              />
+            </label>
+            {DOCKER_LIST_OPS.map((op) => (
+              <button
+                key={op}
+                type="button"
+                onClick={() => void submitDockerList(op)}
+                disabled={dockerPending !== null}
+                className="rounded-lg border border-border bg-surface px-3 py-1.5 text-xs font-medium text-ink hover:bg-neutral-soft disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-accent"
+              >
+                {t(`nodedetail.docker.${op.split(".")[1]}.list` as never)}
+              </button>
+            ))}
+          </div>
+
+          {/* container yaşam döngüsü + loglar */}
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              void submitDockerContainer("docker.container.inspect");
+            }}
+            className="mt-3 flex flex-wrap items-end gap-2"
+          >
+            <label className="flex flex-col gap-1">
+              <span className="text-xs font-medium text-ink">{t("nodedetail.docker.containerRef")}</span>
+              <input
+                value={dockerContainerRef}
+                onChange={(e) => {
+                  setDockerContainerRef(e.target.value);
+                  setDockerError(null);
+                }}
+                placeholder="web-01"
+                className="w-44 rounded-lg border border-border bg-surface px-3 py-1.5 text-sm text-ink focus-visible:outline-2 focus-visible:outline-accent"
+              />
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-xs font-medium text-ink">{t("nodedetail.docker.tail")}</span>
+              <input
+                type="number"
+                min={1}
+                max={500}
+                value={dockerLogTail}
+                onChange={(e) => setDockerLogTail(Number(e.target.value))}
+                className="w-24 rounded-lg border border-border bg-surface px-3 py-1.5 text-sm text-ink focus-visible:outline-2 focus-visible:outline-accent"
+              />
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-xs font-medium text-ink">{t("nodedetail.docker.timeout")}</span>
+              <input
+                type="number"
+                min={1}
+                max={120}
+                value={dockerStopTimeout}
+                onChange={(e) => setDockerStopTimeout(Number(e.target.value))}
+                className="w-24 rounded-lg border border-border bg-surface px-3 py-1.5 text-sm text-ink focus-visible:outline-2 focus-visible:outline-accent"
+              />
+            </label>
+            <button
+              type="submit"
+              disabled={dockerPending !== null}
+              className="rounded-lg border border-border bg-surface px-3 py-1.5 text-xs font-medium text-ink hover:bg-neutral-soft disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-accent"
+            >
+              {t("nodedetail.docker.inspect")}
+            </button>
+            <button
+              type="button"
+              onClick={() => void submitDockerContainer("docker.container.logs")}
+              disabled={dockerPending !== null}
+              className="rounded-lg border border-border bg-surface px-3 py-1.5 text-xs font-medium text-ink hover:bg-neutral-soft disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-accent"
+            >
+              {t("nodedetail.docker.logs")}
+            </button>
+            <button
+              type="button"
+              onClick={() => void submitDockerContainer("docker.container.start")}
+              disabled={dockerPending !== null}
+              className="rounded-lg border border-border bg-surface px-3 py-1.5 text-xs font-medium text-ink hover:bg-neutral-soft disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-accent"
+            >
+              {t("nodedetail.docker.start")}
+            </button>
+            <button
+              type="button"
+              onClick={() => void submitDockerContainer("docker.container.stop")}
+              disabled={dockerPending !== null}
+              className="rounded-lg border border-border bg-surface px-3 py-1.5 text-xs font-medium text-ink hover:bg-neutral-soft disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-accent"
+            >
+              {t("nodedetail.docker.stop")}
+            </button>
+            <button
+              type="button"
+              onClick={() => void submitDockerContainer("docker.container.restart")}
+              disabled={dockerPending !== null}
+              className="rounded-lg border border-border bg-surface px-3 py-1.5 text-xs font-medium text-ink hover:bg-neutral-soft disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-accent"
+            >
+              {t("nodedetail.docker.restart")}
+            </button>
+          </form>
+
+          {/* remove ailesi — YALNIZ ÖNİZLEME (ADR-0011) */}
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              void submitDockerRemove(`${"docker."}${removeKind}.remove` as DockerRemoveOp);
+            }}
+            className="mt-4 flex flex-wrap items-end gap-2 border-t border-border pt-3"
+          >
+            <label className="flex flex-col gap-1">
+              <span className="text-xs font-medium text-ink">{t("nodedetail.docker.removeKind")}</span>
+              <select
+                value={removeKind}
+                onChange={(e) => setRemoveKind(e.target.value as RemoveKind)}
+                className="rounded-lg border border-border bg-surface px-3 py-1.5 text-sm text-ink focus-visible:outline-2 focus-visible:outline-accent"
+              >
+                {REMOVE_KINDS.map((k) => (
+                  <option key={k} value={k}>
+                    {t(`nodedetail.docker.kind.${k}` as never)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-xs font-medium text-ink">{t("nodedetail.docker.removeRef")}</span>
+              <input
+                value={removeRef}
+                onChange={(e) => {
+                  setRemoveRef(e.target.value);
+                  setDockerError(null);
+                }}
+                placeholder={removeKind === "image" ? "nginx:1.25" : "app-data"}
+                className="w-44 rounded-lg border border-border bg-surface px-3 py-1.5 text-sm text-ink focus-visible:outline-2 focus-visible:outline-accent"
+              />
+            </label>
+            <label className="flex items-center gap-2 pb-1.5">
+              <input
+                type="checkbox"
+                checked={removeForce}
+                onChange={(e) => setRemoveForce(e.target.checked)}
+                className="h-4 w-4 rounded border-border"
+              />
+              <span className="text-xs font-medium text-ink">{t("nodedetail.docker.force")}</span>
+            </label>
+            <button
+              type="submit"
+              disabled={dockerPending !== null}
+              className="rounded-lg border border-warn/40 bg-warn-soft px-3 py-1.5 text-xs font-medium text-warn hover:bg-warn/20 disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-accent"
+            >
+              {t("nodedetail.docker.removePreview")}
+            </button>
+            <span className="pb-1.5 text-[11px] text-ink-soft">{t("nodedetail.docker.removeNote")}</span>
+          </form>
+
+          {/* Compose analizi — doğrulama + plan (yürütmez, ADR-0011) */}
+          <div className="mt-4 border-t border-border pt-3">
+            <label className="flex flex-col gap-1">
+              <span className="text-xs font-medium text-ink">{t("nodedetail.compose.yaml")}</span>
+              <textarea
+                value={composeYaml}
+                onChange={(e) => {
+                  setComposeYaml(e.target.value);
+                  setComposeError(null);
+                }}
+                rows={6}
+                spellCheck={false}
+                className="w-full rounded-lg border border-border bg-surface px-3 py-2 font-mono text-xs text-ink focus-visible:outline-2 focus-visible:outline-accent"
+              />
+            </label>
+            <div className="mt-2 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => void submitCompose("docker.compose.validate")}
+                disabled={dockerPending !== null}
+                className="rounded-lg border border-border bg-surface px-3 py-1.5 text-xs font-medium text-ink hover:bg-neutral-soft disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-accent"
+              >
+                {t("nodedetail.compose.validate")}
+              </button>
+              <button
+                type="button"
+                onClick={() => void submitCompose("docker.compose.deploy")}
+                disabled={dockerPending !== null}
+                className="rounded-lg border border-warn/40 bg-warn-soft px-3 py-1.5 text-xs font-medium text-warn hover:bg-warn/20 disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-accent"
+              >
+                {t("nodedetail.compose.plan")}
+              </button>
+              <span className="self-center text-[11px] text-ink-soft">{t("nodedetail.compose.planNote")}</span>
+            </div>
+            {composeError && (
+              <p role="alert" className="mt-2 text-xs text-err">
+                {composeError}
+              </p>
+            )}
+            {composeReport && (
+              <div className="mt-3 rounded-lg border border-border bg-surface p-3" data-testid="compose-report">
+                <p className="text-xs font-medium text-ink">
+                  {composeReport.valid
+                    ? t("nodedetail.compose.valid", { services: composeReport.services ?? 0 })
+                    : t("nodedetail.compose.invalid")}
+                </p>
+                {(composeReport.errors ?? []).map((e, i) => (
+                  <p key={`e${i}`} className="mt-1 text-xs text-err">
+                    • {e}
+                  </p>
+                ))}
+                {(composeReport.findings ?? []).map((f, i) => (
+                  <p key={`f${i}`} className={`mt-1 text-xs ${f.severity === "high" ? "text-err" : f.severity === "medium" ? "text-warn" : "text-ink-soft"}`}>
+                    • [{f.severity}] {f.rule}
+                    {f.service ? ` (${f.service})` : ""} — {f.message}
+                  </p>
+                ))}
+                {(composeReport.actions ?? []).map((a, i) => (
+                  <p key={`a${i}`} className="mt-1 font-mono text-[11px] text-ink-soft">
+                    → {a}
+                  </p>
+                ))}
+                {composeReport.note && <p className="mt-2 text-[11px] text-ink-soft">{composeReport.note}</p>}
+              </div>
+            )}
+          </div>
+
+          {dockerError && (
+            <p role="alert" className="mt-2 text-xs text-err">
+              {dockerError}
             </p>
           )}
         </section>

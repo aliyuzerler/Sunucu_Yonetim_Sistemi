@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/dockerx"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/fwops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/pkgops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/svcops"
@@ -71,7 +72,8 @@ func peerCreds(conn *net.UnixConn) (uid, gid uint32, pid int32, err error) {
 
 // execute runs the validated linux operation with bounded concurrency +
 // timeout.
-func (s *Server) execute(req *Request, unit string, listLimit int, preview fwops.PreviewParams) *Response {
+func (s *Server) execute(req *Request, call validatedCall) *Response {
+	unit, listLimit, preview, dx := call.target, call.listLimit, call.preview, call.docker
 	res := &Response{Status: StatusFailed}
 	select {
 	case s.sem <- struct{}{}:
@@ -91,6 +93,44 @@ func (s *Server) execute(req *Request, unit string, listLimit int, preview fwops
 	var result any
 	var err error
 	switch req.Operation {
+	case OpDockerContainerList:
+		var rows []dockerx.ContainerSummary
+		rows, err = s.dockerRunner().ContainersList(ctx, listLimit)
+		result = map[string]any{"containers": rows}
+	case OpDockerContainerInspect:
+		var d dockerx.ContainerDetail
+		d, err = s.dockerRunner().ContainerInspect(ctx, dx.ref)
+		result = map[string]any{"container": d}
+	case OpDockerContainerLogs:
+		var lc dockerx.LogChunk
+		lc, err = s.dockerRunner().ContainerLogs(ctx, dx.ref, dx.tail)
+		result = map[string]any{"logs": lc}
+	case OpDockerContainerStart:
+		err = s.dockerRunner().ContainerStart(ctx, dx.ref)
+		result = map[string]any{"container": dx.ref, "action": "start"}
+	case OpDockerContainerStop:
+		err = s.dockerRunner().ContainerStop(ctx, dx.ref, dx.timeout)
+		result = map[string]any{"container": dx.ref, "action": "stop"}
+	case OpDockerContainerRestart:
+		err = s.dockerRunner().ContainerRestart(ctx, dx.ref, dx.timeout)
+		result = map[string]any{"container": dx.ref, "action": "restart"}
+	case OpDockerImageList:
+		var imgs []dockerx.ImageSummary
+		imgs, err = s.dockerRunner().ImagesList(ctx, listLimit)
+		result = map[string]any{"images": imgs}
+	case OpDockerNetworkList:
+		var nets []dockerx.NetworkSummary
+		nets, err = s.dockerRunner().NetworksList(ctx, listLimit)
+		result = map[string]any{"networks": nets}
+	case OpDockerVolumeList:
+		var vols []dockerx.VolumeInfo
+		vols, err = s.dockerRunner().VolumesList(ctx, listLimit)
+		result = map[string]any{"volumes": vols}
+	case OpDockerContainerRemove, OpDockerImageRemove, OpDockerVolumeRemove, OpDockerNetworkRemove:
+		// PREVIEW-ONLY (ADR-0011): komut/hedef DATA olarak döner; DELETE
+		// ASLA yapılmaz (runner arayüzünde remove metodu bile yoktur).
+		p := dockerx.RemoveParams{Ref: dx.ref, Force: dx.force, Link: dx.link, V: dx.v, Prune: dx.prune}
+		result = map[string]any{"preview": dockerx.RenderRemovePreview(dx.kind, dx.ref, p)}
 	case OpLinuxPkgList:
 		pkg := s.cfg.Pkg
 		if pkg == nil {
@@ -161,9 +201,13 @@ func (s *Server) execute(req *Request, unit string, listLimit int, preview fwops
 		case errors.Is(err, svcops.ErrTimeout):
 			res.Status = StatusFailed
 			res.ErrorCategory = CatExecutorTimedOut
-		case errors.Is(err, pkgops.ErrPkgUnavailable), errors.Is(err, fwops.ErrPreviewUnsupported):
+		case errors.Is(err, pkgops.ErrPkgUnavailable), errors.Is(err, fwops.ErrPreviewUnsupported),
+			errors.Is(err, dockerx.ErrUnsupportedAPI), errors.Is(err, dockerx.ErrUnavailable):
 			res.Status = StatusRejected
 			res.ErrorCategory = CatUnsupportedOp
+		case errors.Is(err, dockerx.ErrInvalidRef), errors.Is(err, dockerx.ErrLimit):
+			res.Status = StatusRejected
+			res.ErrorCategory = CatInvalidParams
 		case errors.Is(err, pkgops.ErrLimit), errors.Is(err, fwops.ErrInvalidPreview):
 			res.Status = StatusRejected
 			res.ErrorCategory = CatInvalidParams
@@ -185,4 +229,13 @@ func (s *Server) fwRunner() FirewallRunner {
 		return s.cfg.Firewall
 	}
 	return &fwops.Runner{}
+}
+
+// dockerRunner resolves the Docker runner (nil config → unix client with
+// the configured socket; the windows pipe broker has no docker family).
+func (s *Server) dockerRunner() DockerRunner {
+	if s.cfg.Docker != nil {
+		return s.cfg.Docker
+	}
+	return &dockerx.Client{Socket: s.cfg.DockerSocket}
 }

@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+## [0.8.0] — 2026-11-02 — Faz 07: Docker Engine ve Compose yönetimi
+
+### Added
+- Docker Engine adaptörü (`agent/internal/dockerx`, yalnız stdlib): Engine API istemcisi unix socket üzerinden — `/_ping` Api-Version pazarlığı, pencere [1.24, 1.47]; daemon daha eskiyse tipli `ErrUnsupportedAPI` (tahmin yok), daha yeniyse 1.47 clamp; istekler `/v{maj}.{min}/` önekli; çıktı sınırlı (liste 1 MiB, log 64 KiB + dürüst truncation; çoklamalı log akışı ayrıştırıcı — TTY ham akış fallback'i ile).
+- Docker işlem ailesi (15 op): container list/inspect/logs/start/stop/restart, image/network/volume listeleri — gerçek yürütme; **container/image/volume/network remove + compose.deploy PREVIEW-ONLY (ADR-0011)**: Engine `DELETE` çağrısı ve CLI eşdeğeri metin olarak döner, `Executed=false` değişmezi; `*dockerx.Client`'ın remove metodu YOKTUR (derleyici düzeyinde invariant). Inspect çıktısında `Config.Env` KASITLI dışlanır (secret redaksiyonu).
+- Compose analizi (`agent/internal/composeops`, agent-local SAF): `docker.compose.validate` şema doğrulama + 14+ policy kuralı (privileged, tehlikeli cap_add, host network/pid/ipc, docker.sock bind, hassas dizin bind, public port, gizli-anahtar görünümlü env ANAHTARI — değer asla kopyalanmaz, root user, devices, ayrıcalıklı port, env_file, no-restart, writable-rootfs); `docker.compose.deploy` yalnız sıralı aksiyon planı döndürür (`Executed=false`). Girdi sınırları: 64 KiB, NUL reddi, services ≤64, findings ≤100; depends_on bilinmeyen/döngü reddi.
+- Broker: docker ailesi allowlist'e strict şema doğrulamasıyla eklendi (ref allowlist `..` reddiyle, tail/timeout sınırları); `DockerRunner` arayüzünde remove metodu yok (preview-only interface invariant); `server-privd --docker-socket` bayrağı (boş = docker ailesi kapalı); agent `--docker-socket` probe bayrağı (agent sokete BAĞLANMAZ).
+- Control plane: 15 operasyon spec'i (`ops_faz07.go`); YENİ izinler `docker:read` (liste/inspect/logs/önizleme/compose), `docker:control` (start/stop/restart) — yalnız yeni izinler seed edilir (migration 0011, CI-04 dersi); operator salt-okuma; restart `non_idempotent` + retry-güvensiz; registry 18→**33 operasyon** testi.
+- UI: NodeDetail Docker bölümü (docker capability'li node'larda) — list butonları, container ref formsu (inspect/logs/start/stop/restart, istemci ref allowlist), silme önizlemesi ("çalıştırmaz" etiketi), compose YAML alanı; compose görev sonucu poll edilip **bulgular severity renkleriyle gösterilir**; deploy planı aksiyon listesi + "hiçbir kaynak oluşturulmadı" notu; TR/EN sözlükler.
+- E2E: Playwright `docker.spec.ts` (3 test) + `docs/reviews/screenshots/phase-07/` ekran görüntüleri repoda; mock'a docker host şablonu (`docker-` öneki), 15-op katalog, tek-görev GET ucu ve compose sonuç raporu simülasyonu eklendi.
+- CI: `agent-docker` job — runner'ın kendi daemon'ı üzerinde disposable busybox container ile GERÇEK lifecycle kanıtı (list/inspect/logs/stop/start/restart); `EXPECTED_DOCKER=1` gate'i sessiz atlanamaz (CI-17 dersi).
+- Docs: ADR-0011 (broker-tekil erişim + preview-only silme/deploy), `docs/architecture/docker-support.md` (destek matrisi + policy kural kataloğu + dürüst sınırlar), dependency-registry'ye `gopkg.in/yaml.v3 v3.0.1` (MIT), ADR dizini güncellendi.
+
+### Security
+- Docker daemon erişimi YALNIZ privileged broker'da (root, unix socket; TCP yüzeyi yok — ADR-0011); agent yalnız probe için socket VARLIĞINA bakar, bağlanmaz.
+- Silme ve compose deploy yürütme yüzeyi kodda YOKTUR (preview-only; onay akışlı yürütme ayrı faz + yeni ADR).
+- Üç katmanlı doğrulama docker ailesine taşındı: control-plane validator → agent executor → broker `validateRequest` (hepsi strict JSON + kapalı enum + ref allowlist).
+- Secret redaksiyonu: inspect env yok; compose bulgularında yalnız anahtar adları; log 64 KiB sınırı.
+- Yeni bağımlılık: `gopkg.in/yaml.v3 v3.0.1` (MIT) — tek yeni bağımlılık; lisans/SDK kaydı dependency-registry'de.
+
 ## [0.7.0] — 2026-11-01 — Faz 06: Ek Linux dağıtımı adaptörleri (Rocky Linux + AlmaLinux)
 
 ### Added
