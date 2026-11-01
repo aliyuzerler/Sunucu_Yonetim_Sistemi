@@ -187,11 +187,12 @@ jobs:
             container: "debian:13"
     container: ${{ matrix.container != '' && matrix.container || null }}
     steps:
-      - name: Git kurulumu (container)
+      - name: Git ve derleme araçları (container)
         if: matrix.container != ''
+        # gcc + libc6-dev: -race cgo gerektirir (CI bulgusu CI-07).
         run: |
           apt-get update -qq
-          apt-get install -y -qq git ca-certificates
+          apt-get install -y -qq git ca-certificates gcc libc6-dev
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Setup Go
@@ -206,7 +207,7 @@ jobs:
         # hatası CI'ı kilitlemesin (CI bulgusu CI-05).
         run: cd agent && go build -buildvcs=false ./...
       - name: go test -race
-        run: cd agent && go test -race ./...
+        run: cd agent && CGO_ENABLED=1 go test -race ./...
 
   secret-scan:
     name: Secret taraması

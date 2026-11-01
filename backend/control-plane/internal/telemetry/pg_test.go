@@ -141,10 +141,14 @@ func TestMetricsPG(t *testing.T) {
 		t.Fatalf("limit aşımı reddedilmeli: %v", err)
 	}
 
-	// Prune: yalnız retention dışındaki satırlar silinir.
+	// Prune: cutoff'tan eski satırlar silinir; yeni tutulur.
 	n, err := svc.store.Prune(ctx, now.Add(30*time.Second))
-	if err != nil || n != 2 {
-		t.Fatalf("prune 2 satır silmeli: %d %v", n, err)
+	if err != nil || n != 1 {
+		t.Fatalf("prune 1 satır silmeli (now+30s cutoff): %d %v", n, err)
+	}
+	n, err = svc.store.Prune(ctx, now.Add(2*time.Minute))
+	if err != nil || n != 1 {
+		t.Fatalf("prune kalan 1 satırı da silmeli (now+2dk cutoff): %d %v", n, err)
 	}
 	list, err = svc.ListMetrics(ctx, node.ID, 10)
 	if err != nil || len(list) != 0 {
