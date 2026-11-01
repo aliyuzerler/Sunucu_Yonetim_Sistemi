@@ -6,10 +6,10 @@ Self-hosted, genişletilebilir altyapı kontrol düzlemi: Linux/Windows sunucula
 
 | | |
 |---|---|
-| Tamamlanan faz | **Faz 00** — Mimari ve proje sözleşmesi (rapor: `docs/reviews/phase-00-architecture-review.md`) |
-| Bekleyen onay | Bağımsız `phase-00-test` çalıştırması + sahip onayı |
-| Sıradaki faz | **Faz 01** — Monorepo, geliştirme ortamı, temel UI/API |
-| Kaynak kod | Henüz yok (Faz 01'de `backend/control-plane`, `agent`, `proto`, `web`, `deploy` iskeletleri kurulacak) |
+| Tamamlanan fazlar | **Faz 00** — Mimari sözleşme (`docs/reviews/phase-00-architecture-review.md`) · **Faz 01** — Monorepo + temel UI/API (`docs/reviews/phase-01-test-report.md`) |
+| Bekleyen onay | Bağımsız `phase-01-test` çalıştırması + sahip onayı |
+| Sıradaki faz | **Faz 02** — Kimlik, RBAC, sunucu envanteri, görev altyapısı |
+| Çalışan iskelet | Go API (`/healthz`, `/readyz`, `/api/v1/version`) + React kabuğu + PostgreSQL 18 compose + migration runner + CI |
 
 Faz durumu, kanıtlar ve riskler için: [`docs/project-status.md`](docs/project-status.md) · Sürüm geçmişi: [`CHANGELOG.md`](CHANGELOG.md).
 
@@ -24,8 +24,13 @@ docs/phases/         16 fazın kapsam dokümanları + bağımlılık tablosu
 prompts/             Faz başlatma (phase-start), bağımsız test (phase-test), iş akışı promptları
 rules/               Zorunlu kural setleri (agent, architecture, backend, frontend, security)
 skills/              ZCode uzmanlık modülleri (backend, frontend, linux-agent, docker, …)
-backend/, agent/,    Faz 01'de kurulacak monorepo klasörleri
-proto/, web/, deploy/
+backend/control-plane/   Go REST API (health/ready/version) + migration runner
+cmd/migrate              explicit migration CLI (up/down/status)
+agent/               Node Agent — Faz 03'te (rezerve)
+proto/               Protobuf sözleşmeleri — Faz 03'te (rezerve)
+web/                 React 19 + strict TypeScript + Tailwind 4 kabuğu
+deploy/              PostgreSQL 18 compose (digest pinli) + .env.example
+.github/workflows/   CI: backend/frontend kalite kapıları + secret taraması
 ```
 
 ## Teknik kararlar (özet)
@@ -50,7 +55,7 @@ proto/, web/, deploy/
 | Faz | Konu |
 |---|---|
 | 00 | Mimari ve proje sözleşmesini kesinleştirme ✅ |
-| 01 | Monorepo, geliştirme ortamı, temel UI/API |
+| 01 | Monorepo, geliştirme ortamı, temel UI/API ✅ |
 | 02 | Kimlik, RBAC, sunucu envanteri, iş/olay altyapısı |
 | 03 | Agent protokolü, kayıt, mTLS, heartbeat ve capability |
 | 04 | Linux Agent, sistem metrikleri, servis ve temel OS yönetimi |
@@ -66,12 +71,25 @@ proto/, web/, deploy/
 | 14 | Yedekleme, geri yükleme, bulut ve çoklu sunucu ölçekleme |
 | 15 | Eklenti sistemi, güncelleme, paketleme ve üretim sertleştirmesi |
 
-## Geliştirme ortamı (Faz 01'de kurulacak)
+## Hızlı başlangıç (geliştirme)
 
-- Go 1.27.x, Node.js 26 LTS, Docker Engine + Compose, PostgreSQL 18 (geliştirme volume'ü, asla üretim DB değil)
-- Zorunlu komutlar: `go test ./...`, `go vet ./...`, `go test -race ./...`; frontend `typecheck`, `lint`, `test`, `build`
+Gereksinimler: **Go 1.27.3**, **Node.js 26.13.0 LTS**, **Docker Engine + Compose**.
+
+```bash
+cp deploy/.env.example deploy/.env          # yerel değerleri düzenleyin (git'e girmez)
+make compose-up                             # PostgreSQL 18 (localhost'a bağlı)
+export CP_DATABASE_URL="postgres://serverctl:...@localhost:5432/server_control?sslmode=disable"
+make migrate-up                             # explicit migration
+make backend-test && make backend-race      # Go testler
+cd web && npm ci && npm run dev             # UI: http://localhost:5173
+go run ./cmd/control-plane                  # API: http://127.0.0.1:8080 (backend/control-plane altında)
+```
+
+Tüm komutlar: `make help` · Detay: [`docs/operations/development-environment.md`](docs/operations/development-environment.md) ve [`deploy/README.md`](deploy/README.md).
+
+- Zorunlu kalite kapıları: `gofmt` (boş çıktı), `go vet`, `go test -race`; frontend `lint`, `typecheck`, `test`, `build` — CI'da zorlanır.
 - `.env.example` yalnızca placeholder içerir; gerçek `.env` gitignored. Repo asla secret/gerçek sunucu verisi içermez.
 
 ## Lisans notu
 
-Bu depo üçüncü taraf kodu içermez; bağımlılıklar `docs/technology/` altında lisanslarıyla listelenir. Ürün lisansı henüz seçilmemiştir; dağıtımdan önce karar verilmelidir. Bu doküman hukuki görüş değildir.
+Bu depo üçüncü taraf kodu içermez; bağımlılıklar `docs/technology/dependency-registry.md` altında lisanslarıyla listelenir. Ürün lisansı henüz seçilmemiştir; dağıtımdan önce karar verilmelidir. Bu doküman hukuki görüş değildir.

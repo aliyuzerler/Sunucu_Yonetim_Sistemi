@@ -1,0 +1,58 @@
+@import "tailwindcss";
+
+/*
+ * Design tokens (docs/ui-ux/design-system.md): spacing, typography, surfaces,
+ * borders, shadows, status and density live here as reusable tokens. Status
+ * colors are always paired with text and icons in components.
+ */
+@theme {
+  --font-sans: "Inter", "Segoe UI", system-ui, sans-serif;
+
+  --color-surface: #f6f8fb;
+  --color-panel: #ffffff;
+  --color-border: #dde5ef;
+  --color-ink: #16233a;
+  --color-ink-soft: #5b6b82;
+  --color-neutral-soft: #eef2f7;
+
+  --color-accent: #0e7490;
+  --color-accent-soft: #e6f7fb;
+
+  --color-ok: #15803d;
+  --color-ok-soft: #effaf3;
+  --color-warn: #b45309;
+  --color-warn-soft: #fdf6e7;
+  --color-err: #b91c1c;
+  --color-err-soft: #fdeeee;
+  --color-info: #1d4ed8;
+  --color-info-soft: #eef3fd;
+
+  --color-sidebar: #14202f;
+  --color-sidebar-ink: #9fb0c6;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Visible keyboard focus everywhere (a11y rule). */
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

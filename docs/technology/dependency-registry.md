@@ -1,0 +1,53 @@
+# Dependency Registry (Faz 01)
+
+`docs/technology/dependency-policy.md` gereği her doğrudan bağımlılığın kaydı:
+sürüm, kaynak, SPDX lisans, amaç. Sürümler kilitlidir (go.mod / package-lock.json / image digest).
+Lisans kimlikleri paket manifestosundan alınmıştır; yayın öncesi (Faz 15 paketleme)
+SBOM (SPDX/CycloneDX) üretimi ve dosya düzeyi lisans denetimi yapılacaktır.
+
+Doğrulama tarihi: **2026-11-01** (sürümler güncel stable çizgiler; kit tabanı `official-sources.md` ile uyumlu).
+
+## Backend (Go 1.27.3) — module: backend/control-plane
+
+| Bağımlılık | Sürüm | Kaynak | Lisans | Amaç |
+|---|---|---|---|---|
+| `github.com/go-chi/chi/v5` | v5.5.0 | github.com/go-chi/chi | MIT | HTTP router (teknoloji tabanı kararı) |
+| `github.com/jackc/pgx/v5` | v5.12.0 | github.com/jackc/pgx | MIT | PostgreSQL erişimi (pgxpool) |
+| `golang.org/x/text` | v0.41.0 | go.googlesource.com/text | BSD-3-Clause | pgx geçiş bağımlılığı |
+
+Standart kütüphane tercih edilir (slog, net/http, crypto/rand, embed); başka bağımlılık eklenmedi.
+
+## Frontend (Node 26.13.0 LTS, npm) — web/
+
+| Bağımlılık | Sürüm | Lisans | Amaç |
+|---|---|---|---|
+| `react` / `react-dom` | 19.3.1 | MIT | UI çatısı |
+| `vite` | 8.3.5 | MIT | Build aracı + dev sunucu |
+| `@vitejs/plugin-react` | 6.1.2 | MIT | React HMR/transform |
+| `typescript` | 5.9.3 | Apache-2.0 | Strict tip kontrolü. **Not:** TS 7.0.2 yayında; typescript-eslint 8.72.1 `<6.1.0` istediği için 5.9.3 pinlendi. TS 7 desteği çıkınca değerlendirilir. |
+| `tailwindcss` + `@tailwindcss/vite` | 4.3.3 | MIT | Tasarım token'ları + utility CSS |
+| `vitest` | 5.0.5 | MIT | Test çalıştırıcı |
+| `jsdom` | 30.1.3 | MIT | Test DOM ortamı |
+| `@testing-library/react` | 16.3.3 | MIT | Bileşen testleri |
+| `@testing-library/jest-dom` | 7.0.1 | MIT | Matcher eklentisi |
+| `@testing-library/user-event` | 14.6.8 | MIT | Etkileşim testleri |
+| `eslint` | 10.14.0 | MIT | Lint |
+| `@eslint/js` | 10.0.1 | MIT | ESLint önerilen kurallar |
+| `typescript-eslint` | 8.72.1 | MIT | TS lint kuralları |
+| `eslint-plugin-react-hooks` | 7.1.1 | MIT | Hooks kuralları |
+| `eslint-plugin-react-refresh` | 0.5.7 | MIT | HMR güvenlik kuralı |
+| `globals` | 17.13.0 | MIT | Ortam global tanımları |
+| `@types/react` / `@types/react-dom` | 19.3.0 | MIT | React tipleri |
+| `@types/node` | 26.6.6 | MIT | Node tipleri (config dosyaları) |
+
+## Altyapı imajları
+
+| İmaj | Pin | Amaç |
+|---|---|---|
+| `postgres:18-alpine` | sha256:10a5c69a83035ab5239f5620d708520e8b28f5aa1f2b20143e6024532edadfb5 (2026-11-01) | Geliştirme DB + CI servis konteyneri |
+
+## Bilinen riskler / notlar
+
+- `npm audit` (2026-11-01): 12 × **moderate**, tamamı eslint toolchain'i (dev-only, üretime çıkmaz). Kaynak: `minimatch` ve `@eslint-community/eslint-utils` danışmanlıkları. Her faz başında yeniden taranır (dependency-policy §7).
+- `@vitejs/plugin-react` 6.x oxc-transform tabanlıdır; rolldown/babel geçiş peer'ları opsiyoneldir ve kullanılmaz.
+- Otomatik SBOM üretimi Faz 15 paketleme fazında eklenir; bu dosya her fazda elle güncel tutulur.

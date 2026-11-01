@@ -1,0 +1,32 @@
+# Server Control — geliştirme ortamı (Faz 01)
+# Kapsam: yalnızca PostgreSQL 18. Control Plane lokalde `go run` ile çalışır.
+#
+# Kullanım:
+#   cp .env.example .env   # yerel değerleri düzenle (.env git'e girmez)
+#   docker compose up -d
+#
+# Güvenlik notu (docs/operations/deployment-model.md): port yalnızca
+# localhost'a bağlanır; üretimde expose edilmez. Şifre yalnızca geliştirme
+# içindir; gerçek secret'lar bu repoya asla girmez.
+services:
+  postgres:
+    image: postgres:18-alpine@sha256:10a5c69a83035ab5239f5620d708520e8b28f5aa1f2b20143e6024532edadfb5 # 18-alpine, 2026-11-01 tarihinde sabitlendi
+    container_name: server-control-db-dev
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER .env içinde tanımlı olmalı}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD .env içinde tanımlı olmalı}
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB .env içinde tanımlı olmalı}
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pgdata_dev:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  pgdata_dev:
+    name: server-control-pgdata-dev
