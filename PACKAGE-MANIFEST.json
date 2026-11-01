@@ -1,0 +1,9 @@
+{
+  "package": "server-control-zcode-kit",
+  "created_on": "2026-11-01",
+  "file_count_before_manifest": 101,
+  "phases": 16,
+  "phase_prompts": 16,
+  "phase_test_prompts": 16,
+  "note": "Documentation and prompts only; no runnable control panel implementation included."
+}

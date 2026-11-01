@@ -1,0 +1,41 @@
+# ZCode Uygulama Promptu — Faz 04: Linux Agent ve temel OS yönetimi
+
+Bu depodaki `agents.md`, `rules/`, `skills/`, `docs/architecture/`, `docs/technology/`, `docs/security/` ve `docs/phases/phase-04.md` dosyalarını oku. Sonra yalnızca bu fazı uygula.
+
+## Görev
+
+Linux Agent ve dar kapsamlı privileged broker geliştir. Ubuntu 24.04 ve Debian 13 üzerinde system facts, metrik ve izinli servis işlemlerini destekle.
+
+## Uygulama talimatları
+
+1. Başlamadan önce repo durumunu, önceki faz raporunu ve ilgili ADR'leri incele. Önce kısa uygulama planı, dosya listesi, bağımlılıklar ve riskleri çıkar.
+2. İlgili fazın kabul kriterlerini tek tek izlenebilir görevler haline getir. Başka fazlara ait özellikleri kapsam kayması olarak ertele.
+3. Mimari sınırları koru: Control Plane modüler monolith; Agent ayrı ikili; ayrı privileged broker; OS işlemleri adapter arayüzleri; capability ile feature gating; typed operation; PostgreSQL kalıcı kayıt.
+4. Gerçek sunucuya bağlanma veya host konfigürasyonu değiştirme. Önce unit/mock/integration testleri ve disposable ortam kullan. Gerçek host testi gerekiyorsa açıkça ayrı test planı ve risk listesi üret; kullanıcı onayı olmadan destructive işlem çalıştırma.
+5. Her işlem için RBAC, node scope, validation, timeout, idempotency, audit ve secret redaction gereksinimini kontrol et.
+6. Her dosyayı küçük, anlaşılır ve test edilebilir tut. Kod üretirken mevcut dosyaları sebepsiz silme veya büyük ölçekte yeniden yazma.
+7. İhtiyaç duyulan dış bağımlılığın güncel sürümünü, resmi kaynağını ve lisansını doğrula; pinle; `docs/technology/` ve SBOM kayıtlarını güncelle. Lisans belirsizse bağımlılığı ekleme.
+8. Kod, test, dokümantasyon ve UI durumlarını birlikte tamamla. Sadece backend endpointi yazıp UI'yı veya testini eksik bırakma.
+9. Testleri çalıştır; geçmeyen testleri saklama veya silme. Hata varsa düzelt ve yeniden çalıştır.
+10. `docs/project-status.md`, `CHANGELOG.md` ve varsa ADR'leri güncelle.
+
+## Kabul kriterleri
+
+- [ ] Agent ve root broker ayrı servis/kimlik olmalı; broker yalnızca Unix socket üzerinden erişilebilir olmalı.
+- [ ] OS/distro/version/systemd/package manager tespiti yapılmalı ve capability beyanı test edilmelidir.
+- [ ] CPU/RAM/disk/network/uptime metrikleri kaynağı ve timestamp ile raporlanmalı.
+- [ ] Servis listele/status/start/stop/restart işlemleri allowlist ve RBAC ile çalışmalı.
+- [ ] İşlem girdileri shell string olarak birleştirilmemeli; güvenli broker ve audit zorunlu olmalı.
+
+## Son rapor formatı
+
+- Yapılanlar
+- Değişen/eklenen dosyalar
+- Kullanılan yeni bağımlılıklar ve lisansları
+- Çalıştırılan komutlar
+- Test sonuçları (PASS / FAIL / NOT RUN / BLOCKED)
+- Güvenlik ve operasyon riskleri
+- Açık kalan işler
+- Faz tamamlandı mı? (Evet/Hayır; gerekçesi)
+
+**Sonraki faza geçme.** Bu fazın test promptu ayrıca çalıştırılacaktır.

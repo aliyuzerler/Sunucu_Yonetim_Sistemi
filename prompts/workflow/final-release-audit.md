@@ -1,0 +1,3 @@
+# Final Release Audit Prompt
+
+Act as an independent release auditor. Inspect the entire repository and all phase reports. Validate product scope, architectural boundaries, versioned REST/gRPC contracts, OS compatibility matrix, security model, RBAC, Agent enrollment/revocation, typed privileged operations, Docker/KVM privilege boundaries, secrets, backup/restore evidence, migrations, package signatures, SBOM, license obligations and upgrade/rollback. Run all automated suites available. Do not claim unsupported OS/provider combinations. List blockers before release. No production deployment or destructive operations. Output a release readiness report with evidence and a go/no-go recommendation.

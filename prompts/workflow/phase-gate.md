@@ -1,0 +1,3 @@
+# Generic Phase Gate Prompt
+
+Review the current phase against its implementation prompt and test prompt. Do not start the next phase. Inspect code, tests, migrations, generated contracts, docs, changelog and security impact. Run all available automated checks. Classify each acceptance criterion as PASS / FAIL / NOT RUN / BLOCKED and attach command/output evidence. Fix only defects within the current phase; do not hide a failure by weakening a test. Update `docs/project-status.md`. Mark phase COMPLETE only if no failed/blocked mandatory criterion and no unresolved Critical/High security issue remains. Otherwise mark INCOMPLETE and list exact remediation.

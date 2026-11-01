@@ -1,0 +1,41 @@
+# Secrets / ortam dosyaları — repoya ASLA girmesin
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.token
+secrets/
+
+# Node / frontend
+node_modules/
+dist/
+build/
+coverage/
+*.tsbuildinfo
+.vite/
+
+# Go
+bin/
+*.exe
+*.test
+*.out
+vendor/
+
+# Veritabanı / çalışma zamanı
+*.sql.dump
+pgdata/
+data/
+
+# Log ve geçici
+*.log
+tmp/
+.cache/
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
