@@ -39,6 +39,7 @@ var AllPermissions = []string{
 	PermTasksRead, PermTasksWrite,
 	PermAuditRead,
 	PermServiceRead, PermServiceControl,
+	PermEventlogRead,
 }
 
 // Scope types.
