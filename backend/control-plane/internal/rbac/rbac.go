@@ -26,6 +26,10 @@ const (
 	// Faz 04: servis işlemleri — okuma ve KONTROLLÜ yürütme ayrı izinlerdir.
 	PermServiceRead    = "service:read"
 	PermServiceControl = "service:control"
+
+	// Faz 05: Windows Event Log okuma (yalnız allowlist'li kanallar;
+	// Security kanalı tasarımdan hariçtir — ADR-0009).
+	PermEventlogRead = "eventlog:read"
 )
 
 // AllPermissions lists the seeded catalog in one place.

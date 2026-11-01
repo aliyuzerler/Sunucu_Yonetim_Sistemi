@@ -19,18 +19,27 @@ import (
 	"regexp"
 
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/svcops"
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/winops"
 )
 
 // Protocol version of the Unix-socket request/response format.
 const ProtocolV1 = 1
 
-// Allowlisted operations (the ONLY ones the broker will ever run).
+// Allowlisted operations (the ONLY ones the broker will ever run). Linux
+// and Windows families coexist in the protocol; the per-OS executor
+// rejects the foreign family at dispatch (default deny).
 const (
 	OpServiceList    = "linux.systemd.service.list"
 	OpServiceStatus  = "linux.systemd.service.status"
 	OpServiceStart   = "linux.systemd.service.start"
 	OpServiceStop    = "linux.systemd.service.stop"
 	OpServiceRestart = "linux.systemd.service.restart"
+
+	OpWinServiceList    = winops.OpWinServiceList
+	OpWinServiceStatus  = winops.OpWinServiceStatus
+	OpWinServiceStart   = winops.OpWinServiceStart
+	OpWinServiceStop    = winops.OpWinServiceStop
+	OpWinServiceRestart = winops.OpWinServiceRestart
 )
 
 // Result statuses.
@@ -79,6 +88,12 @@ type UnitParams struct {
 	Unit string `json:"unit"`
 }
 
+// ServiceParams is the windows schema for name-targeted params (mirror of
+// winops.ServiceParams).
+type ServiceParams struct {
+	Service string `json:"service"`
+}
+
 // ListParams is the schema for list params (empty object or with limit).
 type ListParams struct {
 	Limit int `json:"limit,omitempty"`
@@ -89,7 +104,7 @@ const maxRequestBytes = 16 << 10
 
 // validateRequest enforces the allowlist + payload schema for one request.
 // It returns (unit, listLimit) and an error with a stable category.
-func validateRequest(req *Request) (unit string, listLimit int, err error) {
+func validateRequest(req *Request) (target string, listLimit int, err error) {
 	if req == nil {
 		return "", 0, reject(CatInvalidRequest, "boş istek")
 	}
@@ -106,7 +121,16 @@ func validateRequest(req *Request) (unit string, listLimit int, err error) {
 			return "", 0, reject(CatInvalidParams, err.Error())
 		}
 		return p.Unit, 0, nil
-	case OpServiceList:
+	case OpWinServiceStatus, OpWinServiceStart, OpWinServiceStop, OpWinServiceRestart:
+		var p ServiceParams
+		if err := strictDecode(req.Params, &p); err != nil {
+			return "", 0, reject(CatInvalidParams, "service şeması uyumsuz")
+		}
+		if err := winops.ValidateServiceName(p.Service); err != nil {
+			return "", 0, reject(CatInvalidParams, err.Error())
+		}
+		return p.Service, 0, nil
+	case OpServiceList, OpWinServiceList:
 		var p ListParams
 		if len(req.Params) == 0 {
 			req.Params = []byte("{}")

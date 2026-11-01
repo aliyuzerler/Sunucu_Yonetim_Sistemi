@@ -15,14 +15,7 @@ import (
 )
 
 func main() {
-	if len(os.Args) < 2 {
-		usage()
-		os.Exit(2)
-	}
-	if err := dispatch(os.Args[1], os.Args[2:]); err != nil {
-		fmt.Fprintf(os.Stderr, "server-agent %s: %v\n", os.Args[1], err)
-		os.Exit(1)
-	}
+	os.Exit(runMain())
 }
 
 func usage() {
@@ -31,10 +24,11 @@ func usage() {
       CA sertifikası daha önce --ca-file ile dizine konmalıdır:
       cp ca.crt <dizin>/ca.crt
 
-  server-agent run --server <host:9090> [--dir <dizin>] [--broker-socket <yol>]
+  server-agent run --server <host:9090> [--dir <dizin>] [--broker-endpoint <uç>]
       Outbound mTLS stream: hello/heartbeat/capability/facts/metrics +
       tipli operasyonlar. Servis işlemleri yerel broker (server-privd)
-      Unix socket'i üzerinden çalışır.
+      platform uç noktası üzerinden çalışır (linux: Unix socket,
+      windows: named pipe).
 
   server-agent version
 `)
@@ -86,7 +80,7 @@ type options struct {
 }
 
 func parseFlags(args []string) options {
-	o := options{dir: "/var/lib/server-control-agent", brokerSocket: "/run/server-control/privd.sock"}
+	o := options{dir: defaultAgentDir(), brokerSocket: defaultBrokerEndpoint()}
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "--server":

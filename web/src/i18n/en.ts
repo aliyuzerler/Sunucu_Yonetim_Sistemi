@@ -244,6 +244,24 @@ export const en: Record<TranslationKey, string> = {
   "nodedetail.services.colOp": "Operation",
   "nodedetail.services.colStatus": "Status",
   "nodedetail.services.colTime": "Time",
+  "nodedetail.services.titleWindows": "Service operations (Windows SCM)",
+  "nodedetail.services.service": "Service name (e.g. Dhcp)",
+  "nodedetail.services.serviceInvalid":
+    "Invalid service name: must start with a letter/digit; may contain only spaces, dashes, dots and underscores; trailing dot/space is rejected.",
+  "nodedetail.eventlog.title": "Event Log (Windows)",
+  "nodedetail.eventlog.note":
+    "Allowlisted channels only (Application/System/Setup); the Security channel is excluded by design. A fixed wevtutil template is used; query text is never composed from input.",
+  "nodedetail.eventlog.channel": "Channel",
+  "nodedetail.eventlog.level": "Level",
+  "nodedetail.eventlog.levelAny": "Any",
+  "nodedetail.eventlog.levelCritical": "Critical",
+  "nodedetail.eventlog.levelError": "Error",
+  "nodedetail.eventlog.levelWarning": "Warning",
+  "nodedetail.eventlog.levelInformation": "Information",
+  "nodedetail.eventlog.levelVerbose": "Verbose",
+  "nodedetail.eventlog.count": "Event count (1-200)",
+  "nodedetail.eventlog.countInvalid": "Event count must be between 1 and 200.",
+  "nodedetail.eventlog.read": "Read events",
 
   "coming.title": "This module is not implemented yet",
   "coming.description":

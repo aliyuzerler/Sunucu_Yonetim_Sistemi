@@ -240,6 +240,24 @@ export const tr = {
   "nodedetail.services.colOp": "Operasyon",
   "nodedetail.services.colStatus": "Durum",
   "nodedetail.services.colTime": "Zaman",
+  "nodedetail.services.titleWindows": "Servis işlemleri (Windows SCM)",
+  "nodedetail.services.service": "Servis adı (ör. Dhcp)",
+  "nodedetail.services.serviceInvalid":
+    "Geçersiz servis adı: harf/rakam ile başlamalı; boşluk, tire, nokta ve alt çizgi dışında özel karakter içeremez; sondaki nokta/boşluk yasak.",
+  "nodedetail.eventlog.title": "Olay günlüğü (Windows Event Log)",
+  "nodedetail.eventlog.note":
+    "Yalnız allowlist'li kanallar (Application/System/Setup); Security kanalı tasarımdan hariçtir. Sabit wevtutil şablonu kullanılır; sorgu metni girdiden üretilmez.",
+  "nodedetail.eventlog.channel": "Kanal",
+  "nodedetail.eventlog.level": "Seviye",
+  "nodedetail.eventlog.levelAny": "Tümü",
+  "nodedetail.eventlog.levelCritical": "Kritik",
+  "nodedetail.eventlog.levelError": "Hata",
+  "nodedetail.eventlog.levelWarning": "Uyarı",
+  "nodedetail.eventlog.levelInformation": "Bilgi",
+  "nodedetail.eventlog.levelVerbose": "Ayrıntılı",
+  "nodedetail.eventlog.count": "Olay sayısı (1-200)",
+  "nodedetail.eventlog.countInvalid": "Olay sayısı 1-200 arasında olmalı.",
+  "nodedetail.eventlog.read": "Olayları oku",
 
   "coming.title": "Bu modül henüz uygulanmadı",
   "coming.description":

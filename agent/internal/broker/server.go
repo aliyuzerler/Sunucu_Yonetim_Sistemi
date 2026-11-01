@@ -1,3 +1,17 @@
+// Package broker implements the Faz 04/05 local privileged broker protocol.
+//
+// Trust model (docs/architecture/security-boundaries.md, ADR-0009):
+//   - The broker (server-privd) is a SEPARATE binary and identity running
+//     with elevated privileges (root on Linux, LocalSystem on Windows); the
+//     agent runs unprivileged.
+//   - Linux: the broker listens ONLY on a mode-0660 Unix socket; peer
+//     identity is verified with SO_PEERCRED against an explicit UID
+//     allowlist. Windows: the broker listens ONLY on a named pipe with a
+//     restrictive SDDL; caller identity is kernel-verified via
+//     impersonation against an explicit SID allowlist. Default deny.
+//   - Requests are typed JSON with allowlisted operations; parameters are
+//     strictly validated. Inputs are NEVER merged into shell strings.
+//   - Every accepted request (and every rejection) is audited.
 package broker
 
 import (
@@ -9,10 +23,7 @@ import (
 	"net"
 	"os"
 	"sync"
-	"syscall"
 	"time"
-
-	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/svcops"
 )
 
 // AuditEntry is one audited broker action (JSONL). Fields echo caller
@@ -20,14 +31,15 @@ import (
 // agent-architecture.md: broker audit records).
 type AuditEntry struct {
 	Time          string `json:"time"`
-	ActorUID      uint32 `json:"actor_uid"`
-	ActorGID      uint32 `json:"actor_gid"`
+	ActorUID      uint32 `json:"actor_uid,omitempty"`
+	ActorGID      uint32 `json:"actor_gid,omitempty"`
+	ActorSID      string `json:"actor_sid,omitempty"` // windows caller SID
 	PID           int32  `json:"pid"`
 	Operation     string `json:"operation"`
 	TaskID        string `json:"task_id,omitempty"`
 	RequestID     string `json:"request_id,omitempty"`
 	CorrelationID string `json:"correlation_id,omitempty"`
-	Target        string `json:"target,omitempty"` // unit name (validated before echo)
+	Target        string `json:"target,omitempty"` // validated before echo
 	Status        string `json:"status"`
 	ErrorCategory string `json:"error_category,omitempty"`
 	DurationMS    int64  `json:"duration_ms"`
@@ -73,28 +85,8 @@ func (s *JSONLSink) Record(e AuditEntry) {
 	_, _ = f.Write(append(b, '\n'))
 }
 
-// SystemdRunner executes one service operation. *svcops.Manager implements it;
-// the interface keeps the broker tests hermetic.
-type SystemdRunner interface {
-	List(ctx context.Context) ([]svcops.UnitInfo, error)
-	Status(ctx context.Context, unit string) (svcops.UnitInfo, error)
-	Start(ctx context.Context, unit string) error
-	Stop(ctx context.Context, unit string) error
-	Restart(ctx context.Context, unit string) error
-}
-
-// Config is the broker daemon configuration.
-type Config struct {
-	AllowedUIDs   []uint32      // explicit allowlist; empty = deny all
-	MaxConcurrent int           // parallel executions (default 4)
-	ExecTimeout   time.Duration // per-op timeout (default 60s)
-	Systemd       SystemdRunner
-	Audit         AuditSink
-	Logger        *slog.Logger
-}
-
-// Server is the privileged broker daemon core (transport-independent core +
-// Unix listener wiring in Serve).
+// Server is the privileged broker daemon core (transport- and OS-neutral:
+// listener wiring and peer identity live in auth_*/listen_*/exec_* files).
 type Server struct {
 	cfg    Config
 	sem    chan struct{}
@@ -115,60 +107,35 @@ func NewServer(cfg Config) *Server {
 	return &Server{cfg: cfg, sem: make(chan struct{}, cfg.MaxConcurrent), logger: cfg.Logger}
 }
 
-// AllowedUID reports whether uid may call the broker (default deny).
-func (s *Server) AllowedUID(uid uint32) bool {
-	for _, u := range s.cfg.AllowedUIDs {
-		if u == uid {
-			return true
-		}
-	}
-	return false
-}
-
-// peerCreds extracts SO_PEERCRED credentials from a Unix connection.
-func peerCreds(conn *net.UnixConn) (uid, gid uint32, pid int32, err error) {
-	sc, serr := conn.SyscallConn()
-	if serr != nil {
-		return 0, 0, 0, serr
-	}
-	var ucred *syscall.Ucred
-	var ctlErr error
-	if ctlErr = sc.Control(func(fd uintptr) {
-		ucred, ctlErr = syscall.GetsockoptUcred(int(fd), syscall.SOL_SOCKET, syscall.SO_PEERCRED)
-	}); ctlErr != nil {
-		return 0, 0, 0, ctlErr
-	}
-	if ctlErr != nil {
-		return 0, 0, 0, ctlErr
-	}
-	if ucred == nil {
-		return 0, 0, 0, errors.New("peer kimliği alınamadı")
-	}
-	return ucred.Uid, ucred.Gid, ucred.Pid, nil
-}
-
-// Handle processes ONE connection: authenticate via SO_PEERCRED, read one
-// bounded request, validate, execute with timeout/concurrency bounds, audit
-// and answer. Exported for hermetic tests over a real temp socket.
+// Handle processes ONE connection: identify the peer (kernel-verified),
+// read one bounded request, validate, execute with timeout/concurrency
+// bounds, audit and answer. The identity extractor is per-OS:
+//   - unix: *net.UnixConn → SO_PEERCRED (auth_unix.go)
+//   - windows: *pipeConn → impersonation-based caller SID (auth_windows.go)
+//   - ANY other transport is REJECTED (defense in depth: the test fallback
+//     of Faz 04 was removed — IN-01).
 func (s *Server) Handle(conn net.Conn) {
-	uc, ok := conn.(*net.UnixConn)
-	if ok {
-		uid, gid, pid, err := peerCreds(uc)
-		if err != nil {
-			s.logger.Warn("broker_peer_creds_failed", slog.String("error", err.Error()))
-			_ = writeResponse(conn, &Response{V: ProtocolV1, Status: StatusRejected, ErrorCategory: CatPeerDenied})
-			return
-		}
-		s.handleCreds(conn, uid, gid, pid)
+	ident, err := identifyPeer(conn)
+	if err != nil {
+		s.logger.Warn("broker_peer_identity_failed", slog.String("error", err.Error()))
+		_ = writeResponse(conn, &Response{V: ProtocolV1, Status: StatusRejected, ErrorCategory: CatPeerDenied})
+		_ = conn.Close()
 		return
 	}
-	// Test transport without peer creds: identity 0/0/0.
-	s.handleCreds(conn, 0, 0, 0)
+	s.handleCreds(conn, ident)
 }
 
-func (s *Server) handleCreds(conn net.Conn, uid, gid uint32, pid int32) {
+func (s *Server) handleCreds(conn net.Conn, ident PeerIdentity) {
 	start := time.Now()
-	base := AuditEntry{Time: start.UTC().Format(time.RFC3339Nano), ActorUID: uid, ActorGID: gid, PID: pid}
+	base := AuditEntry{
+		Time: start.UTC().Format(time.RFC3339Nano),
+		PID:  ident.PID,
+	}
+	if ident.Unix {
+		base.ActorUID, base.ActorGID = ident.UID, ident.GID
+	} else {
+		base.ActorSID = ident.SID
+	}
 
 	respond := func(res *Response, entry AuditEntry) {
 		entry.Status = res.Status
@@ -183,7 +150,7 @@ func (s *Server) handleCreds(conn net.Conn, uid, gid uint32, pid int32) {
 		_ = conn.Close()
 	}
 
-	if !s.AllowedUID(uid) {
+	if !s.peerAllowed(ident) {
 		respond(&Response{V: ProtocolV1, Status: StatusRejected, ErrorCategory: CatPeerDenied},
 			base)
 		return
@@ -221,75 +188,6 @@ func (s *Server) handleCreds(conn net.Conn, uid, gid uint32, pid int32) {
 	res.RequestID = sanitizeID(req.RequestID)
 	res.TaskID = entry.TaskID
 	respond(res, entry)
-}
-
-// execute runs the validated operation with bounded concurrency + timeout.
-func (s *Server) execute(req *Request, unit string, listLimit int) *Response {
-	res := &Response{Status: StatusFailed}
-	select {
-	case s.sem <- struct{}{}:
-		defer func() { <-s.sem }()
-	case <-time.After(5 * time.Second):
-		res.Status = StatusRejected
-		res.ErrorCategory = CatRateLimited
-		return res
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), s.cfg.ExecTimeout)
-	defer cancel()
-	sysd := s.cfg.Systemd
-	if sysd == nil {
-		sysd = &svcops.Manager{}
-	}
-
-	var result any
-	var err error
-	switch req.Operation {
-	case OpServiceList:
-		var units []svcops.UnitInfo
-		units, err = sysd.List(ctx)
-		if units != nil && len(units) > listLimit {
-			units = units[:listLimit]
-		}
-		result = map[string]any{"units": units}
-	case OpServiceStatus:
-		var u svcops.UnitInfo
-		u, err = sysd.Status(ctx, unit)
-		result = map[string]any{"unit": u}
-	case OpServiceStart:
-		err = sysd.Start(ctx, unit)
-		result = map[string]any{"unit": unit, "action": "start"}
-	case OpServiceStop:
-		err = sysd.Stop(ctx, unit)
-		result = map[string]any{"unit": unit, "action": "stop"}
-	case OpServiceRestart:
-		err = sysd.Restart(ctx, unit)
-		result = map[string]any{"unit": unit, "action": "restart"}
-	default:
-		// validateRequest garantisi dışına çıkılmamalı; savunma amaçlı.
-		res.Status = StatusRejected
-		res.ErrorCategory = CatUnsupportedOp
-		return res
-	}
-
-	if err != nil {
-		res.Output = clampStr(err.Error(), 500)
-		switch {
-		case errors.Is(err, svcops.ErrInvalidUnit):
-			res.Status = StatusRejected
-			res.ErrorCategory = CatInvalidParams
-		case errors.Is(err, svcops.ErrTimeout):
-			res.Status = StatusFailed
-			res.ErrorCategory = CatExecutorTimedOut
-		default:
-			res.Status = StatusFailed
-			res.ErrorCategory = CatExecutorFailed
-		}
-		return res
-	}
-	b, _ := json.Marshal(result)
-	res.Status = StatusSucceeded
-	res.Result = b
-	return res
 }
 
 func writeResponse(conn net.Conn, res *Response) error {

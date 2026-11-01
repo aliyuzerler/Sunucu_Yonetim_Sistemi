@@ -12,11 +12,18 @@ import { StatusBadge } from "../components/StatusBadge";
 import type { BadgeVariant } from "../components/StatusBadge";
 import { useI18n } from "../i18n/LocaleProvider";
 
-// Faz 04 unit allowlist — istemci tarafında da uygulanır; gerçek kural
+// Faz 04/05 allowlist'leri — istemci tarafında da uygulanır; gerçek kural
 // sunucu + agent + broker tarafında zorlanır (gizleme yetkilendirme değildir).
 const UNIT_PATTERN = /^[A-Za-z0-9][A-Za-z0-9@._-]{0,246}\.service$/;
+const SCM_PATTERN = /^[A-Za-z0-9][A-Za-z0-9 ._-]{0,79}$/;
 
-const SERVICE_OPERATIONS = [
+function validScmName(name: string): boolean {
+  if (!SCM_PATTERN.test(name)) return false;
+  const last = name[name.length - 1];
+  return last !== "." && last !== " ";
+}
+
+const LINUX_SERVICE_OPS = [
   "linux.systemd.service.list",
   "linux.systemd.service.status",
   "linux.systemd.service.start",
@@ -24,7 +31,22 @@ const SERVICE_OPERATIONS = [
   "linux.systemd.service.restart",
 ] as const;
 
-type ServiceOp = (typeof SERVICE_OPERATIONS)[number];
+const WINDOWS_SERVICE_OPS = [
+  "windows.scm.service.list",
+  "windows.scm.service.status",
+  "windows.scm.service.start",
+  "windows.scm.service.stop",
+  "windows.scm.service.restart",
+] as const;
+
+const ALL_SERVICE_OPS = [...LINUX_SERVICE_OPS, ...WINDOWS_SERVICE_OPS];
+
+type ServiceOp = (typeof ALL_SERVICE_OPS)[number];
+
+// EVENTLOG_CHANNELS: kapalı enum — Security kanalı tasarımdan hariçtir
+// (ADR-0009); gerçek kural sunucu + agent tarafında zorlanır.
+const EVENTLOG_CHANNELS = ["Application", "System", "Setup"] as const;
+type EventlogChannel = (typeof EVENTLOG_CHANNELS)[number];
 
 function bytesLabel(n: number, locale: string): string {
   if (!Number.isFinite(n) || n <= 0) return "0 B";
@@ -65,6 +87,12 @@ export function NodeDetail({ node, onBack }: { node: NodeRecord; onBack: () => v
   const [unitError, setUnitError] = useState<string | null>(null);
   const [pendingOp, setPendingOp] = useState<ServiceOp | null>(null);
   const [lastTaskId, setLastTaskId] = useState<string | null>(null);
+  // Faz 05: event-log formu (yalnız windows node'larında görünür).
+  const [evChannel, setEvChannel] = useState<EventlogChannel>("System");
+  const [evLevel, setEvLevel] = useState(0);
+  const [evCount, setEvCount] = useState(50);
+  const [evError, setEvError] = useState<string | null>(null);
+  const [evPending, setEvPending] = useState(false);
 
   const reload = useCallback(() => setReloadKey((k) => k + 1), []);
 
@@ -102,7 +130,7 @@ export function NodeDetail({ node, onBack }: { node: NodeRecord; onBack: () => v
           `/api/v1/tasks?node_id=${encodeURIComponent(node.id)}&limit=20`,
         );
         if (cancelled) return;
-        setTasks(page.tasks.filter((x) => SERVICE_OPERATIONS.includes(x.operation as ServiceOp)).slice(0, 10));
+        setTasks(page.tasks.filter((x) => (ALL_SERVICE_OPS as readonly string[]).includes(x.operation)).slice(0, 10));
       } catch {
         // Görev listesi isteğe bağlıdır; hata görünümü bozmaz.
       }
@@ -112,23 +140,45 @@ export function NodeDetail({ node, onBack }: { node: NodeRecord; onBack: () => v
     };
   }, [node.id, reloadKey]);
 
-  const serviceCap = capabilities.find((c) => c.capability_id === "linux.systemd.service.restart");
+  // Faz 05: aile seçimi — node'un beyan ettiği kabiliyete göre linux
+  // systemd ya da windows SCM ailesi kullanılır.
+  const isWindows = capabilities.some((c) => c.capability_id.startsWith("windows.scm."));
+  const serviceOps: readonly string[] = isWindows ? WINDOWS_SERVICE_OPS : LINUX_SERVICE_OPS;
+  const familyRestartCap = capabilities.find((c) =>
+    c.capability_id === (isWindows ? "windows.scm.service.restart" : "linux.systemd.service.restart"),
+  );
+
+  function validateTarget(): boolean {
+    const value = unit.trim();
+    const ok = isWindows ? validScmName(value) : UNIT_PATTERN.test(value);
+    if (!ok) {
+      setUnitError(t(isWindows ? "nodedetail.services.serviceInvalid" : "nodedetail.services.unitInvalid"));
+      return false;
+    }
+    return true;
+  }
 
   async function submitServiceOp(op: ServiceOp) {
-    if (op !== "linux.systemd.service.list" && !UNIT_PATTERN.test(unit.trim())) {
-      setUnitError(t("nodedetail.services.unitInvalid"));
+    if (op !== serviceOps[0] && !validateTarget()) {
       return;
     }
     setUnitError(null);
     setPendingOp(op);
     try {
+      const value = unit.trim();
+      const payload =
+        op === serviceOps[0]
+          ? {}
+          : isWindows
+            ? { service: value }
+            : { unit: value };
       const created = await apiFetch<TaskRecord>("/api/v1/tasks", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           operation: op,
           node_id: node.id,
-          payload: op === "linux.systemd.service.list" ? {} : { unit: unit.trim() },
+          payload,
         }),
       });
       setLastTaskId(created.id);
@@ -142,7 +192,35 @@ export function NodeDetail({ node, onBack }: { node: NodeRecord; onBack: () => v
 
   function onUnitSubmit(e: FormEvent) {
     e.preventDefault();
-    void submitServiceOp("linux.systemd.service.status");
+    void submitServiceOp(serviceOps[1] as ServiceOp);
+  }
+
+  // Faz 05: event-log okuma görevi (yalnız windows; kapalı enum + sınırlı
+  // sayılar; gerçek kural sunucu + agent tarafında zorlanır).
+  async function submitEventlogRead() {
+    if (evCount < 1 || evCount > 200) {
+      setEvError(t("nodedetail.eventlog.countInvalid"));
+      return;
+    }
+    setEvError(null);
+    setEvPending(true);
+    try {
+      const created = await apiFetch<TaskRecord>("/api/v1/tasks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          operation: "windows.eventlog.read",
+          node_id: node.id,
+          payload: { channel: evChannel, level: evLevel, count: evCount },
+        }),
+      });
+      setLastTaskId(created.id);
+      setEvPending(false);
+      reload();
+    } catch (err) {
+      setEvPending(false);
+      setError(isApiError(err) ? err.message : t("common.error.generic"));
+    }
   }
 
   const taskBadge: Record<TaskRecord["status"], BadgeVariant> = {
@@ -310,25 +388,29 @@ export function NodeDetail({ node, onBack }: { node: NodeRecord; onBack: () => v
         )}
       </section>
 
-      {/* Servis işlemleri (tipli; shell yok) */}
+      {/* Servis işlemleri (tipli; shell yok; aile: linux systemd / windows SCM) */}
       <section aria-label={t("nodedetail.services.title")} className="rounded-xl border border-border bg-panel p-4 shadow-sm">
-        <h3 className="text-sm font-semibold text-ink">{t("nodedetail.services.title")}</h3>
+        <h3 className="text-sm font-semibold text-ink">
+          {t(isWindows ? "nodedetail.services.titleWindows" : "nodedetail.services.title")}
+        </h3>
         <p className="mt-1 text-[11px] text-ink-soft">{t("nodedetail.services.note")}</p>
-        {serviceCap && !serviceCap.available && (
+        {familyRestartCap && !familyRestartCap.available && (
           <p role="status" className="mt-2 rounded-lg bg-warn-soft px-3 py-2 text-xs text-warn">
-            {t("nodedetail.services.unavailable", { reason: serviceCap.reason_unavailable || "" })}
+            {t("nodedetail.services.unavailable", { reason: familyRestartCap.reason_unavailable || "" })}
           </p>
         )}
         <form onSubmit={onUnitSubmit} className="mt-3 flex flex-col gap-2">
           <label className="flex flex-col gap-1">
-            <span className="text-xs font-medium text-ink">{t("nodedetail.services.unit")}</span>
+            <span className="text-xs font-medium text-ink">
+              {t(isWindows ? "nodedetail.services.service" : "nodedetail.services.unit")}
+            </span>
             <input
               value={unit}
               onChange={(e) => {
                 setUnit(e.target.value);
                 setUnitError(null);
               }}
-              placeholder="nginx.service"
+              placeholder={isWindows ? "Dhcp" : "nginx.service"}
               aria-invalid={unitError !== null}
               className="rounded-lg border border-border bg-surface px-3 py-1.5 text-sm text-ink focus-visible:outline-2 focus-visible:outline-accent"
             />
@@ -341,14 +423,14 @@ export function NodeDetail({ node, onBack }: { node: NodeRecord; onBack: () => v
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
-              onClick={() => void submitServiceOp("linux.systemd.service.list")}
+              onClick={() => void submitServiceOp(serviceOps[0] as ServiceOp)}
               disabled={pendingOp !== null}
               className="rounded-lg border border-border px-3 py-1.5 text-xs text-ink hover:bg-neutral-soft disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-accent"
             >
               {t("nodedetail.services.list")}
             </button>
             {(["status", "start", "stop", "restart"] as const).map((verb) => {
-              const op = `linux.systemd.service.${verb}` as ServiceOp;
+              const op = `${isWindows ? "windows.scm.service" : "linux.systemd.service"}.${verb}` as ServiceOp;
               const destructive = verb === "stop" || verb === "restart";
               return (
                 <button
@@ -399,6 +481,77 @@ export function NodeDetail({ node, onBack }: { node: NodeRecord; onBack: () => v
           </table>
         )}
       </section>
+
+      {/* Faz 05: Windows Event Log okuma (yalnız windows node'ları) */}
+      {isWindows && (
+        <section aria-label={t("nodedetail.eventlog.title")} className="rounded-xl border border-border bg-panel p-4 shadow-sm">
+          <h3 className="text-sm font-semibold text-ink">{t("nodedetail.eventlog.title")}</h3>
+          <p className="mt-1 text-[11px] text-ink-soft">{t("nodedetail.eventlog.note")}</p>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              void submitEventlogRead();
+            }}
+            className="mt-3 flex flex-wrap items-end gap-2"
+          >
+            <label className="flex flex-col gap-1">
+              <span className="text-xs font-medium text-ink">{t("nodedetail.eventlog.channel")}</span>
+              <select
+                value={evChannel}
+                onChange={(e) => setEvChannel(e.target.value as EventlogChannel)}
+                className="rounded-lg border border-border bg-surface px-3 py-1.5 text-sm text-ink focus-visible:outline-2 focus-visible:outline-accent"
+              >
+                {EVENTLOG_CHANNELS.map((ch) => (
+                  <option key={ch} value={ch}>
+                    {ch}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-xs font-medium text-ink">{t("nodedetail.eventlog.level")}</span>
+              <select
+                value={evLevel}
+                onChange={(e) => setEvLevel(Number(e.target.value))}
+                className="rounded-lg border border-border bg-surface px-3 py-1.5 text-sm text-ink focus-visible:outline-2 focus-visible:outline-accent"
+              >
+                <option value={0}>{t("nodedetail.eventlog.levelAny")}</option>
+                <option value={1}>{t("nodedetail.eventlog.levelCritical")}</option>
+                <option value={2}>{t("nodedetail.eventlog.levelError")}</option>
+                <option value={3}>{t("nodedetail.eventlog.levelWarning")}</option>
+                <option value={4}>{t("nodedetail.eventlog.levelInformation")}</option>
+                <option value={5}>{t("nodedetail.eventlog.levelVerbose")}</option>
+              </select>
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-xs font-medium text-ink">{t("nodedetail.eventlog.count")}</span>
+              <input
+                type="number"
+                min={1}
+                max={200}
+                value={evCount}
+                onChange={(e) => {
+                  setEvCount(Number(e.target.value));
+                  setEvError(null);
+                }}
+                className="w-24 rounded-lg border border-border bg-surface px-3 py-1.5 text-sm text-ink focus-visible:outline-2 focus-visible:outline-accent"
+              />
+            </label>
+            <button
+              type="submit"
+              disabled={evPending}
+              className="rounded-lg border border-border bg-surface px-3 py-1.5 text-xs font-medium text-ink hover:bg-neutral-soft disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-accent"
+            >
+              {t("nodedetail.eventlog.read")}
+            </button>
+          </form>
+          {evError && (
+            <p role="alert" className="mt-2 text-xs text-err">
+              {evError}
+            </p>
+          )}
+        </section>
+      )}
     </div>
   );
 }

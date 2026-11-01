@@ -211,9 +211,36 @@ func TestRegistryValidation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("varsayılan kayıt defteri: %v", err)
 	}
-	// Faz 04: echo/noop/tag + 5 systemd servis operasyonu = 8.
-	if len(reg.Names()) != 8 {
-		t.Fatalf("8 operasyon bekleniyordu: %v", reg.Names())
+	// Faz 04+05: echo/noop/tag + 5 systemd + 5 SCM + eventlog = 14.
+	if len(reg.Names()) != 14 {
+		t.Fatalf("14 operasyon bekleniyordu: %v", reg.Names())
+	}
+	// Faz 05: Windows ailesi RBAC katmanı — SCM okuma service:read,
+	// SCM kontrol service:control, eventlog eventlog:read.
+	winPerms := map[string]string{
+		"windows.scm.service.list":    "service:read",
+		"windows.scm.service.status":  "service:read",
+		"windows.scm.service.start":   "service:control",
+		"windows.scm.service.stop":    "service:control",
+		"windows.scm.service.restart": "service:control",
+		"windows.eventlog.read":       "eventlog:read",
+	}
+	for name, want := range winPerms {
+		spec, ok := reg.Spec(name)
+		if !ok {
+			t.Fatalf("%s kayıtlı olmalı", name)
+		}
+		if spec.Target != TargetNode {
+			t.Fatalf("%s node hedefli olmalı", name)
+		}
+		if spec.RequiredPerm != want {
+			t.Fatalf("%s RequiredPerm = %q, beklenen %q", name, spec.RequiredPerm, want)
+		}
+	}
+	// Windows restart da non-idempotent.
+	wrestart, _ := reg.Spec("windows.scm.service.restart")
+	if wrestart.Class != ClassNonIdem || wrestart.RetrySafe {
+		t.Fatalf("windows restart non_idempotent olmalı: %+v", wrestart)
 	}
 	if _, ok := reg.Spec("noop.echo"); !ok {
 		t.Fatal("noop.echo kayıtlı olmalı")

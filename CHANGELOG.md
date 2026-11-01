@@ -2,6 +2,33 @@
 
 ## Unreleased
 
+## [0.6.0] — 2026-11-01 — Faz 05: Windows Server Agent ve native adaptörler
+
+### Added
+- Windows agent (`windows/amd64`): aynı agent çekirdeği (outbound mTLS, hello/heartbeat/capability/facts/metrics, tipli operasyonlar) — platform-ayrık adaptörler build tag'leriyle (`detect_windows.go`, `collect_windows.go`, `registry_windows.go`, `daemon_windows.go`); gRPC sözleşmesi DEĞİŞMEDİ (buf breaking gate ile korumalı).
+- SCM adaptörü (`agent/internal/winscm`): list/status/start/stop/restart `golang.org/x/sys/windows/svc` + `svc/mgr` yapılandırılmış API ile (sc.exe çıktı ayrıştırma YOK); en az ayrıcalıklı SCM erişimi (ENUMERATE|CONNECT); stop→state poll→start; restart non-idempotent + retry-güvensiz; servis KEY adı allowlist `^[A-Za-z0-9][A-Za-z0-9 ._-]{0,79}$` (sondaki nokta/boşluk reddi).
+- Event Log okuyucu (`agent/internal/winevent`): `wevtutil query-events <kanal> /count:N /rd:true /format:xml` SABİT argv şablonu; kanal kapalı enum (Application/System/Setup — Security tasarımdan hariç), seviye istemci tarafında filtre, çıktı `encoding/xml` ile sınırlı olaylara ayrıştırılır (`winops.ParseWevtutilXML`, tüm GOOS'larda fixture-testli); XPath/PowerShell YOK.
+- Windows broker: `server-privd` LocalSystem olarak yalnız `\\.\pipe\server-control-privd` dinler (SDDL `D:P(A;;GA;;;SY)(A;;GA;;;BA)` + agent SID); çağırıcı kimliği `ImpersonateNamedPipeClient` + thread-token SID ile çekirdek garantili; agent pipe'ı `SECURITY_IDENTIFICATION` ile açar; `--allow-sid` açık allowlist (default deny), her ret audit'li. Unix-dışı taşıyıcılar `identifyPeer`'de reddedilir (Faz 04 IN-01 bulgusu bu vesileyle giderildi).
+- Çapraz-platform şema paketi (`agent/internal/winops`): SCM/eventlog payload şemaları, doğrulayıcılar, wevtutil XML ayrıştırıcı — her GOOS'ta birim testli.
+- Windows metrics: GetSystemTimes (CPU pencere %), GlobalMemoryStatusEx, GetDriveType+GetDiskFreeSpaceEx+GetVolumeInformationW (yalnız FIXED hacimler), GetIfTable (MIB_IFROW sabit offset ayrıştırma, fixture-testli), GetTickCount64; facts registry'den (ProductName/DisplayVersion/CurrentBuild+UBR) — YENİ harici bağımlılık YOK (x/sys zaten direct).
+- Agent/ hizmet olarak Windows: `server-agent svc-run` (svc.Handler; StartPending→Running→StopPending) ve `server-privd` SCM farkındalığı; `deploy/agent-windows/README.md` sc.exe kurulum + doğrulama listesi + kaldırma.
+- Control plane: 6 yeni operasyon (`windows.scm.service.list/status/start/stop/restart` — okuma `service:read`, kontrol `service:control`; `windows.eventlog.read` — YENİ `eventlog:read` izni); migration `0009_windows_ops` (yalnız YENİ izin seed'i — CI-04 dersi); şemalar `agent/internal/winops` ile ayna.
+- UI: NodeDetail Windows-farkındalıklı — SCM başlığı/etiketi/placeholder, `{service}` payload'ı, istemci SCM allowlist doğrulaması; Windows node'larda Event Log kartı (kanal seçimi — Security enum'da yok, seviye, olay sayısı 1-200); TR/EN sözlükler; 3 yeni vitest.
+- CI: `agent-windows` job (windows-2025: gerçek SCM salt-okuma, gerçek named pipe + SID izin/ret, wevtutil System sondası, Win32 metrics smoke, registry facts); linux agent job'una `GOOS=windows` çapraz derleme kontrolü.
+
+### Changed
+- `agent/internal/osdetect` ve `internal/metrics` platform-ayrık dosyalara bölündü (Facts/Collector/Snapshot tipleri paylaşımlı kaldı; `applyCPU` ortak pencere mantığı).
+- `broker.Client` platform-ayrık dial (`dial_unix.go`/`dial_windows.go`); `broker.Config` per-OS (AllowedUIDs / AllowedSIDs).
+- `e2e/mock-api.mjs`: windows telemetri şablonu (`win-` öneki / os_family=windows) + windows operasyon kataloğu.
+- `docs/decisions/README.md`: ADR-0009 dizine eklendi.
+
+### Security
+- PowerShell yürütme yüzeyi YOK (kalıcı tasarım reddi — ADR-0009); hiçbir yetenek komut yürütme kabulü sunmaz.
+- Named pipe: yalnız SYSTEM/Administrators/agent SID; çağırıcı kimliği çekirdek doğrulamalı (PID yeniden kullanım yarışı yok); agent kimliği IDENTIFICATION düzeyinde — broker asla agent kimliğine hareket edemez.
+- Üç katmanlı allowlist Windows'a taşındı: sunucu validator → agent executor → broker validateRequest.
+- Windows testleri CI'da unprivileged kullanıcı ile koşar; gerçek servis kontrolü mock'la sınanır; gerçek host doğrulaması disposable VM prosedürüyle sahibine belgelendi.
+
+
 ## [0.5.0] — 2026-11-01 — Faz 04: Linux Agent ve temel OS yönetimi
 
 ### Added

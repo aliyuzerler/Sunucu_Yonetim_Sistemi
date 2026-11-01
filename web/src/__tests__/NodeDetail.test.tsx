@@ -209,3 +209,99 @@ describe("NodesPage detail navigation", () => {
     expect(screen.getByRole("button", { name: /Node listesine dön/ })).toBeInTheDocument();
   });
 });
+
+describe("NodeDetail (Faz 05 — Windows SCM ailesi)", () => {
+  const winFacts = {
+    ...facts,
+    os_id: "windows",
+    os_pretty_name: "Windows Server 2022 Standard",
+    kernel_release: "build 20348.2849",
+    systemd_version: "",
+    package_manager: "msi",
+    systemd_available: false,
+    source: "registry",
+  };
+  const winCapabilities = {
+    capabilities: [
+      { node_id: node.id, capability_id: "agent.echo", version: "1.0.0", available: true },
+      { node_id: node.id, capability_id: "windows.scm.service.restart", version: "1.0.0", available: true },
+      { node_id: node.id, capability_id: "windows.eventlog.read", version: "1.0.0", available: true },
+    ],
+  };
+  const winRoutes = {
+    [`/api/v1/nodes/${node.id}/facts/system`]: winFacts,
+    [`/api/v1/nodes/${node.id}/metrics/latest`]: metrics,
+    [`/api/v1/nodes/${node.id}/capabilities`]: winCapabilities,
+    "/api/v1/tasks": { tasks: [] },
+  };
+
+  it("windows node'unda SCM başlığı, servis adı etiketi ve event log formu görünür", async () => {
+    mockFetch.mockImplementation(routeJson(winRoutes));
+    render(
+      <LocaleProvider>
+        <NodeDetail node={node} onBack={() => {}} />
+      </LocaleProvider>,
+    );
+    await waitFor(() => {
+      expect(screen.getByText("Windows Server 2022 Standard")).toBeInTheDocument();
+    });
+    expect(screen.getByText("Servis işlemleri (Windows SCM)")).toBeInTheDocument();
+    expect(screen.getByText("Servis adı (ör. Dhcp)")).toBeInTheDocument();
+    expect(screen.getByText("Olay günlüğü (Windows Event Log)")).toBeInTheDocument();
+  });
+
+  it("geçersiz SCM servis adını istemci tarafında reddeder ve payload {service} ile gönderir", async () => {
+    mockFetch.mockImplementation(routeJson(winRoutes));
+    render(
+      <LocaleProvider>
+        <NodeDetail node={node} onBack={() => {}} />
+      </LocaleProvider>,
+    );
+    await waitFor(() => {
+      expect(screen.getByText("Servis işlemleri (Windows SCM)")).toBeInTheDocument();
+    });
+
+    // Geçersiz: sondaki nokta → istek gitmez.
+    await userEvent.type(screen.getByPlaceholderText("Dhcp"), "spooler.");
+    await userEvent.click(screen.getByRole("button", { name: "Başlat" }));
+    expect(screen.getByText(/Geçersiz servis adı/)).toBeInTheDocument();
+    expect(mockFetch).not.toHaveBeenCalledWith("/api/v1/tasks", expect.objectContaining({ method: "POST" }));
+
+    // Geçerli: {service} payload'ıyla görev oluşturulur.
+    await userEvent.clear(screen.getByPlaceholderText("Dhcp"));
+    await userEvent.type(screen.getByPlaceholderText("Dhcp"), "Dhcp");
+    await userEvent.click(screen.getByRole("button", { name: "Yeniden başlat" }));
+    await waitFor(() => {
+      const call = mockFetch.mock.calls.find(([p]) => String(p) === "/api/v1/tasks");
+      expect(call).toBeTruthy();
+    });
+    const [, init] = mockFetch.mock.calls.find(([p]) => String(p) === "/api/v1/tasks")!;
+    const body = JSON.parse(String((init as RequestInit).body));
+    expect(body.operation).toBe("windows.scm.service.restart");
+    expect(body.payload).toEqual({ service: "Dhcp" });
+  });
+
+  it("event log okuma görevini kapalı enum + sınırlı sayılarla oluşturur", async () => {
+    mockFetch.mockImplementation(routeJson(winRoutes));
+    render(
+      <LocaleProvider>
+        <NodeDetail node={node} onBack={() => {}} />
+      </LocaleProvider>,
+    );
+    await waitFor(() => {
+      expect(screen.getByText("Olay günlüğü (Windows Event Log)")).toBeInTheDocument();
+    });
+    // Security kanalı enum'da YOK (ADR-0009).
+    const channelOptions = screen.getAllByRole("option").map((o) => o.textContent);
+    expect(channelOptions.join(",")).not.toContain("Security");
+    await userEvent.click(screen.getByRole("button", { name: "Olayları oku" }));
+    await waitFor(() => {
+      const call = mockFetch.mock.calls.find(([p]) => String(p) === "/api/v1/tasks");
+      expect(call).toBeTruthy();
+    });
+    const [, init] = mockFetch.mock.calls.find(([p]) => String(p) === "/api/v1/tasks")!;
+    const body = JSON.parse(String((init as RequestInit).body));
+    expect(body.operation).toBe("windows.eventlog.read");
+    expect(body.payload).toEqual({ channel: "System", level: 0, count: 50 });
+  });
+});

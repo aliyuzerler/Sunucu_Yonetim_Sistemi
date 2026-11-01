@@ -1,8 +1,9 @@
 # agent/
 
 Node Agent — ayrı Go ikilileri: `server-agent` (yetkisiz, outbound mTLS) ve
-`server-privd` (root, yerel privileged broker). Faz 03 protokolü + Faz 04
-OS yönetimi.
+`server-privd` (ayrıcalıklı yerel broker). Faz 03 protokolü + Faz 04 Linux
+OS yönetimi + Faz 05 Windows Server adaptörleri (SCM, Event Log, Win32
+metrikler; `docs/architecture/windows-support.md`).
 
 ## Güvenlik modeli (ADR-0008 + ADR-0003)
 

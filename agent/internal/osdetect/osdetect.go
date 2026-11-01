@@ -1,33 +1,26 @@
-// Package osdetect implements Faz 04 system fact detection: OS/distro/version
-// (os-release), kernel release (procfs), systemd availability + version and
-// the package manager family. Detection is read-only; it never modifies the
-// host. root allows fixture-based tests ("" or "/" = the real host).
+// Package osdetect implements Faz 04/05 system fact detection. Detection is
+// read-only; it never modifies the host. The Facts model is shared across
+// operating systems; per-GOOS detection lives in detect_linux.go and
+// detect_windows.go (ADR-0009).
 package osdetect
 
 import (
-	"bufio"
-	"context"
-	"fmt"
 	"os"
-	"os/exec"
-	"path/filepath"
-	"runtime"
-	"strings"
 	"time"
 )
 
 // Facts is the detected platform data reported to the control plane.
 type Facts struct {
-	OSID             string // /etc/os-release ID (ubuntu, debian)
-	OSVersionID      string // VERSION_ID (24.04, 13)
-	OSPrettyName     string // PRETTY_NAME
-	OSHomeURL        string // HOME_URL
-	KernelRelease    string // /proc/sys/kernel/osrelease
+	OSID             string // linux: /etc/os-release ID (ubuntu, debian); windows: "windows"
+	OSVersionID      string // linux: VERSION_ID; windows: DisplayVersion (e.g. 21H2)
+	OSPrettyName     string // linux: PRETTY_NAME; windows: ProductName+edition
+	OSHomeURL        string // linux: HOME_URL; windows: ""
+	KernelRelease    string // linux: /proc/sys/kernel/osrelease; windows: "build 20348.230"
 	Arch             string
-	SystemdAvailable bool
-	SystemdVersion   string // "255" when present
-	PackageManager   string // apt | dpkg | dnf | yum | unknown
-	Source           string // provenance, e.g. "os-release+procfs+systemctl"
+	SystemdAvailable bool   // linux only (false on windows)
+	SystemdVersion   string // linux only
+	PackageManager   string // linux: apt|dpkg|dnf|yum|unknown; windows: msi|unknown
+	Source           string // provenance, e.g. "os-release+procfs+systemctl" / "registry"
 	CollectedAt      time.Time
 }
 
@@ -36,137 +29,14 @@ const (
 	SourceOSRelease = "os-release"
 	SourceProcfs    = "procfs"
 	SourceSystemctl = "systemctl"
+	SourceRegistry  = "registry"
 )
 
-// Probe reports systemd availability and version for the host at root.
+// Probe reports systemd availability and version for the host at root
+// (linux only; ignored on windows).
 type Probe func(root string) (version string, ok bool)
 
-// Detect collects system facts under root. probe may be nil (DefaultProbe).
-func Detect(root string, probe Probe) (Facts, error) {
-	if probe == nil {
-		probe = DefaultProbe
-	}
-	f := Facts{Arch: runtime.GOARCH, CollectedAt: time.Now().UTC()}
-
-	release, err := parseOSRelease(filepath.Join(root, "etc", "os-release"))
-	if err == nil {
-		f.OSID = release["ID"]
-		f.OSVersionID = release["VERSION_ID"]
-		f.OSPrettyName = release["PRETTY_NAME"]
-		f.OSHomeURL = release["HOME_URL"]
-		f.Source = SourceOSRelease
-	}
-	if kr, err := os.ReadFile(filepath.Join(root, "proc", "sys", "kernel", "osrelease")); err == nil {
-		f.KernelRelease = strings.TrimSpace(string(kr))
-		f.Source = joinSource(f.Source, SourceProcfs)
-	}
-	if v, ok := probe(root); ok {
-		f.SystemdAvailable = true
-		f.SystemdVersion = v
-		f.Source = joinSource(f.Source, SourceSystemctl)
-	}
-	f.PackageManager = detectPackageManager(root)
-	if f.Source == "" {
-		return f, fmt.Errorf("sistem bilgileri okunamadı: %s", root)
-	}
-	return f, nil
-}
-
-// parseOSRelease parses KEY=VALUE lines honoring quotes and escapes
-// (os-release(5) shell-compatible quoting).
-func parseOSRelease(path string) (map[string]string, error) {
-	fh, err := os.Open(path) //nolint:gosec // path is root-joined by Detect or a test fixture
-	if err != nil {
-		return nil, err
-	}
-	defer fh.Close()
-	out := map[string]string{}
-	sc := bufio.NewScanner(fh)
-	sc.Buffer(make([]byte, 0, 4<<10), 64<<10)
-	for sc.Scan() {
-		line := strings.TrimSpace(sc.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		k, v, ok := strings.Cut(line, "=")
-		if !ok {
-			continue
-		}
-		k = strings.TrimSpace(k)
-		v = strings.TrimSpace(v)
-		if len(v) >= 2 && (v[0] == '"' || v[0] == '\'') && v[len(v)-1] == v[0] {
-			v = v[1 : len(v)-1]
-			v = strings.NewReplacer(`\"`, `"`, `\'`, `'`, `\\`, `\`).Replace(v)
-		}
-		out[k] = v
-	}
-	if err := sc.Err(); err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-// DefaultProbe determines systemd availability without modifying the host:
-// /run/systemd/system presence or PID 1 identity, then `systemctl --version`
-// (exec argv, never a shell) for the version number.
-func DefaultProbe(root string) (string, bool) {
-	if !systemdRunning(root) {
-		return "", false
-	}
-	bin := lookPath(filepath.Join(root, "usr", "bin", "systemctl"), "systemctl")
-	if bin == "" {
-		return "", false
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-	out, err := runArgv(ctx, bin, "--version")
-	if err != nil {
-		return "", false
-	}
-	return parseSystemdVersion(out), true
-}
-
-// systemdRunning checks the two canonical markers (root-relative so that
-// fixtures can fake both).
-func systemdRunning(root string) bool {
-	if st, err := os.Stat(filepath.Join(root, "run", "systemd", "system")); err == nil && st.IsDir() {
-		return true
-	}
-	if b, err := os.ReadFile(filepath.Join(root, "proc", "1", "comm")); err == nil {
-		if strings.HasPrefix(strings.TrimSpace(string(b)), "systemd") {
-			return true
-		}
-	}
-	return false
-}
-
-// parseSystemdVersion extracts the version from `systemd 255 (2024.02)…`.
-func parseSystemdVersion(firstLine string) string {
-	fields := strings.Fields(strings.TrimSpace(firstLine))
-	if len(fields) >= 2 && fields[0] == "systemd" {
-		return fields[1]
-	}
-	return ""
-}
-
-// detectPackageManager probes well-known package managers under <root>/usr/bin.
-// apt implies dpkg on Debian-family systems; report the highest-level tool.
-func detectPackageManager(root string) string {
-	for _, p := range []struct{ file, name string }{
-		{"usr/bin/apt-get", "apt"},
-		{"usr/bin/dnf", "dnf"},
-		{"usr/bin/yum", "yum"},
-		{"usr/bin/dpkg", "dpkg"},
-	} {
-		if fileExists(filepath.Join(root, p.file)) {
-			return p.name
-		}
-	}
-	return "unknown"
-}
-
-// ---- küçük yardımcılar ----
-
+// joinSource appends provenance fragments.
 func joinSource(a, b string) string {
 	if a == "" {
 		return b
@@ -178,27 +48,3 @@ func fileExists(p string) bool {
 	st, err := os.Stat(p)
 	return err == nil && !st.IsDir()
 }
-
-// lookPath prefers the root-relative well-known location, then PATH.
-func lookPath(absolute, name string) string {
-	if fileExists(absolute) {
-		return absolute
-	}
-	if p, err := execLookPath(name); err == nil {
-		return p
-	}
-	return ""
-}
-
-// runArgv executes one fixed program with argument-vector only (ADR-0003:
-// no shell, no string concatenation of inputs).
-func runArgv(ctx context.Context, bin string, args ...string) (string, error) {
-	c := exec.CommandContext(ctx, bin, args...) //nolint:gosec // bin from LookPath/well-known path, args are fixed
-	out, err := c.Output()
-	if err != nil {
-		return "", err
-	}
-	return string(out), nil
-}
-
-func execLookPath(name string) (string, error) { return exec.LookPath(name) }

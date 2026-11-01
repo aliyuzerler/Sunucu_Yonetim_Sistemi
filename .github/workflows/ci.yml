@@ -208,6 +208,34 @@ jobs:
         run: cd agent && go build -buildvcs=false ./...
       - name: go test -race
         run: cd agent && CGO_ENABLED=1 go test -race ./...
+      - name: Windows çapraz derleme kontrolü
+        # Faz 05: linux runner'da GOOS=windows derlemesi her push'ta
+        # windows kod yolunun (winscm/winevent/pipe broker) derlendiğini
+        # garanti eder; gerçek testler agent-windows job'ında koşar.
+        run: cd agent && GOOS=windows GOARCH=amd64 go build -buildvcs=false ./...
+
+  agent-windows:
+    name: Agent (Go, windows-2025)
+    runs-on: windows-2025
+    timeout-minutes: 12
+    # Faz 05: gerçek Windows runner'da SCM (salt okuma), named pipe broker
+    # (SID allowlist), wevtutil event log, Win32 metrics ve registry facts
+    # testleri koşar. Kontrol (start/stop) işlemleri arayüz mock'larıyla
+    # sınanır; runner'da gerçek servis kontrolü yapılmaz.
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Setup Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: agent/go.mod
+          cache-dependency-path: agent/go.sum
+      - name: go vet
+        run: cd agent; go vet ./...
+      - name: go build (server-agent + server-privd)
+        run: cd agent; go build -buildvcs=false ./...
+      - name: go test
+        run: cd agent; go test ./...
 
   secret-scan:
     name: Secret taraması

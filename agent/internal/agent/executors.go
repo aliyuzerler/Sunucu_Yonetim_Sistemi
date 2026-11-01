@@ -9,11 +9,13 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/broker"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/svcops"
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/winops"
 	agentv1 "github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/gen/proto/servercontrol/agent/v1"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -184,22 +186,13 @@ func (EchoExecutor) Execute(_ context.Context, payload []byte) ([]byte, string, 
 	return body, "echo tamamlandı", nil
 }
 
-// DefaultRegistry returns the Faz 04 agent executor set: the echo proof plus
-// the five systemd service operations (broker-backed). brokerPath is the local
-// privileged broker's Unix socket; the service capabilities report
-// availability by probing that socket at report time.
-func DefaultRegistry(brokerPath string) (*ExecutorRegistry, error) {
-	return NewRegistry(
-		EchoExecutor{},
-		NewServiceExecutor(broker.OpServiceList, brokerPath),
-		NewServiceExecutor(broker.OpServiceStatus, brokerPath),
-		NewServiceExecutor(broker.OpServiceStart, brokerPath),
-		NewServiceExecutor(broker.OpServiceStop, brokerPath),
-		NewServiceExecutor(broker.OpServiceRestart, brokerPath),
-	)
-}
+// DefaultRegistry builds the per-OS executor set (registry_linux.go /
+// registry_windows.go): the echo proof plus broker-backed service
+// operations and (windows) the direct event-log reader. brokerPath is the
+// local privileged broker's platform endpoint; the service capabilities
+// report availability by probing that endpoint at report time.
 
-// ---- Faz 04: servis işlemleri (yerel privileged broker üzerinden) ----
+// ---- servis işlemleri (yerel privileged broker üzerinden) ----
 
 // Prober lets an executor refine capability availability at report time
 // (docs/architecture/capability-system.md: capability is a runtime contract).
@@ -251,8 +244,8 @@ type servicePayload struct {
 // maps the response to an OperationResult payload.
 func (s *ServiceExecutor) Execute(ctx context.Context, payload []byte) ([]byte, string, error) {
 	req := &broker.Request{Operation: s.op}
-	switch s.op {
-	case broker.OpServiceList:
+	switch {
+	case s.op == broker.OpServiceList || s.op == broker.OpWinServiceList:
 		var p servicePayload
 		if len(payload) > 0 {
 			dec := json.NewDecoder(bytes.NewReader(payload))
@@ -269,6 +262,17 @@ func (s *ServiceExecutor) Execute(ctx context.Context, payload []byte) ([]byte, 
 			return nil, "", fmt.Errorf("limit 1..500 olmalı")
 		}
 		req.Params, _ = json.Marshal(broker.ListParams{Limit: limit})
+	case isWinOp(s.op):
+		var p winServicePayload
+		dec := json.NewDecoder(bytes.NewReader(payload))
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&p); err != nil {
+			return nil, "", fmt.Errorf("payload çözülemedi: %w", err)
+		}
+		if err := winops.ValidateServiceName(p.Service); err != nil {
+			return nil, "", err
+		}
+		req.Params, _ = json.Marshal(broker.ServiceParams{Service: p.Service})
 	default:
 		var p servicePayload
 		dec := json.NewDecoder(bytes.NewReader(payload))
@@ -293,6 +297,17 @@ func (s *ServiceExecutor) Execute(ctx context.Context, payload []byte) ([]byte, 
 	default:
 		return nil, res.Output, fmt.Errorf("broker işlemi başarısız: %s", res.ErrorCategory)
 	}
+}
+
+// isWinOp reports whether the executor targets the windows SCM family.
+func isWinOp(op string) bool {
+	return strings.HasPrefix(op, "windows.scm.")
+}
+
+// winServicePayload is the agent-side mirror of the windows service schema.
+type winServicePayload struct {
+	Service string `json:"service"`
+	Limit   int    `json:"limit,omitempty"`
 }
 
 func now() *timestamppb.Timestamp { return timestamppb.New(time.Now().UTC()) }
@@ -324,3 +339,16 @@ func hostName() string {
 func osFamily() string { return runtime.GOOS }
 
 func osVersion() string { return runtime.GOOS + " " + runtime.GOARCH }
+
+// decodeStrict decodes JSON disallowing unknown fields and trailing data.
+func decodeStrict(raw []byte, v any) error {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(v); err != nil {
+		return fmt.Errorf("payload çözülemedi: %w", err)
+	}
+	if dec.More() {
+		return fmt.Errorf("payload sonrası veri")
+	}
+	return nil
+}

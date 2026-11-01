@@ -54,6 +54,13 @@ const OPERATIONS = [
   { name: "linux.systemd.service.start", version: "1.0.0", class: "idempotent_desired_state", retry_safe: true, timeout_seconds: 120 },
   { name: "linux.systemd.service.stop", version: "1.0.0", class: "idempotent_desired_state", retry_safe: true, timeout_seconds: 120 },
   { name: "linux.systemd.service.restart", version: "1.0.0", class: "non_idempotent", retry_safe: false, timeout_seconds: 120 },
+  // Faz 05: windows SCM servis operasyonları + event log okuma.
+  { name: "windows.scm.service.list", version: "1.0.0", class: "read_only", retry_safe: true, timeout_seconds: 60 },
+  { name: "windows.scm.service.status", version: "1.0.0", class: "read_only", retry_safe: true, timeout_seconds: 60 },
+  { name: "windows.scm.service.start", version: "1.0.0", class: "idempotent_desired_state", retry_safe: true, timeout_seconds: 120 },
+  { name: "windows.scm.service.stop", version: "1.0.0", class: "idempotent_desired_state", retry_safe: true, timeout_seconds: 120 },
+  { name: "windows.scm.service.restart", version: "1.0.0", class: "non_idempotent", retry_safe: false, timeout_seconds: 180 },
+  { name: "windows.eventlog.read", version: "1.0.0", class: "read_only", retry_safe: true, timeout_seconds: 60 },
 ];
 
 // Faz 04 telemetri mock verisi: her node'a agent telemetrisi eklenir.
@@ -107,6 +114,58 @@ function attachMockTelemetry(node) {
     { node_id: node.id, capability_id: "linux.systemd.service.start", version: "1.0.0", available: true, adapter_id: "systemd-broker" },
     { node_id: node.id, capability_id: "linux.systemd.service.stop", version: "1.0.0", available: true, adapter_id: "systemd-broker" },
     { node_id: node.id, capability_id: "linux.systemd.service.restart", version: "1.0.0", available: true, adapter_id: "systemd-broker" },
+  ]);
+}
+
+
+// Faz 05: windows node şablonu — SCM + event log kabiliyetleriyle.
+function attachWindowsTelemetry(node) {
+  const now = new Date().toISOString();
+  nodeFacts.set(node.id, {
+    node_id: node.id,
+    os_id: "windows",
+    os_version_id: "21H2",
+    os_pretty_name: "Windows Server 2022 Standard",
+    os_home_url: "",
+    kernel_release: "build 20348.2849",
+    arch: "amd64",
+    systemd_version: "",
+    package_manager: "msi",
+    systemd_available: false,
+    source: "registry",
+    collected_at: now,
+  });
+  nodeMetrics.set(node.id, {
+    collected_at: now,
+    source: "winapi+iphlpapi",
+    cpu: { percent: 23.4, logical_cores: 8, load_1m: 0, load_5m: 0, load_15m: 0 },
+    memory: {
+      total_bytes: 32 * 1024 ** 3,
+      available_bytes: 18 * 1024 ** 3,
+      used_bytes: 14 * 1024 ** 3,
+      used_percent: 43.75,
+    },
+    disks: [
+      {
+        device: "C:\\",
+        mount_point: "C:\\",
+        fs_type: "NTFS",
+        total_bytes: 120 * 1024 ** 3,
+        used_bytes: 72 * 1024 ** 3,
+        available_bytes: 48 * 1024 ** 3,
+      },
+    ],
+    networks: [{ interface: "Ethernet", rx_bytes: 555555555, tx_bytes: 444444444 }],
+    uptime_seconds: 432000,
+  });
+  nodeCapabilities.set(node.id, [
+    { node_id: node.id, capability_id: "agent.echo", version: "1.0.0", available: true, adapter_id: "builtin" },
+    { node_id: node.id, capability_id: "windows.scm.service.list", version: "1.0.0", available: true, adapter_id: "scm-broker" },
+    { node_id: node.id, capability_id: "windows.scm.service.status", version: "1.0.0", available: true, adapter_id: "scm-broker" },
+    { node_id: node.id, capability_id: "windows.scm.service.start", version: "1.0.0", available: true, adapter_id: "scm-broker" },
+    { node_id: node.id, capability_id: "windows.scm.service.stop", version: "1.0.0", available: true, adapter_id: "scm-broker" },
+    { node_id: node.id, capability_id: "windows.scm.service.restart", version: "1.0.0", available: true, adapter_id: "scm-broker" },
+    { node_id: node.id, capability_id: "windows.eventlog.read", version: "1.0.0", available: true, adapter_id: "wevtutil" },
   ]);
 }
 
@@ -283,7 +342,14 @@ const server = createServer(async (req, res) => {
       last_seen_at: null,
     };
     nodes.push(node);
-    attachMockTelemetry(node);
+    // Faz 05 (yalnız MOCK): windows ailesi işaretli ya da "win-" önekli
+    // node'lar Windows telemetri şablonuyla doğar — E2E'nin SCM/eventlog
+    // akışlarını form bağımsız sınaması için.
+    if (body.os_family === "windows" || String(body.display_name || "").startsWith("win-")) {
+      attachWindowsTelemetry(node);
+    } else {
+      attachMockTelemetry(node);
+    }
     logAudit(actor, "node.create", "node", node.id, "success");
     json(res, 201, node);
     return;
