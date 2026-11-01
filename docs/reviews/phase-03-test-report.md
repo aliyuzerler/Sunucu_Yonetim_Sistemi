@@ -46,6 +46,13 @@
 - Faz 02 testleri değişmeden PASS; `noop.echo`/`inventory.node.tag.set` operasyonları `control_plane` hedefiyle geriye uyumlu.
 - Faz 01 health/migration testleri PASS.
 
+## CI doğrulama geçmişi
+
+| Koşu | Bulgu | Çözüm |
+|---|---|---|
+| 1. koşu (5b6d25e) | `scanTask` 21 kolon / 20 hedef uyuşmazlığı → tüm task kiralama sorguları patladı; agentsrv yanlış-node testinde orijinal status kodu kayboldu; proto job'da `buf` PATH'te yoktu; E2E token regex'i mock'a özgüydü | scanTask'a ExecutionTarget eklendi; recvErr orijinal status'u taşıyor; proto-check artık proto-tools'a bağlı; E2E gösterimi mock-bağımsız doğruluyor |
+| Sonuç | Düzeltmeler sonrası backend/agent/web/e2e/proto/secret-scan lokalde yeşil; CI yeniden koşuldu | Aşağıdaki karar bölümüne bakın |
+
 ## Bulgular
 
 | ID | Önem | Bulgu | Durum |

@@ -36,9 +36,13 @@ test("agent kayıt tokenı üretimi tek gösterimle", async ({ page }) => {
   await page.getByLabel("Hedef grup").selectOption({ label: "prod-tr" });
   await page.getByRole("button", { name: "Token Üret" }).click();
 
-  // Tek gösterim paneli.
+  // Tek gösterim paneli: plaintext token <code> bloğunda, dolu ve tek seferlik.
   await expect(page.getByText("Token bir kez gösterilir")).toBeVisible();
-  await expect(page.getByText(/e2e-.*-mock-token/)).toBeVisible();
+  const revealed = page
+    .getByLabel("Token bir kez gösterilir")
+    .locator("code");
+  await expect(revealed).toBeVisible();
+  await expect(revealed).not.toHaveText("");
   await page.screenshot({ path: path.join(shotDir, "10-enrollment-reveal.png"), fullPage: true });
 
   await page.getByRole("button", { name: "Anladım, gizle" }).click();

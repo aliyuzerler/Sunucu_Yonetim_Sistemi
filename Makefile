@@ -80,7 +80,7 @@ proto:
 	cd proto && buf lint && buf generate
 
 # Kırılma kapısı: üretilen kod taze değilse başarısız olur (CI'da zorlanır).
-proto-check: proto
+proto-check: proto-tools proto
 	git diff --exit-code -- gen/proto
 
 compose-up:

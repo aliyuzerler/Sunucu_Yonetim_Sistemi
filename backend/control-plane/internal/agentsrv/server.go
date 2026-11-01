@@ -175,8 +175,10 @@ func (s *Server) Connect(stream agentv1.AgentService_ConnectServer) error {
 		case <-stream.Context().Done():
 			return status.Error(codes.Canceled, "stream kapandı")
 		case err := <-recvErr:
-			_ = err
-			return status.Error(codes.Unknown, "alım sonlandı")
+			if err != nil {
+				return err // istemciye orijinal status kodunu koru
+			}
+			return status.Error(codes.Canceled, "stream sonlandı")
 		case env := <-ns.send:
 			if err := stream.Send(env); err != nil {
 				return status.Error(codes.Unavailable, "gönderim başarısız")

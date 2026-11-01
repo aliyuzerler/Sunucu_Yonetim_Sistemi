@@ -22,6 +22,7 @@ import (
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/tasks"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/testdb"
 	agentv1 "github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/gen/proto/servercontrol/agent/v1"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
@@ -33,6 +34,7 @@ type testEnv struct {
 	t            *testing.T
 	ca           *certs.CA
 	caPEM        string
+	pool         *pgxpool.Pool
 	enrollSvc    *enroll.Service
 	inventorySvc *inventory.Service
 	tasksSvc     *tasks.Service
@@ -125,6 +127,7 @@ func setupEnv(t *testing.T) *testEnv {
 		t:            t,
 		ca:           ca,
 		caPEM:        ca.CertificatePEM(),
+		pool:         pool,
 		enrollSvc:    enrollSvc,
 		inventorySvc: inventorySvc,
 		tasksSvc:     tasksSvc,
@@ -272,9 +275,16 @@ func TestEnrollGroupScopeCreatesNodeAndCertificate(t *testing.T) {
 	if len(node.GroupIDs) != 1 || node.GroupIDs[0] != g.ID {
 		t.Fatalf("grup üyeliği bekleniyordu: %v", node.GroupIDs)
 	}
-	if view.ConsumedAt == nil {
-		t.Fatal("token tüketilmiş görünmeli")
-	}
+	// Token tüketimi DB'de kalıcı olmalı (view, üretim anının anlık görüntüsüdür).
+	waitFor(t, 3*time.Second, "token tüketimi", func() bool {
+		var n int
+		if err := env.pool.QueryRow(ctx,
+			`SELECT count(*) FROM enrollment_tokens WHERE id = $1::uuid AND consumed_at IS NOT NULL`,
+			view.ID).Scan(&n); err != nil {
+			return false
+		}
+		return n == 1
+	})
 
 	// Tek kullanımlık: aynı token tekrar reddedilir.
 	client2 := &agentClient{env: env}

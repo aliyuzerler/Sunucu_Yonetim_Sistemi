@@ -32,9 +32,10 @@ const taskCols = `id, operation, operation_version, node_id, payload, status,
 func scanTask(row pgx.Row) (*Task, error) {
 	t := &Task{}
 	err := row.Scan(&t.ID, &t.Operation, &t.OperationVersion, &t.NodeID, &t.Payload,
-		&t.Status, &t.Priority, &t.Actor, &t.CorrelationID, &t.IdempotencyKey,
-		&t.Result, &t.ErrorCategory, &t.Attempts, &t.MaxAttempts, &t.RetrySafe,
-		&t.DeadlineAt, &t.LeaseOwner, &t.LeaseExpiresAt, &t.CreatedAt, &t.UpdatedAt)
+		&t.Status, &t.ExecutionTarget, &t.Priority, &t.Actor, &t.CorrelationID,
+		&t.IdempotencyKey, &t.Result, &t.ErrorCategory, &t.Attempts, &t.MaxAttempts,
+		&t.RetrySafe, &t.DeadlineAt, &t.LeaseOwner, &t.LeaseExpiresAt, &t.CreatedAt,
+		&t.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
