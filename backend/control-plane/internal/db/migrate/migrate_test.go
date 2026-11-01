@@ -91,11 +91,17 @@ func TestAdvisoryLockRejectsSecondRunnerIntegration(t *testing.T) {
 	ctx := context.Background()
 
 	// Harici bir runner kilidi tutuyormuş gibi kilidi doğrudan al.
+	// Not: release yalnızca unlock'tan sonra olmalı; her ikisi de t.Cleanup'ta
+	// yapılır (defer'ler cleanup'lardan önce koşar — bkz. CI bulgusu 2026-11-01).
 	conn, err := pool.Acquire(ctx)
 	if err != nil {
 		t.Fatalf("bağlantı alınamadı: %v", err)
 	}
-	defer conn.Release()
+	t.Cleanup(func() {
+		_, _ = conn.Exec(context.Background(), "SELECT pg_advisory_unlock($1)", advisoryLockKey)
+		conn.Release()
+	})
+
 	var ok bool
 	if err := conn.QueryRow(ctx, "SELECT pg_try_advisory_lock($1)", advisoryLockKey).Scan(&ok); err != nil {
 		t.Fatalf("kilit sorgusu başarısız: %v", err)
@@ -103,9 +109,6 @@ func TestAdvisoryLockRejectsSecondRunnerIntegration(t *testing.T) {
 	if !ok {
 		t.Fatal("test kilidi alınamadı")
 	}
-	t.Cleanup(func() {
-		_, _ = conn.Exec(context.Background(), "SELECT pg_advisory_unlock($1)", advisoryLockKey)
-	})
 
 	if _, err := r2.Up(ctx); err == nil {
 		t.Fatal("kilit tutulurken ikinci runner başarısız olmalıydı")

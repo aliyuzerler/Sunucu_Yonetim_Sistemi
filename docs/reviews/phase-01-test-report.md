@@ -54,6 +54,10 @@ bash scripts/secret-scan.sh → temiz ✓
 | Orta | TypeScript 7.0.2 yayında ama typescript-eslint 8.72.1 `<6.1.0` istiyor | TS 5.9.3 pinlendi; TS 7 desteği çıkınca yükseltme değerlendirilecek |
 | Düşük | compose-up sandbox'ta çalıştırılamadı (Docker yok) | Sahip lokal doğrulaması için `make compose-up` hazır; CI PG 18 servisinde migration testleri gerçek çalışıyor |
 
+### Düzeltme geçmişi (CI döngüsü)
+
+- **CI-1 (2026-11-01):** İlk CI koşusu, sandbox'ta çalıştırılamayan `TestAdvisoryLockRejectsSecondRunnerIntegration` içinde gerçek bir test hatası yakaladı: `defer conn.Release()` `t.Cleanup` geri çağrısından **önce** koştuğu için cleanup, serbest bırakılmış havuz bağlantısında `Exec` çağırıyordu → nil pointer panic (pgx/puddle). **Kök neden:** Go'da defer'ler cleanup'lardan önce çalışır. **Düzeltme:** unlock + release tek `t.Cleanup` içinde doğru sıraya alındı; test silinmedi, zayıflatılmadı, kapsamı korundu. Düzeltme sonrası CI yeniden koşuldu (aşağıdaki kanıtlar günceldir). Bu bulgu CI'ın tam değerini gösterir: sandbox kısıtı olan testler ilk kez gerçek PostgreSQL 18'de koştu.
+
 ## Güvenlik değerlendirmesi
 
 - Repoda secret yok (pattern taraması + elle inceleme); `.env` gitignored, örnek dosya placeholder.
