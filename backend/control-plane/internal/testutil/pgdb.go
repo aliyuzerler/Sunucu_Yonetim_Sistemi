@@ -18,10 +18,25 @@ import (
 func AdminURL() string { return os.Getenv("TEST_DATABASE_URL") }
 
 // UniqueDB creates a uniquely-named disposable database from the admin URL
-// and returns its URL. One database per test PROCESS keeps parallel packages
-// from sharing schema state (CI finding CI-1/CI-4, 2026-11-01). The database
-// is dropped (WITH FORCE) when the test ends, then the admin pool closes.
+// and returns its URL. The database is dropped (WITH FORCE) when the test
+// ends, then the admin pool closes. Use this for per-test databases.
 func UniqueDB(t *testing.T, adminURL string) string {
+	url := createDB(t, adminURL)
+	t.Cleanup(func() {
+		dropDB(t, adminURL, dbNameFromURL(url))
+	})
+	return url
+}
+
+// UniqueDBPersistent creates a uniquely-named database WITHOUT registering a
+// drop cleanup — for package-lifetime databases whose first test would
+// otherwise drop the DB while later tests still use it. CI containers are
+// disposable, so the database dies with the job; drop it locally if needed.
+func UniqueDBPersistent(t *testing.T, adminURL string) string {
+	return createDB(t, adminURL)
+}
+
+func createDB(t *testing.T, adminURL string) string {
 	t.Helper()
 	admin, err := pgxpool.New(context.Background(), adminURL)
 	if err != nil {
@@ -34,13 +49,38 @@ func UniqueDB(t *testing.T, adminURL string) string {
 		admin.Close()
 		t.Fatalf("test veritabanı oluşturulamadı (%s): %v", name, err)
 	}
-	t.Cleanup(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		_, _ = admin.Exec(ctx, fmt.Sprintf(`DROP DATABASE IF EXISTS %s WITH (FORCE)`, name))
-		admin.Close()
-	})
+	t.Cleanup(admin.Close)
 	return ReplaceDBName(adminURL, name)
+}
+
+func dropDB(t *testing.T, adminURL, name string) {
+	// DROP, hedef veritabanına bağlıyken yapılamaz; admin (postgres) DB'sine bağlan.
+	admin, err := pgxpool.New(context.Background(), ReplaceDBName(adminURL, "postgres"))
+	if err != nil {
+		return
+	}
+	defer admin.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	_, _ = admin.Exec(ctx, `DROP DATABASE IF EXISTS `+quoteIdent(name)+` WITH (FORCE)`)
+}
+
+func quoteIdent(name string) string {
+	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
+}
+
+func dbNameFromURL(url string) string {
+	rest := url
+	if i := strings.Index(rest, "://"); i >= 0 {
+		rest = rest[i+3:]
+	}
+	if slash := strings.Index(rest, "/"); slash >= 0 {
+		rest = rest[slash+1:]
+	}
+	if q := strings.Index(rest, "?"); q >= 0 {
+		rest = rest[:q]
+	}
+	return rest
 }
 
 // ReplaceDBName swaps the database component of a PostgreSQL URL.

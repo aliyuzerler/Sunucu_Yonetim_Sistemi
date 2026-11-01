@@ -38,7 +38,7 @@ func Pool(t *testing.T) *pgxpool.Pool {
 		t.Skip("TEST_DATABASE_URL tanımlı değil; PostgreSQL entegrasyon testi atlandı")
 	}
 	dbOnce.Do(func() {
-		dbURL = testutil.UniqueDB(t, adminURL)
+		dbURL = testutil.UniqueDBPersistent(t, adminURL)
 	})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
