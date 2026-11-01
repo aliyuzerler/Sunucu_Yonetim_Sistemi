@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+## [0.3.0] — 2026-11-01 — Faz 02: Kimlik, RBAC, node envanteri, görev altyapısı ve E2E
+
+### Added
+- Kimlik ve oturum (ADR-0007): argon2id parola özeti; sunucu taraflı oturumlar (token yalnızca SHA-256 özeti saklanır); `HttpOnly SameSite=Strict` cookie; oturum token'ından türetilen CSRF token'ı (mutating isteklerde `X-CSRF-Token` zorunlu); IP/kullanıcı bazlı giriş hız sınırlama; uniform hata ile kullanıcı adı sızıntısının önlenmesi.
+- İlk yönetici bootstrap: `control-plane bootstrap` CLI ile tek kullanımlık, kısa ömürlü token (≤1h, yalnızca özeti saklanır); `POST /api/v1/bootstrap/admin` tek transaction'da ilk yönetici + global admin rolü oluşturur; yarış testiyle tek admin kanıtı; varsayılan parola yok.
+- RBAC: sabit izin kataloğu (users/nodes/tasks/audit × read/write), `all`/`group`/`node` kapsamlı rol bağlamaları, default-deny policy (pure fonksiyon + SQL store), her uçta `requirePermission`, reddedilen isteklerin audit'i.
+- Node envanteri: nodes/node_groups/node_tags/node_facts (sürümlenmiş JSONB)/node_capabilities tabloları; oluşturma, güncelleme, etiket, grup ataması, facts upsert, capability upsert; keyset sayfalama ve izin filtreleri.
+- Görev altyapısı: tipli operasyon kaydı (`noop.echo`, `inventory.node.tag.set` — allowlist, payload şema doğrulaması); task + outbox TEK transaction'da; worker `FOR UPDATE SKIP LOCKED` kiralaması, lease kurtarma, süre aşımı taraması, outbox teslimi (exponential backoff); attempt kayıtları; idempotency key (kısmi benzersiz indeks + replay/çatışma semantiği).
+- Audit: append-only `audit_events` (trigger ile UPDATE/DELETE engeli), actor/target/action/result/correlation ID, secret redaction (recall-first, test edildi), keyset sayfalama.
+- REST `/api/v1`: bootstrap, auth (login/session/csrf/logout), nodes (+tags/facts/capabilities), node-groups, tasks (+cancel, task-operations), audit, users (salt-okunur), overview özeti.
+- Frontend: giriş sayfası + auth gate/provider; Sunucular (oluşturma + grup + etiket), Görevler (tipli kayıt, oluştur/iptal/yenile), Denetim Kaydı (filtre + "daha fazla"), Kullanıcılar (salt-okunur), gerçek sayılarla dürüst Genel Bakış; TR/EN sözlük genişletmesi.
+- Playwright E2E katmanı: 5 smoke senaryosu (giriş, node oluşturma, görev yaşam döngüsü, denetim kaydı, EN yerel ayar); lokalde mock API (`web/e2e/mock-api.mjs`), CI'da gerçek Control Plane (`E2E_REAL=1`); ekran görüntüleri `docs/reviews/screenshots/phase-02/` altında repoya commit edildi.
+- CI `e2e` job'ı: PostgreSQL 18 servis + Go build + `migrate up` + gerçek bootstrap + Playwright (chromium) + artifact yükleme (`actions/upload-artifact` SHA-pinli, doğrulanmış).
+- `docs/decisions/ADR-0007-identity-sessions-bootstrap.md`; ADR dizin güncellemesi; `internal/testdb` ortak PostgreSQL test altyapısı; Makefile `web-e2e`/`web-e2e-install`/`web-e2e-real` hedefleri.
+
+### Changed
+- Migration seti 0002–0005 ile genişledi (kimlik, envanter, görev, denetim).
+- `docs/ui-ux/navigation.md` — Operasyonlar grubuna "Audit Log" eklendi (Faz 02 denetim görünürlüğü).
+- `docs/technology/dependency-registry.md` — `golang.org/x/crypto v0.58.0` (BSD-3-Clause), `@playwright/test 1.57.0` (Apache-2.0, dev-only) kayıtları.
+- `docs/operations/development-environment.md` — bootstrap akışı, E2E komutları ve yeni ortam değişkenleri.
+- `docs/project-status.md` — Faz 02 kanıtları ve açık işler.
+
+### Security
+- Oturum/CSRF token'larının veritabanında düz metin bulunmaması; audit ve loglarda secret redaction; audit tablosunun append-only olması; bootstrap token üretiminin yalnızca host CLI'sında olması; default-deny RBAC ve katalog dışı izin reddi; payload `DisallowUnknownFields` + boyut limitleri; login rate limit + uniform hata.
+
 ## [0.2.0] — 2026-11-01 — Faz 01: Monorepo, geliştirme ortamı, temel UI/API
 
 ### Added

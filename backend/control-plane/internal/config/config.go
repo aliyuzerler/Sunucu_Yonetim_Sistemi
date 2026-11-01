@@ -26,6 +26,11 @@ type Config struct {
 
 	DatabaseURL    string
 	DatabaseURLSet bool
+
+	// Identity/session settings (Faz 02).
+	CookieSecure bool          // Secure flag on the session cookie (prod TLS: true)
+	SessionTTL   time.Duration // server-side session lifetime
+	BootstrapTTL time.Duration // one-time admin bootstrap token lifetime
 }
 
 // Load reads configuration from process environment variables.
@@ -78,6 +83,36 @@ func FromEnv(env map[string]string) (Config, error) {
 		}
 		cfg.DatabaseURL = raw
 		cfg.DatabaseURLSet = true
+	}
+
+	cfg.CookieSecure = false
+	if v, ok := env["CP_COOKIE_SECURE"]; ok && strings.TrimSpace(v) != "" {
+		switch strings.ToLower(strings.TrimSpace(v)) {
+		case "1", "true", "yes", "on":
+			cfg.CookieSecure = true
+		case "0", "false", "no", "off":
+			cfg.CookieSecure = false
+		default:
+			return Config{}, fmt.Errorf("CP_COOKIE_SECURE geçersiz: %q (true|false)", v)
+		}
+	}
+
+	cfg.SessionTTL = 12 * time.Hour
+	if v, ok := env["CP_SESSION_TTL"]; ok && strings.TrimSpace(v) != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil || d < 5*time.Minute || d > 30*24*time.Hour {
+			return Config{}, fmt.Errorf("CP_SESSION_TTL geçersiz: %q (5m..720h)", v)
+		}
+		cfg.SessionTTL = d
+	}
+
+	cfg.BootstrapTTL = 15 * time.Minute
+	if v, ok := env["CP_BOOTSTRAP_TTL"]; ok && strings.TrimSpace(v) != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil || d < time.Minute || d > time.Hour {
+			return Config{}, fmt.Errorf("CP_BOOTSTRAP_TTL geçersiz: %q (1m..1h)", v)
+		}
+		cfg.BootstrapTTL = d
 	}
 	return cfg, nil
 }

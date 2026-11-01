@@ -81,9 +81,16 @@ make compose-up                             # PostgreSQL 18 (localhost'a bağlı
 export CP_DATABASE_URL="postgres://serverctl:...@localhost:5432/server_control?sslmode=disable"
 make migrate-up                             # explicit migration
 make backend-test && make backend-race      # Go testler
-cd web && npm ci && npm run dev             # UI: http://localhost:5173
+go run ./cmd/control-plane bootstrap        # tek kullanımlık ilk yönetici tokenı (backend/control-plane altında)
 go run ./cmd/control-plane                  # API: http://127.0.0.1:8080 (backend/control-plane altında)
+# Token ile: curl -X POST http://127.0.0.1:8080/api/v1/bootstrap/admin \
+#   -H 'Content-Type: application/json' \
+#   -d '{"token":"<TOKEN>","username":"<ad>","password":"<güçlü-parola>"}'
+cd web && npm ci && npm run dev             # UI: http://localhost:5173 (giriş yapın)
+make web-e2e                                # Playwright smoke + ekran görüntüleri (mock API)
 ```
+
+Faz 02'de oturum açma zorunludur; ilk yönetici hesabı yukarıdaki bootstrap akışıyla oluşturulur (varsayılan parola yoktur — ADR-0007).
 
 Tüm komutlar: `make help` · Detay: [`docs/operations/development-environment.md`](docs/operations/development-environment.md) ve [`deploy/README.md`](deploy/README.md).
 

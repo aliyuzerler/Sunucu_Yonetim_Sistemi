@@ -47,6 +47,7 @@ export const navGroups: NavGroup[] = [
       { id: "monitoring", key: "nav.item.monitoring" },
       { id: "logs", key: "nav.item.logs" },
       { id: "tasks", key: "nav.item.tasks" },
+      { id: "audit", key: "nav.item.audit" },
       { id: "backups", key: "nav.item.backups" },
       { id: "security", key: "nav.item.security" },
     ],
@@ -66,10 +67,10 @@ export const navGroups: NavGroup[] = [
 ];
 
 // Roadmap phase per module id — drives the honest "not implemented yet" chips
-// and the ComingSoon page. 0 means available in the Phase 01 shell.
+// and the ComingSoon page. 0 means available in the Faz 02 application.
 export const modulePhase: Record<string, number> = {
   overview: 0,
-  nodes: 2,
+  nodes: 0,
   linux: 4,
   windows: 5,
   docker: 7,
@@ -81,10 +82,11 @@ export const modulePhase: Record<string, number> = {
   email: 11,
   monitoring: 13,
   logs: 13,
-  tasks: 2,
+  tasks: 0,
+  audit: 0,
   backups: 14,
   security: 13,
-  users: 2,
+  users: 0,
   enrollment: 3,
   integrations: 14,
   modules: 15,

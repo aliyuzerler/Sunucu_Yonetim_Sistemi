@@ -5,13 +5,14 @@ sürüm, kaynak, SPDX lisans, amaç. Sürümler kilitlidir (go.mod / package-loc
 Lisans kimlikleri paket manifestosundan alınmıştır; yayın öncesi (Faz 15 paketleme)
 SBOM (SPDX/CycloneDX) üretimi ve dosya düzeyi lisans denetimi yapılacaktır.
 
-Doğrulama tarihi: **2026-11-01** (sürümler güncel stable çizgiler; kit tabanı `official-sources.md` ile uyumlu).
+Doğrulama tarihi: **2026-11-01** (sürümler güncel stable çizgiler; kit tabanı `official-sources.md` ile uyumlu). Faz 02 eklentileri aynı gün doğrulandı.
 
 ## Backend (Go 1.27.3) — module: backend/control-plane
 
 | Bağımlılık | Sürüm | Kaynak | Lisans | Amaç |
 |---|---|---|---|---|
 | `github.com/go-chi/chi/v5` | v5.5.0 | github.com/go-chi/chi | MIT | HTTP router (teknoloji tabanı kararı) |
+| `golang.org/x/crypto` | v0.58.0 | go.googlesource.com/crypto | BSD-3-Clause | argon2id parola özeti (ADR-0007) |
 | `github.com/jackc/pgx/v5` | v5.12.0 | github.com/jackc/pgx | MIT | PostgreSQL erişimi (pgxpool) |
 | `golang.org/x/text` | v0.41.0 | go.googlesource.com/text | BSD-3-Clause | pgx geçiş bağımlılığı |
 
@@ -39,6 +40,7 @@ Standart kütüphane tercih edilir (slog, net/http, crypto/rand, embed); başka 
 | `globals` | 17.13.0 | MIT | Ortam global tanımları |
 | `@types/react` / `@types/react-dom` | 19.3.0 | MIT | React tipleri |
 | `@types/node` | 26.6.6 | MIT | Node tipleri (config dosyaları) |
+| `@playwright/test` | 1.57.0 | playwright.dev (github.com/microsoft/playwright) | Apache-2.0 | E2E smoke testleri + ekran görüntüleri (dev-only) |
 
 ## Altyapı imajları
 

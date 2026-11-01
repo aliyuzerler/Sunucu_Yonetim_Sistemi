@@ -39,3 +39,7 @@ tmp/
 .vscode/
 .DS_Store
 Thumbs.db
+
+# Playwright çıktıları
+test-results/
+playwright-report/

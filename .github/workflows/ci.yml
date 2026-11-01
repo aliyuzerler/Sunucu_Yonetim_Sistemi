@@ -78,6 +78,81 @@ jobs:
       - name: build
         run: npm run build
 
+  e2e:
+    name: E2E (Playwright, gerçek backend)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18-alpine@sha256:10a5c69a83035ab5239f5620d708520e8b28f5aa1f2b20143e6024532edadfb5
+        env:
+          POSTGRES_USER: serverctl_test
+          POSTGRES_PASSWORD: ci-test-only
+          POSTGRES_DB: server_control_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U serverctl_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      CP_DATABASE_URL: postgres://serverctl_test:ci-test-only@localhost:5432/server_control_test?sslmode=disable
+      E2E_ADMIN_PASSWORD: guclu-parola-12345
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Setup Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: backend/control-plane/go.mod
+          cache-dependency-path: backend/control-plane/go.sum
+      - name: Setup Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 26.13.0
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Backend derle ve migration uygula
+        run: |
+          cd backend/control-plane
+          go build -o /tmp/control-plane ./cmd/control-plane
+          go run ./cmd/migrate up
+          go run ./cmd/migrate status
+      - name: Bootstrap token üret ve ilk yöneticiyi oluştur
+        run: |
+          TOKEN=$(/tmp/control-plane bootstrap | grep -E '^  [A-Za-z0-9_-]{43}$' | head -1 | xargs)
+          test -n "$TOKEN" || { echo "bootstrap token üretilemedi"; exit 1; }
+          /tmp/control-plane > /tmp/control-plane.log 2>&1 &
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:8080/healthz >/dev/null && break
+            sleep 1
+          done
+          curl -sf -X POST http://127.0.0.1:8080/api/v1/bootstrap/admin \
+            -H 'Content-Type: application/json' \
+            -d "{\"token\":\"$TOKEN\",\"username\":\"admin\",\"password\":\"$E2E_ADMIN_PASSWORD\",\"display_name\":\"E2E Admin\"}"
+      - name: Frontend bağımlılık ve build
+        run: |
+          cd web
+          npm ci
+          npm run build
+      - name: Playwright chromium kur
+        run: cd web && npx playwright install --with-deps chromium
+      - name: E2E smoke (gerçek Control Plane)
+        run: cd web && E2E_REAL=1 API_PROXY_TARGET=http://127.0.0.1:8080 npx playwright test
+      - name: Ekran görüntüleri ve rapor (artifact)
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: e2e-artifacts
+          path: |
+            web/test-results/
+            web/playwright-report/
+            docs/reviews/screenshots/phase-02/
+          if-no-files-found: ignore
+      - name: Sunucu logları (hata durumunda)
+        if: failure()
+        run: tail -50 /tmp/control-plane.log || true
+
   secret-scan:
     name: Secret taraması
     runs-on: ubuntu-latest

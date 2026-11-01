@@ -5,7 +5,7 @@ import reactRefresh from "eslint-plugin-react-refresh";
 import globals from "globals";
 
 export default tseslint.config(
-  { ignores: ["dist", "coverage", "node_modules"] },
+  { ignores: ["dist", "coverage", "node_modules", "playwright-report", "test-results"] },
   {
     files: ["**/*.{ts,tsx}"],
     extends: [js.configs.recommended, ...tseslint.configs.recommended],
@@ -28,6 +28,14 @@ export default tseslint.config(
         "error",
         { fixStyle: "inline-type-imports" },
       ],
+    },
+  },
+  {
+    // Node ortamı: Playwright config + E2E spec'leri.
+    files: ["playwright.config.ts", "e2e/**/*.{ts,mjs}"],
+    languageOptions: {
+      ecmaVersion: 2024,
+      globals: { ...globals.node },
     },
   },
 );

@@ -5,12 +5,12 @@ GO ?= go
 CD_CP = cd backend/control-plane
 
 .PHONY: help backend-build backend-test backend-race backend-vet backend-fmt \
-        web-install web-lint web-typecheck web-test web-build \
+        web-install web-lint web-typecheck web-test web-build web-e2e web-e2e-install web-e2e-real \
         compose-up compose-down compose-ps migrate-up migrate-status migrate-down
 
 help:
 	@echo "Backend:  make backend-build | backend-test | backend-race | backend-vet | backend-fmt"
-	@echo "Frontend: make web-install | web-lint | web-typecheck | web-test | web-build"
+	@echo "Frontend: make web-install | web-lint | web-typecheck | web-test | web-build | web-e2e"
 	@echo "DB:       make compose-up | compose-ps | migrate-up | migrate-status | migrate-down"
 
 backend-build:
@@ -42,6 +42,16 @@ web-test:
 
 web-build:
 	cd web && npm run build
+
+# E2E (Playwright): önce build; mock API ile lokal, gerçek backend ile CI.
+web-e2e-install:
+	cd web && npx playwright install chromium
+
+web-e2e: web-build
+	cd web && npm run e2e
+
+web-e2e-real: web-build
+	cd web && E2E_REAL=1 API_PROXY_TARGET=$${API_PROXY_TARGET:-http://127.0.0.1:8080} npm run e2e
 
 compose-up:
 	cd deploy && docker compose up -d && docker compose ps

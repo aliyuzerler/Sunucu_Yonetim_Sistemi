@@ -1,8 +1,10 @@
+import { useAuth } from "../../auth/AuthProvider";
 import { useI18n } from "../../i18n/LocaleProvider";
 import type { Locale } from "../../i18n/tr";
 
 export function TopBar() {
   const { t, locale, setLocale } = useI18n();
+  const { user, logout } = useAuth();
 
   const localeButton = (target: Locale, label: string) => (
     <button
@@ -31,12 +33,18 @@ export function TopBar() {
           {localeButton("tr", t("topbar.locale.tr"))}
           {localeButton("en", t("topbar.locale.en"))}
         </div>
-        <span
-          aria-label={t("topbar.user")}
-          className="flex h-7 w-7 items-center justify-center rounded-full bg-accent-soft text-xs font-semibold text-accent"
-        >
-          Y
-        </span>
+        {user && (
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-medium text-ink">{user.username}</span>
+            <button
+              type="button"
+              onClick={() => void logout()}
+              className="rounded-lg border border-border px-2 py-1 text-xs font-medium text-ink hover:bg-neutral-soft focus-visible:outline-2 focus-visible:outline-accent"
+            >
+              {t("topbar.logout")}
+            </button>
+          </div>
+        )}
       </div>
     </header>
   );

@@ -18,6 +18,7 @@ Operations
   Monitoring
   Logs
   Tasks & Activity
+  Audit Log
   Backups
   Security
 Settings
