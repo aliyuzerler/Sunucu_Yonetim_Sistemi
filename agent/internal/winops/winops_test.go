@@ -132,6 +132,39 @@ func TestParseWevtutilXMLMalformed(t *testing.T) {
 	}
 }
 
+// CI bulgusu CI-13: gerçek wevtutil çıktısı kök sarmalamaz — art arda
+// <Event> kök öğeleri (her biri kendi xmlns'iyle). Hem bu ham şekil hem
+// <Events> sarmalı desteklenmelidir.
+const wevtUnwrapped = "<Event xmlns='http://schemas.microsoft.com/win/2004/08/events/event'>" +
+	"<System><Provider Name='Service Control Manager'/><EventID Qualifiers='16384'>7040</EventID>" +
+	"<Level>4</Level><Task>0</Task><Keywords>0x8080000000000000</Keywords>" +
+	"<TimeCreated SystemTime='2026-11-01T10:00:00.123456700Z'/><EventRecordID>1234</EventRecordID>" +
+	"<Channel>System</Channel><Computer>WIN-SRV01</Computer></System>\n" +
+	"<RenderingInfo Culture='tr-TR'><Message>Bilgisayar  TR-TR  mesaj\nikinci satır</Message></RenderingInfo>\n" +
+	"</Event>\n" +
+	"<Event xmlns='http://schemas.microsoft.com/win/2004/08/events/event'>" +
+	"<System><Provider Name='Microsoft-Windows-WindowsUpdateClient'/><EventID>43</EventID>" +
+	"<Level>2</Level><TimeCreated SystemTime='2026-11-01T11:30:00.000Z'/><EventRecordID>1235</EventRecordID>" +
+	"<Channel>System</Channel><Computer>WIN-SRV01</Computer></System></Event>\n"
+
+func TestParseWevtutilXMLUnwrapped(t *testing.T) {
+	evs := ParseWevtutilXML([]byte(wevtUnwrapped))
+	if len(evs) != 2 {
+		t.Fatalf("sarmalanmamış çıktıda 2 olay beklenir, %d geldi", len(evs))
+	}
+	e0 := evs[0]
+	if e0.EventID != 7040 || e0.Level != 4 || e0.Provider != "Service Control Manager" ||
+		e0.RecordID != 1234 || e0.Computer != "WIN-SRV01" {
+		t.Errorf("e0 alanları: %+v", e0)
+	}
+	if e0.Message != "Bilgisayar TR-TR mesaj ikinci satır" {
+		t.Errorf("e0 message = %q", e0.Message)
+	}
+	if evs[1].EventID != 43 || evs[1].Level != 2 || evs[1].LevelName != "error" {
+		t.Errorf("e1 alanları: %+v", evs[1])
+	}
+}
+
 func TestParseWevtutilXMLEncodings(t *testing.T) {
 	base := ParseWevtutilXML([]byte(wevtSample))
 	if len(base) != 2 {

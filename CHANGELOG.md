@@ -28,6 +28,8 @@
 - Üç katmanlı allowlist Windows'a taşındı: sunucu validator → agent executor → broker validateRequest.
 - Windows testleri CI'da unprivileged kullanıcı ile koşar; gerçek servis kontrolü mock'la sınanır; gerçek host doğrulaması disposable VM prosedürüyle sahibine belgelendi.
 
+### Fixed (bağımsız test koşusunda)
+- CI-13 (Yüksek, test altyapısı): gerçek `wevtutil` çıktısı `<Events>` köküyle SARMALAMAZ — art arda `<Event>` kök öğeleri basar. `winops.ParseWevtutilXML` sarmal varsaydığından windows-2025 CI smoke sondası `parse=0` üretti (run 41319001191, `TestReadSmoke`). Ayrıştırıcı `xml.Decoder` akış çözümüne geçirildi: hem sarmalanmış hem ham şekil kabul edilir; bozuk öğede temkinli durup o ana dek çözülen olayları döndürür. Gerçek wevtutil şekli kalıcı fixture olarak eklendi (`TestParseWevtutilXMLUnwrapped`).
 
 ## [0.5.0] — 2026-11-01 — Faz 04: Linux Agent ve temel OS yönetimi
 

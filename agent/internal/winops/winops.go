@@ -182,10 +182,6 @@ type Event struct {
 
 // ---- wevtutil XML parsing (pure; fixture-tested on every GOOS) ----
 
-type xmlEvents struct {
-	Events []xmlEvent `xml:"Event"`
-}
-
 type xmlEvent struct {
 	System        xmlSystem     `xml:"System"`
 	RenderingInfo *xmlRendering `xml:"RenderingInfo"`
@@ -218,38 +214,57 @@ type xmlRendering struct {
 
 // ParseWevtutilXML parses `wevtutil query-events … /format:xml` output into
 // bounded Events. Message is collapsed to one line and truncated to 4000
-// bytes. Malformed documents yield nil; unknown fields never fail the read.
+// bytes. Unknown fields never fail the read; parsing stops gracefully and
+// keeps the events decoded so far.
+//
 // CI bulgusu CI-12: wevtutil redirects emit UTF-16LE (BOM FF FE) on some
 // Windows builds — decode before parsing, never assume UTF-8.
+// CI bulgusu CI-13: real wevtutil output is a SEQUENCE of <Event> root
+// elements WITHOUT an <Events> wrapper (the CI smoke probe parsed 0 events
+// because the fixture assumed a wrapper). Stream-decode every <Event>
+// element instead; both the wrapped and the raw shapes are accepted.
 func ParseWevtutilXML(data []byte) []Event {
 	data = normalizeWevtEncoding(data)
-	var wrapper xmlEvents
-	if err := xml.Unmarshal(data, &wrapper); err != nil {
-		return nil
-	}
-	out := make([]Event, 0, len(wrapper.Events))
-	for _, e := range wrapper.Events {
-		msg := ""
-		if e.RenderingInfo != nil {
-			msg = e.RenderingInfo.Message
+	dec := xml.NewDecoder(bytes.NewReader(data))
+	out := make([]Event, 0, 16)
+	for {
+		tok, err := dec.Token()
+		if err != nil {
+			break // EOF or malformed tail: keep what was decoded
 		}
-		ev := Event{
-			RecordID:    e.System.EventRecordID,
-			TimeCreated: e.System.TimeCreated.SystemTime,
-			Level:       e.System.Level,
-			LevelName:   LevelName(e.System.Level),
-			EventID:     e.System.EventID.Value,
-			Provider:    e.System.Provider.Name,
-			Channel:     e.System.Channel,
-			Computer:    e.System.Computer,
-			Message:     oneLine(msg),
+		se, ok := tok.(xml.StartElement)
+		if !ok || se.Name.Local != "Event" {
+			continue // declarations, wrapper roots, comments
 		}
-		out = append(out, ev)
+		var raw xmlEvent
+		if err := dec.DecodeElement(&raw, &se); err != nil {
+			break // malformed event: conservative stop, keep events so far
+		}
+		out = append(out, xmlToEvent(raw))
 		if len(out) >= 200 {
 			break // bound
 		}
 	}
 	return out
+}
+
+// xmlToEvent maps one parsed XML record to the bounded Event.
+func xmlToEvent(e xmlEvent) Event {
+	msg := ""
+	if e.RenderingInfo != nil {
+		msg = e.RenderingInfo.Message
+	}
+	return Event{
+		RecordID:    e.System.EventRecordID,
+		TimeCreated: e.System.TimeCreated.SystemTime,
+		Level:       e.System.Level,
+		LevelName:   LevelName(e.System.Level),
+		EventID:     e.System.EventID.Value,
+		Provider:    e.System.Provider.Name,
+		Channel:     e.System.Channel,
+		Computer:    e.System.Computer,
+		Message:     oneLine(msg),
+	}
 }
 
 // normalizeWevtEncoding decodes UTF-16LE/BE BOMs (and heuristic NUL-padded
