@@ -54,6 +54,24 @@ func ValidateServiceName(name string) error {
 // ErrInvalidService is the stable validation error for service names.
 var ErrInvalidService = errors.New("geçersiz servis adı")
 
+// linuxUnitRE mirrors the systemd unit allowlist (svcops): first char
+// alphanumeric (no flag injection), template units allowed, no path
+// separators or shell metacharacters, mandatory .service suffix,
+// UNIT_NAME_MAX=256 bounded. Lives HERE so linux unit validation is
+// testable on every GOOS (svcops itself is unix-only).
+var linuxUnitRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9@._-]{0,246}\.service$`)
+
+// ErrInvalidLinuxUnit is the stable validation error for systemd units.
+var ErrInvalidLinuxUnit = errors.New("geçersiz servis birimi adı")
+
+// ValidateLinuxUnit enforces the systemd unit-name allowlist.
+func ValidateLinuxUnit(unit string) error {
+	if !linuxUnitRE.MatchString(unit) {
+		return ErrInvalidLinuxUnit
+	}
+	return nil
+}
+
 // ServiceParams is the schema for name-targeted SCM params.
 type ServiceParams struct {
 	Service string `json:"service"`

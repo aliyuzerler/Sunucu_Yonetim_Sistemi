@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/broker"
-	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/svcops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/winops"
 	agentv1 "github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/gen/proto/servercontrol/agent/v1"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -280,7 +279,7 @@ func (s *ServiceExecutor) Execute(ctx context.Context, payload []byte) ([]byte, 
 		if err := dec.Decode(&p); err != nil {
 			return nil, "", fmt.Errorf("payload çözülemedi: %w", err)
 		}
-		if err := svcops.ValidateUnit(p.Unit); err != nil {
+		if err := winops.ValidateLinuxUnit(p.Unit); err != nil {
 			return nil, "", err
 		}
 		req.Params, _ = json.Marshal(broker.UnitParams{Unit: p.Unit})

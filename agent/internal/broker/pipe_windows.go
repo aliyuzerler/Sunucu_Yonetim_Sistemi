@@ -3,9 +3,11 @@
 package broker
 
 import (
+	"context"
 	"errors"
 	"net"
 	"sync"
+	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -113,6 +115,15 @@ func (l *pipeListener) Accept() (net.Conn, error) {
 		return nil, err
 	}
 
+	// Kapanış sırasında mı uyandı? (Close'un self-connect uyanışı dahil.)
+	l.mu.Lock()
+	closed := l.closed
+	l.mu.Unlock()
+	if closed {
+		_ = windows.CloseHandle(h)
+		return nil, errPipeClosed
+	}
+
 	// Yeni bekleyen örneği hemen yarat (kabul döngüsü kayıpsız olsun).
 	nh, nerr := l.createInstance(false)
 	l.mu.Lock()
@@ -122,27 +133,37 @@ func (l *pipeListener) Accept() (net.Conn, error) {
 		// Örnek yaratılamadı: dinleyiciyi yeniden denenebilir bırak.
 		l.next = 0
 	}
-	closed := l.closed
 	l.mu.Unlock()
-	if closed {
-		_ = windows.CloseHandle(h)
-		return nil, errPipeClosed
-	}
 
 	return &pipeConn{handle: h, file: newPipeFile(h, l.path), local: pipeAddr{l.path}}, nil
 }
 
-// Close stops the listener and drops the pending instance.
+// Close stops the listener. On Windows a synchronous ConnectNamedPipe is NOT
+// reliably unblocked by CloseHandle from another thread (CI bulgusu CI-10),
+// so Close wakes the pending Accept by connecting to our own pipe once.
 func (l *pipeListener) Close() error {
 	l.mu.Lock()
-	defer l.mu.Unlock()
 	if l.closed {
+		l.mu.Unlock()
 		return nil
 	}
 	l.closed = true
-	if l.next != 0 {
-		_ = windows.CloseHandle(l.next) // ConnectNamedPipe bekleenini kırar
-		l.next = 0
+	l.mu.Unlock()
+
+	// Self-connect wakeup: Accept içindeki ConnectNamedPipe döner; Accept
+	// closed bayrağını görür ve errPipeClosed ile çıkar (Serve sonlanır).
+	wakeCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	for i := 0; i < 3; i++ {
+		conn, err := dialPipe(wakeCtx, l.path)
+		if err == nil {
+			_ = conn.Close()
+			break
+		}
+		select {
+		case <-wakeCtx.Done():
+		case <-time.After(50 * time.Millisecond):
+		}
 	}
 	return nil
 }

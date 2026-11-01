@@ -1,3 +1,5 @@
+//go:build unix
+
 // Package svcops implements the Faz 04 Linux systemd service adapter.
 //
 // Security rules (docs/architecture/agent-architecture.md, ADR-0003):
@@ -14,31 +16,23 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
-	"regexp"
 	"strings"
 	"time"
+
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/winops"
 )
 
-// Operation error categories (stable API contract).
+// Operation error categories (stable API contract). Unit validation is
+// delegated to the cross-platform winops package (single source of truth).
 var (
-	ErrInvalidUnit   = errors.New("geçersiz servis birimi adı")
+	ErrInvalidUnit   = winops.ErrInvalidLinuxUnit
 	ErrSystemdAbsent = errors.New("systemd kullanılamıyor")
 	ErrTimeout       = errors.New("işlem zaman aşımına uğradı")
 )
 
-// unitNameRE: systemd service unit names. First char must be alphanumeric
-// (rejects leading "-" → no flag injection into systemctl); the body allows
-// template units (user@1000.service, systemd-fsck@dev-sda1.service); path
-// separators, shell metacharacters and % specifiers are excluded by the class;
-// UNIT_NAME_MAX is 256.
-var unitNameRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9@._-]{0,246}\.service$`)
-
-// ValidateUnit enforces the unit-name allowlist.
+// ValidateUnit enforces the unit-name allowlist (winops single source).
 func ValidateUnit(unit string) error {
-	if !unitNameRE.MatchString(unit) {
-		return ErrInvalidUnit
-	}
-	return nil
+	return winops.ValidateLinuxUnit(unit)
 }
 
 // UnitInfo is the typed status of one systemd service unit.

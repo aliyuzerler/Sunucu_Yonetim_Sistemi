@@ -18,7 +18,6 @@ import (
 	"fmt"
 	"regexp"
 
-	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/svcops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/winops"
 )
 
@@ -117,7 +116,7 @@ func validateRequest(req *Request) (target string, listLimit int, err error) {
 		if err := strictDecode(req.Params, &p); err != nil {
 			return "", 0, reject(CatInvalidParams, "unit şeması uyumsuz")
 		}
-		if err := svcops.ValidateUnit(p.Unit); err != nil {
+		if err := winops.ValidateLinuxUnit(p.Unit); err != nil {
 			return "", 0, reject(CatInvalidParams, err.Error())
 		}
 		return p.Unit, 0, nil
