@@ -7,7 +7,7 @@ import (
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/composeops"
 )
 
-// DefaultRegistry returns the Faz 04/06/07/08 unix executor set: the echo
+// DefaultRegistry returns the Faz 04/06/07/08/09 unix executor set: the echo
 // proof, the systemd service operations, the read-only package inventory,
 // the firewall survey/preview family, the Docker Engine family (broker-only
 // socket access; preview-only removes — ADR-0011), the compose analysis
@@ -52,5 +52,10 @@ func DefaultRegistry(brokerPath, dockerSocket string) (*ExecutorRegistry, error)
 		NewWebExecutor(broker.OpWebSiteDisable, brokerPath),
 		NewWebExecutor(broker.OpWebSiteDelete, brokerPath),
 		NewWebExecutor(broker.OpWebPHPList, brokerPath),
+		// Faz 09: TLS sertifika ailesi (3 op — gerçek yürütme yalnız
+		// broker'da --web-enable ile; ADR-0013).
+		NewWebExecutor(broker.OpWebCertRequest, brokerPath),
+		NewWebExecutor(broker.OpWebCertInstall, brokerPath),
+		NewWebExecutor(broker.OpWebCertStatus, brokerPath),
 	)
 }

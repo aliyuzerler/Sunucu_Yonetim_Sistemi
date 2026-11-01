@@ -36,3 +36,4 @@ ADR'ler, mimari olarak önemli kararları, bağlamlarını ve sonuçlarını kay
 | [ADR-0010](ADR-0010-firewall-preview-only.md) | Firewall Rule Changes — Preview-Only (No Mutation Surface) | Accepted (Phase 06) |
 | [ADR-0011](ADR-0011-docker-broker-only-preview-remove.md) | Docker Engine Access — Broker-Only + Preview-Only Remove/Deploy | Accepted (Phase 07) |
 | [ADR-0012](ADR-0012-web-hosting.md) | Web Hosting — Broker-Only Execution, File-Preserving Delete, Marker Config Discipline | Accepted (Phase 08) |
+| [ADR-0013](ADR-0013-dns-acme-tls-keys.md) | DNS Provider Adapter on Control Plane, ACME DNS-01 Orchestration, TLS Keys Never Leave the Node | Accepted (Phase 09) |

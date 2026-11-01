@@ -11,6 +11,7 @@ import (
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/fwops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/pkgops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/svcops"
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/tlsops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/webops"
 )
 
@@ -37,6 +38,9 @@ type Config struct {
 	// the daemon enables it ONLY with --web-enable — ADR-0012: real user/
 	// config mutations are opt-in).
 	Web WebRunner
+	// Faz 09: TLS sertifika runner (nil = cert ailesi reddedilir; web
+	// ailesiyle aynı --web-enable kapısı — ADR-0013).
+	TLS TLSRunner
 
 	// Audit receives one entry per handled request (incl. rejections).
 	Audit  AuditSink
@@ -103,3 +107,15 @@ type WebRunner interface {
 
 // compile-time: the real runner satisfies the interface.
 var _ WebRunner = (*webops.Runner)(nil)
+
+// TLSRunner executes the Faz 09 node-side TLS certificate operations.
+// *tlsops.Runner implements it. The private key NEVER leaves the runner
+// (only CSRs and public certificate material cross the boundary).
+type TLSRunner interface {
+	Request(ctx context.Context, domain string, sans []string) (tlsops.RequestResult, error)
+	Install(ctx context.Context, domain, certPEM, chainPEM string) (tlsops.InstallResult, error)
+	Status(ctx context.Context) ([]tlsops.CertStatus, error)
+}
+
+// compile-time: the real runner satisfies the interface.
+var _ TLSRunner = (*tlsops.Runner)(nil)

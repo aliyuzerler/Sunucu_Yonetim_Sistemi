@@ -18,9 +18,40 @@ const groups = [];
 const tasks = [];
 const audit = [];
 const enrollmentTokens = [];
+// Faz 09 mock state: sağlayıcılar reset ile temizlenir; sertifikalar demo
+// içerikle yeniden tohumlanır (yenileme başarısızlığı + rate_limit görünür
+// örnek — kriter 3'ün mock modda doğrulanması).
+const dnsProviders = [];
+let certificates = [];
+function seedDemoCertificates() {
+
+  certificates = [
+    {
+      id: uuid(),
+      name: "demo.example.internal",
+      sans: ["demo.example.internal", "www.demo.example.internal"],
+      provider_id: null,
+      node_id: null,
+      state: "renewal_failed",
+      not_after: new Date(Date.now() + 12 * 86400e3).toISOString(),
+      fingerprint: "aa11bb22cc33dd44".repeat(4),
+      last_error: "A: 5 validation errors per week (rate limit)",
+      last_error_class: "rate_limit",
+      retry_after_secs: 3600,
+      expires_in_days: 12,
+      expiring_soon: true,
+      effective_state: "renewal_failed",
+      issued_at: new Date(Date.now() - 78 * 86400e3).toISOString(),
+      created_at: new Date(Date.now() - 80 * 86400e3).toISOString(),
+      updated_at: new Date(Date.now() - 86400e3).toISOString(),
+    },
+  ];
+}
 let idSeq = 1;
 const uuid = () =>
   `${String(idSeq++).padStart(8, "0")}-0000-4000-8000-${String(idSeq).padStart(12, "0")}`;
+
+seedDemoCertificates();
 
 users.set("admin", {
   id: uuid(),
@@ -90,6 +121,18 @@ const OPERATIONS = [
   { name: "web.site.update", version: "1.0.0", class: "idempotent_desired_state", retry_safe: true, timeout_seconds: 300 },
   { name: "web.site.disable", version: "1.0.0", class: "idempotent_desired_state", retry_safe: true, timeout_seconds: 180 },
   { name: "web.site.delete", version: "1.0.0", class: "non_idempotent", retry_safe: false, timeout_seconds: 300 },
+  // Faz 09: DNS + SSL (sağlayıcı kimlik bilgileri şifreli; anahtar node'da — ADR-0013).
+  { name: "dns.zone.list", version: "1.0.0", class: "read_only", retry_safe: true, timeout_seconds: 60 },
+  { name: "dns.record.list", version: "1.0.0", class: "read_only", retry_safe: true, timeout_seconds: 60 },
+  { name: "dns.record.diff", version: "1.0.0", class: "read_only", retry_safe: true, timeout_seconds: 60 },
+  { name: "dns.record.apply", version: "1.0.0", class: "idempotent_desired_state", retry_safe: true, timeout_seconds: 120 },
+  { name: "dns.record.delete", version: "1.0.0", class: "non_idempotent", retry_safe: false, timeout_seconds: 120 },
+  { name: "cert.issue", version: "1.0.0", class: "non_idempotent", retry_safe: false, timeout_seconds: 300 },
+  { name: "cert.renew", version: "1.0.0", class: "non_idempotent", retry_safe: false, timeout_seconds: 300 },
+  { name: "cert.revoke", version: "1.0.0", class: "non_idempotent", retry_safe: false, timeout_seconds: 120 },
+  { name: "web.cert.request", version: "1.0.0", class: "idempotent_desired_state", retry_safe: true, timeout_seconds: 60 },
+  { name: "web.cert.install", version: "1.0.0", class: "idempotent_desired_state", retry_safe: true, timeout_seconds: 120 },
+  { name: "web.cert.status", version: "1.0.0", class: "read_only", retry_safe: true, timeout_seconds: 60 },
 ];
 
 // Faz 04 telemetri mock verisi: her node'a agent telemetrisi eklenir.
@@ -329,6 +372,7 @@ function attachWebHost(node) {
   for (const c of [
     "web.site.list", "web.site.status", "web.php.list",
     "web.site.create", "web.site.update", "web.site.disable", "web.site.delete",
+    "web.cert.request", "web.cert.install", "web.cert.status",
   ]) {
     caps.push({ node_id: node.id, capability_id: c, version: "1.0.0", available: true, adapter_id: "web-broker" });
   }
@@ -424,6 +468,111 @@ setInterval(() => {
           },
         };
       }
+      // ---- Faz 09: DNS + SSL görev sonuçları ----
+      if (t.operation === "dns.zone.list") {
+        t.result = {
+          zones: ["example.com", "test.example.internal"],
+          capabilities: {
+            record_types: ["A", "AAAA", "CNAME", "TXT", "MX"],
+            ttl_min: 60, ttl_max: 86400, supports_dns01: true, wildcard: true,
+            note: "yerleşik mock sağlayıcı (in-memory; yalnız test/offline değerlendirme)",
+          },
+        };
+      }
+      if (t.operation === "dns.record.list") {
+        t.result = {
+          records: [
+            { name: "@", type: "A", value: "203.0.113.10", ttl: 3600 },
+            { name: "www", type: "A", value: "203.0.113.10", ttl: 300 },
+            { name: "www", type: "AAAA", value: "2001:db8::10", ttl: 300 },
+            { name: "_acme-challenge", type: "TXT", value: "mock-digest-value", ttl: 60 },
+          ],
+          capabilities: { record_types: ["A", "AAAA", "CNAME", "TXT", "MX"], ttl_min: 60, ttl_max: 86400, supports_dns01: true, wildcard: true },
+        };
+      }
+      if (t.operation === "dns.record.diff" || t.operation === "dns.record.apply") {
+        const p = t.payload || {};
+        const action = p.name === "www" && p.type === "A" ? "update" : "create";
+        t.result = {
+          change: {
+            action,
+            before: action === "update" ? { name: p.name, type: p.type, value: "203.0.113.10", ttl: 300 } : null,
+            after: { name: p.name, type: p.type, value: p.value, ttl: p.ttl },
+          },
+        };
+      }
+      if (t.operation === "dns.record.delete") {
+        t.result = { deleted: { name: (t.payload && t.payload.name) || "@", type: (t.payload && t.payload.type) || "A" } };
+      }
+      if (t.operation === "web.cert.request") {
+        const d = (t.payload && t.payload.domain) || "example.internal";
+        t.result = {
+          request: {
+            domain: d,
+            sans: [d, ...((t.payload && t.payload.sans) || [])],
+            csr_pem: "-----BEGIN CERTIFICATE REQUEST-----\nMIIBmockCSRPayload\n-----END CERTIFICATE REQUEST-----",
+            key_fingerprint: "11".repeat(32),
+            key_reused: false,
+          },
+        };
+      }
+      if (t.operation === "cert.issue" || t.operation === "cert.renew") {
+        const name = (t.payload && t.payload.name) || "example.internal";
+        const rec = {
+          id: uuid(),
+          name,
+          sans: [name, ...((t.payload && t.payload.sans) || [])],
+          provider_id: (t.payload && t.payload.provider_id) || null,
+          node_id: (t.payload && t.payload.node_id) || null,
+          state: "issued",
+          not_after: new Date(Date.now() + 90 * 86400e3).toISOString(),
+          fingerprint: "22".repeat(32),
+          last_error: null,
+          last_error_class: null,
+          retry_after_secs: 0,
+          expires_in_days: 90,
+          expiring_soon: false,
+          effective_state: "issued",
+          issued_at: new Date().toISOString(),
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        };
+        certificates.unshift(rec);
+        t.result = {
+          certificate: rec,
+          cert_pem: "-----BEGIN CERTIFICATE-----\nMIIBmockLeafCertificate\n-----END CERTIFICATE-----",
+          chain_pem: "-----BEGIN CERTIFICATE-----\nMIIBmockChainCertificate\n-----END CERTIFICATE-----",
+        };
+      }
+      if (t.operation === "cert.revoke") {
+        const rec = certificates.find((c) => c.id === (t.payload && t.payload.cert_id));
+        if (rec) {
+          rec.state = "revoked";
+          rec.effective_state = "revoked";
+          rec.revoked_at = new Date().toISOString();
+        }
+        t.result = { certificate: rec ?? null };
+      }
+      if (t.operation === "web.cert.install") {
+        const d = (t.payload && t.payload.domain) || "example.internal";
+        t.result = {
+          result: {
+            domain: d,
+            not_after: new Date(Date.now() + 90 * 86400e3).toISOString(),
+            fingerprint: "22".repeat(32),
+            reloaded: true,
+            rollback_used: false,
+            notes: ["nginx -t kapısı geçildi; reload sinyali verildi"],
+          },
+        };
+      }
+      if (t.operation === "web.cert.status") {
+        t.result = {
+          certificates: [
+            { domain: (t.payload && t.payload.domain) || "example.internal", not_after: new Date(Date.now() + 90 * 86400e3).toISOString(), fingerprint: "22".repeat(32), key_present: true, days_left: 90 },
+          ],
+        };
+      }
       if (t.operation === "web.site.disable" || t.operation === "web.site.delete") {
         const site = (t.payload && t.payload.site) || "site";
         const act = t.operation.split(".")[2];
@@ -503,7 +652,8 @@ const server = createServer(async (req, res) => {
     nodeFacts.clear();
     nodeMetrics.clear();
     nodeCapabilities.clear();
-    json(res, 200, { status: "reset", mock: true });
+    dnsProviders.length = 0;
+        json(res, 200, { status: "reset", mock: true });
     return;
   }
 
@@ -678,6 +828,66 @@ const server = createServer(async (req, res) => {
   }
 
   // ---- tasks ----
+  // ---- Faz 09: DNS sağlayıcı kayıtları (kimlik bilgisi ASLA geri verilmez) ----
+  if (method === "GET" && path === "/api/v1/dns-providers") {
+    if (!session) { json(res, 401, errorBody("unauthorized", "Oturum gerekli.", 401)); return; }
+    json(res, 200, { providers: dnsProviders.map(({ credentials_encrypted, ...pub }) => pub) });
+    return;
+  }
+  if (method === "POST" && path === "/api/v1/dns-providers") {
+    if (!session) { json(res, 401, errorBody("unauthorized", "Oturum gerekli.", 401)); return; }
+    const body = await readBody();
+    if (!body.name || !body.kind || !body.credentials || !body.credentials.api_key) {
+      json(res, 400, errorBody("invalid_request", "name/kind/credentials zorunlu.", 400));
+      return;
+    }
+    if (body.kind !== "mock") {
+      json(res, 400, errorBody("invalid_request", "Sağlayıcı türü desteklenmiyor (desteklenen: mock).", 400));
+      return;
+    }
+    const row = {
+      id: uuid(),
+      name: String(body.name),
+      kind: "mock",
+      capabilities: { record_types: ["A", "AAAA", "CNAME", "TXT", "MX"], ttl_min: 60, ttl_max: 86400, supports_dns01: true, wildcard: true, note: "yerleşik mock sağlayıcı (in-memory)" },
+      credential_keys: ["api_key"],
+      credentials_encrypted: Buffer.from(JSON.stringify(body.credentials)).toString("base64"),
+      has_credentials: true,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    dnsProviders.push(row);
+    logAudit(actor, "dns.provider.create", "dns_provider", row.id, "success");
+    const { credentials_encrypted, ...pub } = row;
+    json(res, 201, pub);
+    return;
+  }
+  const dnsDelMatch = /^\/api\/v1\/dns-providers\/([^/]+)$/.exec(path);
+  if (method === "DELETE" && dnsDelMatch) {
+    if (!session) { json(res, 401, errorBody("unauthorized", "Oturum gerekli.", 401)); return; }
+    const idx = dnsProviders.findIndex((p) => p.id === dnsDelMatch[1]);
+    if (idx < 0) { json(res, 404, errorBody("not_found", "Kayıt bulunamadı.", 404)); return; }
+    dnsProviders.splice(idx, 1);
+    logAudit(actor, "dns.provider.delete", "dns_provider", dnsDelMatch[1], "success");
+    json(res, 200, { deleted: true });
+    return;
+  }
+
+  // ---- Faz 09: SSL sertifika durumu ----
+  if (method === "GET" && path === "/api/v1/certificates") {
+    if (!session) { json(res, 401, errorBody("unauthorized", "Oturum gerekli.", 401)); return; }
+    json(res, 200, { certificates });
+    return;
+  }
+  const certGetMatch = /^\/api\/v1\/certificates\/([^/]+)$/.exec(path);
+  if (method === "GET" && certGetMatch) {
+    if (!session) { json(res, 401, errorBody("unauthorized", "Oturum gerekli.", 401)); return; }
+    const rec = certificates.find((c) => c.id === certGetMatch[1]);
+    if (!rec) { json(res, 404, errorBody("not_found", "Kayıt bulunamadı.", 404)); return; }
+    json(res, 200, rec);
+    return;
+  }
+
   if (method === "GET" && path === "/api/v1/task-operations") {
     json(res, 200, { operations: OPERATIONS });
     return;

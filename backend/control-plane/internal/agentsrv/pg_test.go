@@ -91,7 +91,7 @@ func setupEnv(t *testing.T) *testEnv {
 	auditRec := noopAudit{}
 	inventorySvc := inventory.NewService(inventory.NewPGStore(pool), auditRec)
 	taskStore := tasks.NewPGStore(pool)
-	registry, err := tasks.BuildDefaultRegistry(nopTagSetter{})
+	registry, err := tasks.BuildDefaultRegistry(nopTagSetter{}, tasks.Faz09Services{})
 	if err != nil {
 		t.Fatal(err)
 	}

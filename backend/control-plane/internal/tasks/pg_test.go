@@ -17,7 +17,7 @@ func pgService(t *testing.T) (*Service, *PGStore, *Registry) {
 	pool := testdb.Pool(t)
 	testdb.Reset(t, pool)
 	store := NewPGStore(pool)
-	reg, err := BuildDefaultRegistry(nopSetter{})
+	reg, err := BuildDefaultRegistry(nopSetter{}, Faz09Services{})
 	if err != nil {
 		t.Fatal(err)
 	}

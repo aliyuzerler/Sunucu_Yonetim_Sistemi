@@ -207,14 +207,15 @@ func TestRegistryValidation(t *testing.T) {
 	if err == nil {
 		t.Fatal("geçersiz operasyon adı reddedilmeli")
 	}
-	reg, err := BuildDefaultRegistry(&fakeTagSetter{})
+	reg, err := BuildDefaultRegistry(&fakeTagSetter{}, Faz09Services{})
 	if err != nil {
 		t.Fatalf("varsayılan kayıt defteri: %v", err)
 	}
-	// Faz 04+05+06+07+08: echo/noop/tag + 5 systemd + 5 SCM + eventlog
-	// + pkg.list + 3 firewall + 15 docker/compose + 7 web = 40.
-	if len(reg.Names()) != 40 {
-		t.Fatalf("40 operasyon bekleniyordu: %v", reg.Names())
+	// Faz 04+05+06+07+08+09: echo/noop/tag + 5 systemd + 5 SCM + eventlog
+	// + pkg.list + 3 firewall + 15 docker/compose + 7 web
+	// + 5 dns + 3 cert + 3 web.cert = 51.
+	if len(reg.Names()) != 51 {
+		t.Fatalf("51 operasyon bekleniyordu: %v", reg.Names())
 	}
 	// Faz 05: Windows ailesi RBAC katmanı — SCM okuma service:read,
 	// SCM kontrol service:control, eventlog eventlog:read.
@@ -297,7 +298,7 @@ func TestPayloadValidators(t *testing.T) {
 func newTestService(t *testing.T) (*Service, *fakeStore, *spyAudit) {
 	t.Helper()
 	store := newFakeStore()
-	reg, err := BuildDefaultRegistry(&fakeTagSetter{})
+	reg, err := BuildDefaultRegistry(&fakeTagSetter{}, Faz09Services{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -459,7 +460,7 @@ func (c *collectPublisher) Publish(_ context.Context, ev *OutboxEvent) error {
 
 func TestWorkerExecutesQueuedTask(t *testing.T) {
 	svc, store, _ := newTestService(t)
-	reg, _ := BuildDefaultRegistry(&fakeTagSetter{})
+	reg, _ := BuildDefaultRegistry(&fakeTagSetter{}, Faz09Services{})
 	w, spy, pub := runWorker(t, store, reg)
 	ctx := context.Background()
 
@@ -555,7 +556,7 @@ func TestWorkerFailsOnExecutorPanic(t *testing.T) {
 
 func TestWorkerUnsupportedOperation(t *testing.T) {
 	store := newFakeStore()
-	reg, _ := BuildDefaultRegistry(&fakeTagSetter{})
+	reg, _ := BuildDefaultRegistry(&fakeTagSetter{}, Faz09Services{})
 	w, _, _ := runWorker(t, store, reg)
 	ctx := context.Background()
 

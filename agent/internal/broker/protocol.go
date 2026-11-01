@@ -17,11 +17,13 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"strings"
 
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/composeops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/dockerx"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/fwops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/pkgops"
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/tlsops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/webops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/winops"
 )
@@ -76,6 +78,12 @@ const (
 	OpWebSiteDisable = webops.OpWebSiteDisable
 	OpWebSiteDelete  = webops.OpWebSiteDelete
 	OpWebPHPList     = webops.OpWebPHPList
+
+	// Faz 09: TLS sertifika ailesi (web ailesiyle aynı --web-enable
+	// kapısı; ADR-0013). Özel anahtar ASLA broker dışına çıkmaz.
+	OpWebCertRequest = tlsops.OpWebCertRequest
+	OpWebCertInstall = tlsops.OpWebCertInstall
+	OpWebCertStatus  = tlsops.OpWebCertStatus
 
 	OpWinServiceList    = winops.OpWinServiceList
 	OpWinServiceStatus  = winops.OpWinServiceStatus
@@ -157,12 +165,22 @@ type dockerCall struct {
 	prune   bool
 }
 
-// webCall carries the Faz 08 web-family parameters extracted at validation
-// time (site name, full spec, list bound).
+// webCall carries the Faz 08/09 web-family parameters extracted at
+// validation time (site name, full spec, list bound, cert payloads).
 type webCall struct {
 	site  string
 	spec  *webops.SiteSpec
 	limit int
+	// Faz 09: TLS sertifika parametreleri.
+	certDomains []string
+	certInstall *tlsInstallCall
+}
+
+// tlsInstallCall carries the public certificate material to stage.
+type tlsInstallCall struct {
+	domain   string
+	certPEM  string
+	chainPEM string
 }
 
 // validatedCall is the typed outcome of request validation.
@@ -338,6 +356,55 @@ func validateRequest(req *Request) (validatedCall, error) {
 		}
 		if err := strictDecode(req.Params, &p); err != nil {
 			return empty, reject(CatInvalidParams, "php.list şeması uyumsuz (boş obje beklenir)")
+		}
+		return validatedCall{}, nil
+
+	// ---- Faz 09: TLS sertifika ailesi ----
+	case OpWebCertRequest:
+		if len(req.Params) > tlsops.MaxPayloadBytes {
+			return empty, reject(CatInvalidParams, "payload çok büyük")
+		}
+		var p struct {
+			Domain string   `json:"domain"`
+			SANs   []string `json:"sans,omitempty"`
+		}
+		if err := strictDecode(req.Params, &p); err != nil {
+			return empty, reject(CatInvalidParams, "cert request şeması uyumsuz")
+		}
+		domains, err := tlsops.NormalizeDomains(p.Domain, p.SANs)
+		if err != nil {
+			return empty, reject(CatInvalidParams, err.Error())
+		}
+		return validatedCall{web: webCall{certDomains: domains}, target: domains[0]}, nil
+	case OpWebCertInstall:
+		if len(req.Params) > tlsops.MaxPayloadBytes {
+			return empty, reject(CatInvalidParams, "payload çok büyük")
+		}
+		var p struct {
+			Domain   string `json:"domain"`
+			CertPEM  string `json:"cert_pem"`
+			ChainPEM string `json:"chain_pem,omitempty"`
+		}
+		if err := strictDecode(req.Params, &p); err != nil {
+			return empty, reject(CatInvalidParams, "cert install şeması uyumsuz")
+		}
+		if !tlsops.ValidDomain(p.Domain) {
+			return empty, reject(CatInvalidParams, "domain geçersiz")
+		}
+		if p.CertPEM == "" || len(p.CertPEM) > tlsops.MaxCertPEMLen || len(p.ChainPEM) > tlsops.MaxCertPEMLen {
+			return empty, reject(CatInvalidParams, "PEM boyut sınırları")
+		}
+		if !strings.Contains(p.CertPEM, "BEGIN CERTIFICATE") {
+			return empty, reject(CatInvalidParams, "cert_pem CERTIFICATE PEM olmalı")
+		}
+		return validatedCall{web: webCall{site: p.Domain, certInstall: &tlsInstallCall{domain: p.Domain, certPEM: p.CertPEM, chainPEM: p.ChainPEM}}, target: p.Domain}, nil
+	case OpWebCertStatus:
+		var p struct{}
+		if len(req.Params) == 0 {
+			req.Params = []byte("{}")
+		}
+		if err := strictDecode(req.Params, &p); err != nil {
+			return empty, reject(CatInvalidParams, "cert status şeması uyumsuz (boş obje beklenir)")
 		}
 		return validatedCall{}, nil
 	case "":

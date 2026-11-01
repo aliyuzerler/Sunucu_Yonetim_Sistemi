@@ -65,7 +65,7 @@ func TestValidateServiceListPayload(t *testing.T) {
 // RequiredPerm layering: service mutations require service:control, reads
 // require service:read; echo remains unrestricted.
 func TestServiceOpPermissionLayering(t *testing.T) {
-	reg, err := BuildDefaultRegistry(&fakeTagSetter{})
+	reg, err := BuildDefaultRegistry(&fakeTagSetter{}, Faz09Services{})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -21,6 +21,7 @@ import (
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/fwops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/pkgops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/svcops"
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/tlsops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/webops"
 )
 
@@ -81,6 +82,7 @@ func run(logger *slog.Logger, cfg daemonConfig) error {
 		Firewall:      &fwops.Runner{},                                // Faz 06: firewall tespit + salt-okuma liste
 		Docker:        dockerRunnerOrZero(platformFlags.dockerSocket), // Faz 07: Engine API (unix soket; ADR-0011)
 		Web:           webRunnerOrZero(platformFlags.webEnable),       // Faz 08: site yaşam döngüsü (opt-in; ADR-0012)
+		TLS:           tlsRunnerOrZero(platformFlags.webEnable),       // Faz 09: sertifika yaşam döngüsü (aynı opt-in; ADR-0013)
 		Audit:         sink,
 		Logger:        logger,
 	})
@@ -114,6 +116,16 @@ func webRunnerOrZero(enabled bool) broker.WebRunner {
 		return nil
 	}
 	return webops.NewRunner()
+}
+
+// tlsRunnerOrZero wires the Faz 09 TLS certificate runner; the family is
+// OPT-IN under the same --web-enable gate (real key generation, cert
+// staging, nginx reload — ADR-0013). The private key never leaves here.
+func tlsRunnerOrZero(enabled bool) broker.TLSRunner {
+	if !enabled {
+		return nil
+	}
+	return tlsops.NewRunner()
 }
 
 func parseUIDs(s string) ([]uint32, error) {

@@ -348,6 +348,16 @@ jobs:
       - name: Web adapter gerçek lifecycle kanıtı
         run: |
           sudo -E env EXPECTED_WEB=1 /tmp/webops.test -test.run 'TestRealWebHostLifecycle' -test.v
+      - name: TLS ops test ikilisini derle
+        run: |
+          cd agent
+          go test -c -buildvcs=false -o /tmp/tlsops.test ./internal/tlsops/
+      - name: Faz 09 TLS sertifika gerçek lifecycle kanıtı
+        run: |
+          # Anahtar üretimi + self-signed sertifika kurulumu + gerçek
+          # nginx -t kapısı + reload + eşleşmeyen anahtar reddi (canlı
+          # sertifika korunur). EXPECTED_TLS=1: sessiz atlama yasak (CI-17).
+          sudo -E env EXPECTED_TLS=1 /tmp/tlsops.test -test.run 'TestRealTLSLifecycle' -test.v
       - name: Temizlik
         if: always()
         run: |
@@ -355,6 +365,7 @@ jobs:
           sudo rm -f /etc/php/8.3/fpm/pool.d/srvctl-* || true
           sudo userdel sc-web-citest 2>/dev/null || true
           sudo rm -rf /var/www/server-control/citest || true
+          sudo rm -rf /etc/nginx/ssl/srvctl-citest || true
 
   agent-windows:
     name: Agent (Go, windows-2025)

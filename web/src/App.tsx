@@ -5,7 +5,9 @@ import { AuditPage } from "./pages/AuditPage";
 import { ComingSoonPage } from "./pages/ComingSoonPage";
 import { EnrollmentPage } from "./pages/EnrollmentPage";
 import { LoginPage } from "./pages/LoginPage";
+import { DnsPage } from "./pages/DnsPage";
 import { NodesPage } from "./pages/NodesPage";
+import { SslPage } from "./pages/SslPage";
 import { OverviewPage } from "./pages/OverviewPage";
 import { TasksPage } from "./pages/TasksPage";
 import { UsersPage } from "./pages/UsersPage";
@@ -39,7 +41,9 @@ export function App() {
           {active === "audit" && <AuditPage />}
           {active === "users" && <UsersPage />}
           {active === "enrollment" && <EnrollmentPage />}
-          {!["overview", "nodes", "tasks", "audit", "users", "enrollment"].includes(active) && (
+          {active === "dns" && <DnsPage />}
+          {active === "ssl" && <SslPage />}
+          {!["overview", "nodes", "tasks", "audit", "users", "enrollment", "dns", "ssl"].includes(active) && (
             <ComingSoonPage moduleId={active} />
           )}
         </main>

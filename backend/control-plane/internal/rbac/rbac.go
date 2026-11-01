@@ -46,6 +46,15 @@ const (
 	// Faz 08: web hosting (nginx + PHP-FPM site yaşam döngüsü).
 	PermWebRead    = "web:read"
 	PermWebControl = "web:control"
+
+	// Faz 09: Domain/DNS ve SSL sertifika yaşam döngüsü.
+	// dns:control → kayıt mutasyonu (apply/delete) + sağlayıcı yönetimi;
+	// cert:control → issue/renew/revoke. Cert install node tarafında
+	// web:control altındadır (web.cert.* — web ailesi opt-in kapısı).
+	PermDNSRead    = "dns:read"
+	PermDNSControl = "dns:control"
+	PermCertRead   = "cert:read"
+	PermCertCtrl   = "cert:control"
 )
 
 // AllPermissions lists the seeded catalog in one place.
@@ -59,6 +68,8 @@ var AllPermissions = []string{
 	PermPkgRead, PermFirewallRead,
 	PermDockerRead, PermDockerControl,
 	PermWebRead, PermWebControl,
+	PermDNSRead, PermDNSControl,
+	PermCertRead, PermCertCtrl,
 }
 
 // Scope types.

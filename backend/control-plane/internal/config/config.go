@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/secrets"
 )
 
 // Config carries all runtime settings for the control plane process.
@@ -36,6 +38,14 @@ type Config struct {
 	GRPCAddr string
 	CACert   string
 	CAKey    string
+
+	// Faz 09: secrets + ACME. SecretsKey empty → DNS provider
+	// registrations and cert material are REJECTED (honest config
+	// error; no silent fallback). ACME unset → cert ops refuse.
+	SecretsKey       string // CP_SECRETS_KEY (base64, 32 bayt)
+	ACMEAccountKey   string // CP_ACME_ACCOUNT_KEY (dosya yolu)
+	ACMEDirectoryURL string // CP_ACME_DIRECTORY_URL (örn. LE staging)
+	ACMEContact      string // CP_ACME_CONTACT (örn. mailto:ops@example.com)
 }
 
 // Load reads configuration from process environment variables.
@@ -125,6 +135,19 @@ func FromEnv(env map[string]string) (Config, error) {
 	cfg.CAKey = strings.TrimSpace(env["CP_CA_KEY"])
 	if (cfg.CACert == "") != (cfg.CAKey == "") {
 		return Config{}, fmt.Errorf("CP_CA_CERT ve CP_CA_KEY birlikte tanımlanmalı")
+	}
+
+	cfg.SecretsKey = strings.TrimSpace(env["CP_SECRETS_KEY"])
+	cfg.ACMEAccountKey = strings.TrimSpace(env["CP_ACME_ACCOUNT_KEY"])
+	cfg.ACMEDirectoryURL = strings.TrimSpace(env["CP_ACME_DIRECTORY_URL"])
+	cfg.ACMEContact = strings.TrimSpace(env["CP_ACME_CONTACT"])
+	if (cfg.ACMEAccountKey == "") != (cfg.ACMEDirectoryURL == "") {
+		return Config{}, fmt.Errorf("CP_ACME_ACCOUNT_KEY ve CP_ACME_DIRECTORY_URL birlikte tanımlanmalı")
+	}
+	if len(cfg.SecretsKey) > 0 {
+		if _, err := secrets.ParseKey(cfg.SecretsKey); err != nil {
+			return Config{}, fmt.Errorf("CP_SECRETS_KEY geçersiz: base64 32 bayt gerekli")
+		}
 	}
 	return cfg, nil
 }

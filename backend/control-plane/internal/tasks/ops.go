@@ -151,9 +151,10 @@ func decodeStrict(payload json.RawMessage, v any) error {
 	return nil
 }
 
-// BuildDefaultRegistry returns the Faz 02 operation registry (Faz 04 ile
-// genişletildi: linux systemd servis operasyonları).
-func BuildDefaultRegistry(tagSetter TagSetter) (*Registry, error) {
+// BuildDefaultRegistry returns the Faz 02 operation registry (Faz 04-09
+// ile genişletildi). faz09 nil geçilebilir: DNS/cert executor'ları o zaman
+// dürüst yapılandırma hatası döndürür.
+func BuildDefaultRegistry(tagSetter TagSetter, faz09 Faz09Services) (*Registry, error) {
 	specs := []*OperationSpec{
 		&OperationSpec{
 			Name:       "noop.echo",
@@ -325,6 +326,9 @@ func BuildDefaultRegistry(tagSetter TagSetter) (*Registry, error) {
 	// Faz 08: Web hosting (nginx + PHP-FPM site yaşam döngüsü) ayrı dosyada:
 	// ops_faz08.go (delete dosya-koruyucu — ADR-0012).
 	specs = append(specs, buildFaz08Registry()...)
+	// Faz 09: DNS sağlayıcı adaptörü + ACME sertifika yaşam döngüsü ayrı
+	// dosyada: ops_faz09.go (anahtar-node'da, kimlik-şifreli — ADR-0013).
+	specs = append(specs, buildFaz09Registry(faz09)...)
 	return NewRegistry(specs...)
 }
 

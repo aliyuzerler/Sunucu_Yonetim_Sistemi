@@ -22,10 +22,35 @@ go run ./cmd/migrate up
 go run ./cmd/control-plane
 # healthz:  http://127.0.0.1:8080/healthz
 # readyz:   http://127.0.0.1:8080/readyz  (DB up → ready)
+#
+# Faz 09: DNS/SSL için ek ortam değişkenleri (hepsi OPSİYONEL; ayarsız
+# ilgili aile dürüstçe tipli hata verir — sessiz fallback yoktur):
+#   CP_SECRETS_KEY        base64 32 bayt AES-256 anahtarı (sağlayıcı
+#                         kimlik bilgileri + sertifika materyali için
+#                         ZORUNLU; üretimi: openssl rand -base64 32)
+#   CP_ACME_ACCOUNT_KEY   ACME hesap anahtarı dosya yolu (yoksa P-256
+#                         üretir, 0600)
+#   CP_ACME_DIRECTORY_URL ACME dizin URL'si — test için LE STAGING:
+#                         https://acme-staging-v02.api.letsencrypt.org/directory
+#   CP_ACME_CONTACT       mailto:ops@example.com
+# Ayrıntılar: docs/architecture/dns-ssl.md + ADR-0013.
 
 # 5) UI (ayrı terminal)
 cd ../../web && npm install && npm run dev
 ```
+
+## Agent: web hosting + TLS sertifikaları (Faz 08/09)
+
+`server-privd` gerçek sistem mutasyonlarını (web hosting: kullanıcı/config/reload;
+TLS: anahtar üretimi, sertifika sahneleme, nginx reload) yalnız opt-in ile yapar:
+
+```bash
+server-privd --web-enable ...   # VARSAYILAN KAPALI — her iki aile için tek kapı
+```
+
+Kapalıyken ilgili operasyonlar tipli `unsupported_operation` döndürür (sessiz
+kalabalık yok). TLS özel anahtarı yalnız bu broker'da doğar ve node'dan asla
+çıkmaz (ADR-0013).
 
 ## Güvenlik notları
 

@@ -7,6 +7,8 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/certmgmt"
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/dns"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/enroll"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/identity"
 
@@ -50,6 +52,8 @@ type Options struct {
 	Audit     audit.Recorder
 	AuditList AuditLister
 	Enroll    EnrollmentManager
+	DNS       *dns.Service    // Faz 09: sağlayıcı kayıt CRUD (kimlik bilgileri yaz-amaçlı)
+	Certs     *certmgmt.Store // Faz 09: sertifika durum okuma
 }
 
 // api holds handler dependencies.
@@ -65,6 +69,8 @@ type api struct {
 	telemetry *telemetry.Service
 	audit     audit.Recorder
 	auditList AuditLister
+	dns       *dns.Service
+	certs     *certmgmt.Store
 }
 
 // New assembles the HTTP handler with the full middleware chain.

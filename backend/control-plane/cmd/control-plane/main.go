@@ -17,17 +17,21 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/acmex"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/agentsrv"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/audit"
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/certmgmt"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/certs"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/config"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/db"
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/dns"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/enroll"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/httpapi"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/identity"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/inventory"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/platform"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/rbac"
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/secrets"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/tasks"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/telemetry"
 	"google.golang.org/grpc"
@@ -253,7 +257,41 @@ func run() error {
 		authzSvc := rbac.NewService(rbac.NewPGStore(p))
 		inventorySvc := inventory.NewService(inventory.NewPGStore(p), auditRec)
 		taskStore := tasks.NewPGStore(p)
-		taskRegistry, err := tasks.BuildDefaultRegistry(inventorySvc)
+
+		// Faz 09: DNS sağlayıcı + sertifika yaşam döngüsü servisleri.
+		var secretsKey secrets.Key
+		if cfg.SecretsKey != "" {
+			key, keyErr := secrets.ParseKey(cfg.SecretsKey)
+			if keyErr != nil {
+				return fmt.Errorf("secrets anahtarı: %w", keyErr)
+			}
+			secretsKey = key
+		}
+		dnsSvc := &dns.Service{Store: dns.NewStore(p), Key: secretsKey}
+		certStore := certmgmt.NewStore(p)
+		var acmeMgr *acmex.Manager
+		if cfg.ACMEDirectoryURL != "" && cfg.ACMEAccountKey != "" {
+			acctKey, keyErr := acmex.LoadOrCreateAccountKey(cfg.ACMEAccountKey)
+			if keyErr != nil {
+				return fmt.Errorf("ACME hesap anahtarı: %w", keyErr)
+			}
+			acmeMgr = &acmex.Manager{
+				Key:          acctKey,
+				DirectoryURL: cfg.ACMEDirectoryURL,
+				MaxRetry:     2,
+			}
+			if cfg.ACMEContact != "" {
+				acmeMgr.Contact = []string{cfg.ACMEContact}
+			}
+		}
+		certSvc := &certmgmt.Service{
+			Store:   certStore,
+			DNS:     dnsSvc,
+			ACME:    acmeMgr,
+			Secrets: secretsKey,
+		}
+
+		taskRegistry, err := tasks.BuildDefaultRegistry(inventorySvc, tasks.Faz09Services{DNS: dnsSvc, Cert: certSvc})
 		if err != nil {
 			return fmt.Errorf("görev kayıt defteri: %w", err)
 		}
@@ -265,6 +303,8 @@ func run() error {
 		workerCtx, workerStop := context.WithCancel(context.Background())
 		defer workerStop()
 		go taskWorker.Run(workerCtx)
+		// Faz 09: sertifika süre izleyicisi (issued → expired geçişi).
+		go certmgmt.Watcher{Store: certStore, Interval: time.Hour}.Run(workerCtx)
 
 		var ca *certs.CA
 		if cfg.CACert != "" && cfg.CAKey != "" {
@@ -285,6 +325,8 @@ func run() error {
 		opts.Audit = auditRec
 		opts.AuditList = audit.NewService(p)
 		opts.Enroll = enrollSvc
+		opts.DNS = dnsSvc
+		opts.Certs = certStore
 
 		// Agent gRPC sunucusu: yalnızca CA yapılandırıldığında başlar.
 		if ca != nil {

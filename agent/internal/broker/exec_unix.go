@@ -14,6 +14,7 @@ import (
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/fwops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/pkgops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/svcops"
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/tlsops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/webops"
 )
 
@@ -203,6 +204,38 @@ func (s *Server) execute(req *Request, call validatedCall) *Response {
 		var m webops.PHPMatrix
 		m, err = s.cfg.Web.PHPVersions(ctx)
 		result = map[string]any{"php": m}
+
+	// ---- Faz 09: TLS sertifika ailesi (TLS runner --web-enable ile) ----
+	case OpWebCertRequest:
+		if s.cfg.TLS == nil {
+			res.Status = StatusFailed
+			res.ErrorCategory = CatExecutorFailed
+			res.Output = "tls runner yapılandırılmadı"
+			return res
+		}
+		var rr tlsops.RequestResult
+		rr, err = s.cfg.TLS.Request(ctx, wb.certDomains[0], wb.certDomains[1:])
+		result = map[string]any{"request": rr}
+	case OpWebCertInstall:
+		if s.cfg.TLS == nil {
+			res.Status = StatusFailed
+			res.ErrorCategory = CatExecutorFailed
+			res.Output = "tls runner yapılandırılmadı"
+			return res
+		}
+		var ir tlsops.InstallResult
+		ir, err = s.cfg.TLS.Install(ctx, wb.certInstall.domain, wb.certInstall.certPEM, wb.certInstall.chainPEM)
+		result = map[string]any{"result": ir}
+	case OpWebCertStatus:
+		if s.cfg.TLS == nil {
+			res.Status = StatusFailed
+			res.ErrorCategory = CatExecutorFailed
+			res.Output = "tls runner yapılandırılmadı"
+			return res
+		}
+		var sts []tlsops.CertStatus
+		sts, err = s.cfg.TLS.Status(ctx)
+		result = map[string]any{"certificates": sts}
 	case OpServiceList:
 		var units []svcops.UnitInfo
 		units, err = sysd.List(ctx)
@@ -290,7 +323,9 @@ func (s *Server) fwRunner() FirewallRunner {
 func isWebOp(op string) bool {
 	switch op {
 	case OpWebSiteList, OpWebSiteStatus, OpWebSiteCreate, OpWebSiteUpdate,
-		OpWebSiteDisable, OpWebSiteDelete, OpWebPHPList:
+		OpWebSiteDisable, OpWebSiteDelete, OpWebPHPList,
+		// Faz 09: TLS sertifika ailesi aynı opt-in kapısında (ADR-0013).
+		OpWebCertRequest, OpWebCertInstall, OpWebCertStatus:
 		return true
 	}
 	return false

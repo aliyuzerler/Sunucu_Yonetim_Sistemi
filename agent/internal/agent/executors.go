@@ -17,6 +17,7 @@ import (
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/composeops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/dockerx"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/fwops"
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/tlsops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/webops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/winops"
 	agentv1 "github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/gen/proto/servercontrol/agent/v1"
@@ -642,6 +643,40 @@ func (w *WebExecutor) Execute(ctx context.Context, payload []byte) ([]byte, stri
 		}
 		req.Params = payload
 	case w.op == broker.OpWebPHPList:
+		req.Params = []byte("{}")
+
+	// ---- Faz 09: TLS sertifika ailesi (yalnız public materyal geçer) ----
+	case w.op == broker.OpWebCertRequest:
+		var p struct {
+			Domain string   `json:"domain"`
+			SANs   []string `json:"sans,omitempty"`
+		}
+		if err := decodeStrict(payload, &p); err != nil {
+			return nil, "", err
+		}
+		domains, err := tlsops.NormalizeDomains(p.Domain, p.SANs)
+		if err != nil {
+			return nil, "", err
+		}
+		out, _ := json.Marshal(map[string]any{"domain": domains[0], "sans": domains[1:]})
+		req.Params = out
+	case w.op == broker.OpWebCertInstall:
+		var p struct {
+			Domain   string `json:"domain"`
+			CertPEM  string `json:"cert_pem"`
+			ChainPEM string `json:"chain_pem,omitempty"`
+		}
+		if err := decodeStrict(payload, &p); err != nil {
+			return nil, "", err
+		}
+		if !tlsops.ValidDomain(p.Domain) {
+			return nil, "", fmt.Errorf("%w: %q", tlsops.ErrInvalidDomain, p.Domain)
+		}
+		if p.CertPEM == "" || len(p.CertPEM) > tlsops.MaxCertPEMLen || len(p.ChainPEM) > tlsops.MaxCertPEMLen {
+			return nil, "", fmt.Errorf("%w: PEM boyut sınırları", tlsops.ErrCertInvalid)
+		}
+		req.Params = payload
+	case w.op == broker.OpWebCertStatus:
 		req.Params = []byte("{}")
 	default:
 		return nil, "", fmt.Errorf("web executor izin dışı operasyon: %s", w.op)
