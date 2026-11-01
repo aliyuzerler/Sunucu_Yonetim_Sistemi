@@ -215,7 +215,7 @@ jobs:
         run: cd agent && GOOS=windows GOARCH=amd64 go build -buildvcs=false ./...
 
   agent-rhel:
-    name: Agent (Gerçek dağıtım: ${{ matrix.name }})
+    name: "Agent (gerçek dağıtım — ${{ matrix.name }})"
     runs-on: ubuntu-latest
     timeout-minutes: 20
     # Faz 06: Rocky Linux 9 + AlmaLinux 9 disposable systemd container'ları —
