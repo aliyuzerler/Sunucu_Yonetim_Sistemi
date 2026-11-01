@@ -94,7 +94,7 @@ func TestFlowIssueRenewRevoke(t *testing.T) {
 	csr := testCSRPEM(t, []string{"flow.example.internal"})
 	out, err := svc.Issue(ctx, IssueRequest{
 		Name: "flow.example.internal", ProviderID: providerID,
-		NodeID: "node-flow", CSRPEM: csr,
+		NodeID: "0aa1c3e1-1111-4222-8333-444455556666", CSRPEM: csr,
 	})
 	if err != nil {
 		t.Fatalf("issue: %v", err)

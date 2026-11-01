@@ -18,8 +18,8 @@ func TestStoreLifecycle(t *testing.T) {
 	rec, err := store.Create(ctx, Record{
 		Name:       "example.internal",
 		SANs:       []string{"example.internal", "www.example.internal"},
-		ProviderID: "prov-1",
-		NodeID:     "node-1",
+		ProviderID: "6f9a1c3e-1111-4222-8333-444455556666",
+		NodeID:     "0aa1c3e1-1111-4222-8333-444455556666",
 		CSRPEM:     "-----BEGIN CERTIFICATE REQUEST-----\nTEST\n-----END CERTIFICATE REQUEST-----",
 	})
 	if err != nil {
