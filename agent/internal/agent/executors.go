@@ -17,6 +17,7 @@ import (
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/composeops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/dockerx"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/fwops"
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/webops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/winops"
 	agentv1 "github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/gen/proto/servercontrol/agent/v1"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -545,6 +546,107 @@ func (d *DockerExecutor) Execute(ctx context.Context, payload []byte) ([]byte, s
 		req.Params, _ = json.Marshal(p)
 	}
 	res, err := broker.NewClient(d.brokerPath).Call(ctx, req)
+	if err != nil {
+		return nil, "", fmt.Errorf("broker erişilemiyor: %w", err)
+	}
+	switch res.Status {
+	case broker.StatusSucceeded:
+		return res.Result, "broker işlemi tamamlandı", nil
+	case broker.StatusRejected:
+		return nil, res.Output, fmt.Errorf("broker reddetti: %s", res.ErrorCategory)
+	default:
+		return nil, res.Output, fmt.Errorf("broker işlemi başarısız: %s", res.ErrorCategory)
+	}
+}
+
+// WebExecutor executes one web.* operation (Faz 08 hosting family) by
+// forwarding the typed request to the local privileged broker. ALL real
+// mutations (useradd, config writes, nginx/php-fpm reloads) happen ONLY in
+// the broker behind --web-enable; the agent merely validates and relays
+// (ADR-0012).
+type WebExecutor struct {
+	op         string
+	brokerPath string
+}
+
+// NewWebExecutor builds one broker-backed web hosting executor.
+func NewWebExecutor(op, brokerPath string) *WebExecutor {
+	return &WebExecutor{op: op, brokerPath: brokerPath}
+}
+
+// Info describes the capability; availability refined by ProbeAvailable.
+func (w *WebExecutor) Info() *agentv1.Capability {
+	return &agentv1.Capability{
+		CapabilityId:   w.op,
+		Version:        "1.0.0",
+		Available:      false,
+		AdapterId:      "web-broker",
+		AdapterVersion: Version,
+	}
+}
+
+// ProbeAvailable: broker ayakta mı (web ailesinin tek gerçek bağımlılığı —
+// nginx/php-fpm varlığı broker yürütme anında tipli hata verir).
+func (w *WebExecutor) ProbeAvailable(ctx context.Context) (bool, string) {
+	cli := broker.NewClient(w.brokerPath)
+	probeCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	return cli.Ping(probeCtx)
+}
+
+// webSitePayload is the agent-side mirror of the {site} schema.
+type webSitePayload struct {
+	Site string `json:"site"`
+}
+
+// webListPayload is the shared {limit} schema.
+type webListPayload struct {
+	Limit int `json:"limit,omitempty"`
+}
+
+// Execute validates the payload and forwards the typed request.
+func (w *WebExecutor) Execute(ctx context.Context, payload []byte) ([]byte, string, error) {
+	req := &broker.Request{Operation: w.op}
+	switch {
+	case w.op == broker.OpWebSiteList:
+		var p webListPayload
+		if len(payload) > 0 {
+			if err := decodeStrict(payload, &p); err != nil {
+				return nil, "", err
+			}
+		}
+		limit := p.Limit
+		if limit == 0 {
+			limit = 200
+		}
+		if limit < 0 || limit > webops.MaxSiteList {
+			return nil, "", fmt.Errorf("%w: limit 1..%d olmalı", webops.ErrLimit, webops.MaxSiteList)
+		}
+		req.Params, _ = json.Marshal(broker.ListParams{Limit: limit})
+	case w.op == broker.OpWebSiteStatus || w.op == broker.OpWebSiteDisable || w.op == broker.OpWebSiteDelete:
+		var p webSitePayload
+		if err := decodeStrict(payload, &p); err != nil {
+			return nil, "", err
+		}
+		if !webops.ValidSiteName(p.Site) {
+			return nil, "", fmt.Errorf("%w: %q", webops.ErrInvalidName, p.Site)
+		}
+		req.Params, _ = json.Marshal(p)
+	case w.op == broker.OpWebSiteCreate || w.op == broker.OpWebSiteUpdate:
+		var spec webops.SiteSpec
+		if err := decodeStrict(payload, &spec); err != nil {
+			return nil, "", err
+		}
+		if err := spec.Validate(); err != nil {
+			return nil, "", err
+		}
+		req.Params = payload
+	case w.op == broker.OpWebPHPList:
+		req.Params = []byte("{}")
+	default:
+		return nil, "", fmt.Errorf("web executor izin dışı operasyon: %s", w.op)
+	}
+	res, err := broker.NewClient(w.brokerPath).Call(ctx, req)
 	if err != nil {
 		return nil, "", fmt.Errorf("broker erişilemiyor: %w", err)
 	}

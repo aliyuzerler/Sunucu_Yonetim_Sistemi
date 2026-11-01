@@ -22,6 +22,7 @@ import (
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/dockerx"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/fwops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/pkgops"
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/webops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/winops"
 )
 
@@ -65,6 +66,16 @@ const (
 	// analiz); ad sabitleri dışa açılır.
 	OpDockerComposeValidate = composeops.OpDockerComposeValidate
 	OpDockerComposeDeploy   = composeops.OpDockerComposeDeploy
+
+	// Faz 08: Web hosting ailesi (nginx + PHP-FPM). Yürütme yüzü
+	// YALNIZ bu broker'dadır (--web-enable ile seçilir; ADR-0012).
+	OpWebSiteList    = webops.OpWebSiteList
+	OpWebSiteStatus  = webops.OpWebSiteStatus
+	OpWebSiteCreate  = webops.OpWebSiteCreate
+	OpWebSiteUpdate  = webops.OpWebSiteUpdate
+	OpWebSiteDisable = webops.OpWebSiteDisable
+	OpWebSiteDelete  = webops.OpWebSiteDelete
+	OpWebPHPList     = webops.OpWebPHPList
 
 	OpWinServiceList    = winops.OpWinServiceList
 	OpWinServiceStatus  = winops.OpWinServiceStatus
@@ -146,12 +157,21 @@ type dockerCall struct {
 	prune   bool
 }
 
+// webCall carries the Faz 08 web-family parameters extracted at validation
+// time (site name, full spec, list bound).
+type webCall struct {
+	site  string
+	spec  *webops.SiteSpec
+	limit int
+}
+
 // validatedCall is the typed outcome of request validation.
 type validatedCall struct {
 	target    string              // unit/service name (service families)
 	listLimit int                 // list family bound
 	preview   fwops.PreviewParams // firewall preview payload
 	docker    dockerCall          // docker family payload
+	web       webCall             // web hosting family payload
 }
 
 // validateRequest enforces the allowlist + payload schema for one request.
@@ -273,6 +293,53 @@ func validateRequest(req *Request) (validatedCall, error) {
 		// PREVIEW-ONLY (ADR-0011): yalnız render edilecek veri taşınır; broker
 		// bu aile için hiçbir DELETE yürütme yolu içermez.
 		return validatedCall{docker: dockerCall{kind: kind, ref: p.Ref, force: p.Force, link: p.Link, v: p.V, prune: p.Prune}}, nil
+
+	// ---- Faz 08: web hosting ailesi ----
+	case OpWebSiteList:
+		var p ListParams
+		if len(req.Params) == 0 {
+			req.Params = []byte("{}")
+		}
+		if err := strictDecode(req.Params, &p); err != nil || p.Limit < 0 || p.Limit > webops.MaxSiteList {
+			return empty, reject(CatInvalidParams, "list şeması uyumsuz")
+		}
+		if p.Limit == 0 {
+			p.Limit = 200
+		}
+		return validatedCall{web: webCall{limit: p.Limit}}, nil
+	case OpWebSiteStatus, OpWebSiteDisable, OpWebSiteDelete:
+		var p struct {
+			Site string `json:"site"`
+		}
+		if err := strictDecode(req.Params, &p); err != nil {
+			return empty, reject(CatInvalidParams, "site şeması uyumsuz")
+		}
+		if !webops.ValidSiteName(p.Site) {
+			return empty, reject(CatInvalidParams, "site adı allowlist dışı")
+		}
+		return validatedCall{web: webCall{site: p.Site}, target: p.Site}, nil
+	case OpWebSiteCreate, OpWebSiteUpdate:
+		if len(req.Params) > webops.MaxPayloadBytes {
+			return empty, reject(CatInvalidParams, "payload çok büyük")
+		}
+		var p webops.SiteSpec
+		if err := strictDecode(req.Params, &p); err != nil {
+			return empty, reject(CatInvalidParams, "site spec şeması uyumsuz")
+		}
+		if err := p.Validate(); err != nil {
+			return empty, reject(CatInvalidParams, err.Error())
+		}
+		spec := p
+		return validatedCall{web: webCall{site: spec.Name, spec: &spec}, target: spec.Name}, nil
+	case OpWebPHPList:
+		var p struct{}
+		if len(req.Params) == 0 {
+			req.Params = []byte("{}")
+		}
+		if err := strictDecode(req.Params, &p); err != nil {
+			return empty, reject(CatInvalidParams, "php.list şeması uyumsuz (boş obje beklenir)")
+		}
+		return validatedCall{}, nil
 	case "":
 		return empty, reject(CatInvalidRequest, "operasyon boş")
 	default:

@@ -11,6 +11,7 @@ import (
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/fwops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/pkgops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/svcops"
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/webops"
 )
 
 // Config is the unix broker daemon configuration.
@@ -32,6 +33,11 @@ type Config struct {
 	// DockerSocket; empty defaults to /var/run/docker.sock.
 	Docker       DockerRunner
 	DockerSocket string
+	// Faz 08: web hosting runner (nil = web family rejected as unsupported;
+	// the daemon enables it ONLY with --web-enable — ADR-0012: real user/
+	// config mutations are opt-in).
+	Web WebRunner
+
 	// Audit receives one entry per handled request (incl. rejections).
 	Audit  AuditSink
 	Logger *slog.Logger
@@ -80,3 +86,20 @@ type DockerRunner interface {
 
 // compile-time: the real client satisfies the runner surface.
 var _ DockerRunner = (*dockerx.Client)(nil)
+
+// WebRunner executes the Faz 08 web hosting operations (nginx + PHP-FPM
+// site lifecycle). *webops.Runner implements it. The interface keeps broker
+// tests hermetic; the runner performs REAL mutations (useradd, atomic config
+// writes, reloads) and is wired only behind --web-enable (ADR-0012).
+type WebRunner interface {
+	List(ctx context.Context, limit int) ([]webops.SiteInfo, error)
+	Status(ctx context.Context, site string) (webops.SiteStatus, error)
+	Create(ctx context.Context, spec webops.SiteSpec) (webops.SiteResult, error)
+	Update(ctx context.Context, spec webops.SiteSpec) (webops.SiteResult, error)
+	Disable(ctx context.Context, site string) (webops.SiteResult, error)
+	Delete(ctx context.Context, site string) (webops.SiteResult, error)
+	PHPVersions(ctx context.Context) (webops.PHPMatrix, error)
+}
+
+// compile-time: the real runner satisfies the interface.
+var _ WebRunner = (*webops.Runner)(nil)

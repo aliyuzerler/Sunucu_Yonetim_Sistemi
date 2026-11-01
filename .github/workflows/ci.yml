@@ -318,6 +318,44 @@ jobs:
         if: always()
         run: docker rm -f srvctl-ci-docker || true
 
+  agent-web:
+    name: Agent (gerçek nginx + php-fpm — web lifecycle)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Faz 08: GERÇEK web hosting kanıtı — runner'da gerçek nginx + php-fpm
+    # ile tam site lifecycle (create/update/disable/delete + rollback
+    # doğrulaması; docroot korunur). EXPECTED_WEB=1 gate'i CI-17 dersi
+    # gereği SESSİZ ATLANMAZ: ortam eksikse test BAŞARISIZ olur. useradd +
+    # /etc yazımı root ister → sudo. Runner VM disposable'dır.
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Setup Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: agent/go.mod
+          cache-dependency-path: agent/go.sum
+      - name: nginx + php-fpm kur
+        run: |
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq nginx php8.3-fpm
+          sudo systemctl enable --now nginx php8.3-fpm
+          nginx -v && php-fpm8.3 -v
+      - name: Webops test ikilisini derle
+        run: |
+          cd agent
+          go test -c -buildvcs=false -o /tmp/webops.test ./internal/webops/
+      - name: Web adapter gerçek lifecycle kanıtı
+        run: |
+          sudo -E env EXPECTED_WEB=1 /tmp/webops.test -test.run 'TestRealWebHostLifecycle' -test.v
+      - name: Temizlik
+        if: always()
+        run: |
+          sudo rm -f /etc/nginx/conf.d/srvctl-* || true
+          sudo rm -f /etc/php/8.3/fpm/pool.d/srvctl-* || true
+          sudo userdel sc-web-srvctl-citest 2>/dev/null || true
+          sudo rm -rf /var/www/server-control/srvctl-citest || true
+
   agent-windows:
     name: Agent (Go, windows-2025)
     runs-on: windows-2025

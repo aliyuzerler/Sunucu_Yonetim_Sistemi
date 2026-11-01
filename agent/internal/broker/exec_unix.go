@@ -14,6 +14,7 @@ import (
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/fwops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/pkgops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/svcops"
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/webops"
 )
 
 // PeerIdentity is the kernel-verified caller identity.
@@ -73,8 +74,16 @@ func peerCreds(conn *net.UnixConn) (uid, gid uint32, pid int32, err error) {
 // execute runs the validated linux operation with bounded concurrency +
 // timeout.
 func (s *Server) execute(req *Request, call validatedCall) *Response {
-	unit, listLimit, preview, dx := call.target, call.listLimit, call.preview, call.docker
+	unit, listLimit, preview, dx, wb := call.target, call.listLimit, call.preview, call.docker, call.web
 	res := &Response{Status: StatusFailed}
+	// Faz 08: web ailesi --web-enable olmadan TİPLİ olarak reddedilir
+	// (kapalı = sessiz kalabalık değil, dürüst unsupported — ADR-0012).
+	if isWebOp(req.Operation) && s.cfg.Web == nil {
+		res.Status = StatusRejected
+		res.ErrorCategory = CatUnsupportedOp
+		res.Output = "web hosting ailesi kapalı (--web-enable)"
+		return res
+	}
 	select {
 	case s.sem <- struct{}{}:
 		defer func() { <-s.sem }()
@@ -164,6 +173,36 @@ func (s *Server) execute(req *Request, call validatedCall) *Response {
 		if err == nil {
 			result = map[string]any{"preview": pv}
 		}
+
+	// ---- Faz 08: web hosting ailesi ----
+	case OpWebSiteList:
+		var rows []webops.SiteInfo
+		rows, err = s.cfg.Web.List(ctx, wb.limit)
+		result = map[string]any{"sites": rows}
+	case OpWebSiteStatus:
+		var st webops.SiteStatus
+		st, err = s.cfg.Web.Status(ctx, wb.site)
+		result = map[string]any{"status": st}
+	case OpWebSiteCreate:
+		var sr webops.SiteResult
+		sr, err = s.cfg.Web.Create(ctx, *wb.spec)
+		result = map[string]any{"result": sr}
+	case OpWebSiteUpdate:
+		var sr webops.SiteResult
+		sr, err = s.cfg.Web.Update(ctx, *wb.spec)
+		result = map[string]any{"result": sr}
+	case OpWebSiteDisable:
+		var sr webops.SiteResult
+		sr, err = s.cfg.Web.Disable(ctx, wb.site)
+		result = map[string]any{"result": sr}
+	case OpWebSiteDelete:
+		var sr webops.SiteResult
+		sr, err = s.cfg.Web.Delete(ctx, wb.site)
+		result = map[string]any{"result": sr}
+	case OpWebPHPList:
+		var m webops.PHPMatrix
+		m, err = s.cfg.Web.PHPVersions(ctx)
+		result = map[string]any{"php": m}
 	case OpServiceList:
 		var units []svcops.UnitInfo
 		units, err = sysd.List(ctx)
@@ -211,6 +250,22 @@ func (s *Server) execute(req *Request, call validatedCall) *Response {
 		case errors.Is(err, pkgops.ErrLimit), errors.Is(err, fwops.ErrInvalidPreview):
 			res.Status = StatusRejected
 			res.ErrorCategory = CatInvalidParams
+		case errors.Is(err, webops.ErrSyntaxCheck), errors.Is(err, webops.ErrNotIncluded),
+			errors.Is(err, webops.ErrPortConflict), errors.Is(err, webops.ErrConflict),
+			errors.Is(err, webops.ErrForeignConfig):
+			// Ortam-durum redleri: istek geçerli, durum uygunsuz.
+			res.Status = StatusFailed
+			res.ErrorCategory = CatExecutorFailed
+		case errors.Is(err, webops.ErrInvalidName), errors.Is(err, webops.ErrInvalidSpec),
+			errors.Is(err, webops.ErrNotFound), errors.Is(err, webops.ErrLimit):
+			res.Status = StatusRejected
+			res.ErrorCategory = CatInvalidParams
+		case errors.Is(err, webops.ErrPHPUnsupported), errors.Is(err, webops.ErrPHPNotInstalled):
+			res.Status = StatusRejected
+			res.ErrorCategory = CatUnsupportedOp
+		case errors.Is(err, webops.ErrUnavailable):
+			res.Status = StatusRejected
+			res.ErrorCategory = CatUnsupportedOp
 		default:
 			res.Status = StatusFailed
 			res.ErrorCategory = CatExecutorFailed
@@ -229,6 +284,16 @@ func (s *Server) fwRunner() FirewallRunner {
 		return s.cfg.Firewall
 	}
 	return &fwops.Runner{}
+}
+
+// isWebOp reports whether an operation belongs to the Faz 08 web family.
+func isWebOp(op string) bool {
+	switch op {
+	case OpWebSiteList, OpWebSiteStatus, OpWebSiteCreate, OpWebSiteUpdate,
+		OpWebSiteDisable, OpWebSiteDelete, OpWebPHPList:
+		return true
+	}
+	return false
 }
 
 // dockerRunner resolves the Docker runner (nil config → unix client with

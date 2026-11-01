@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+## [0.9.0] — 2026-11-02 — Faz 08: Web hosting ve uygulama dağıtımı
+
+### Added
+- Web hosting adaptörü (`agent/internal/webops`, yalnız stdlib): nginx + PHP-FPM site yaşam döngüsü — site create/update/disable/delete **typed işlemler olarak gerçek yürütülür** (broker-tekil, `--web-enable` opt-in; ADR-0012). Site başına sistem kullanıcısı izolasyonu (`sc-web-<site>`, nologin, `--system --user-group`), docroot 0750 (sahip site kullanıcısı, grup www-data) — site kullanıcıları birbirinin dosyasını okuyamaz.
+- Config disiplini: ilk satır `MarkerHeader`; markersız dosya `ErrForeignConfig` ile reddedilir (**mevcut config üzerine kör yazım imkânsız** — kriter 5). Yazım temp+rename **atomiktir**; önceki içerik daima `.rollback` kopyası olarak tutulur (kriter 3). Reload YALNIZ `nginx -t` (syntax) VE `nginx -T` (include kanıtı) geçince sinyallenir; kapı başarısızsa rollback geri yüklenir, reload yapılmaz.
+- PHP-FPM pool + sürüm matrisi: kapalı küme {8.2, 8.3, 8.4, 8.5} — matris dışı `ErrPHPUnsupported`, kurulu değilse `ErrPHPNotInstalled` (tahmin yok; kriter 4). Pool site kullanıcısı altında çalışır; socket ACL yalnız www-data'ya (0660); `disable_functions` havuzu arındırılır; reload `php<v>-fpm.service` birimine.
+- Port çakışması/edge-proxy yönetimi: `/proc/net/tcp{,6}` + inode eşlemesiyle dinleyici **sahiplik** tespiti — nginx'e ait portta vhost serbest, Apache (apache2/httpd) sahipliği tipli `ErrPortConflict` + edge-proxy önerisi, sahipsiz dinleyici güvenli tarafta red. Apache opsiyonel driver olarak tasarlandı (adapter ayrı fazta).
+- Node.js/Python dağıtımı: `backend=proxy` — nginx reverse-proxy **yalnız loopback** hedefe (127.0.0.1:port, [::1]:port, unix:/run/...); dış hedef SSRF guard ile reddedilir. Uygulama runtime yönetimi dürüst olarak sonraki faza bırakıldı (web-hosting.md §Uygulama dağıtımı).
+- site.delete **dosya-koruyucu**: docroot ve kullanıcı verisi ASLA silinmez (`docroot_preserved=true`); yalnız broker'ın kendi marker'lı config/pool dosyaları (önce `.rollback`) + türetilen sistem kullanıcısı kaldırılır (ADR-0012).
+- Broker: web ailesi allowlist'e strict şema doğrulamasıyla eklendi (site adı allowlist, kapalı backend enum, php matrisi, proxy hedef kalıpları); `WebRunner` arayüzü (hermetik testler için); `server-privd --web-enable` bayrağı (VARSAYILAN KAPALI — gerçek mutasyon opt-in); kapalıyken tipli `unsupported_operation`.
+- Control plane: 7 operasyon spec'i (`ops_faz08.go`); YENİ izinler `web:read` / `web:control` — yalnız yeni izinler seed edilir (migration 0012, CI-04 dersi); operator salt-okuma; create/update/disable idempotent + retry-safe, delete `non_idempotent` + retry-güvensiz; registry 33→**40 operasyon** testi.
+- UI: NodeDetail Web hosting bölümü — site listesi tablosu, PHP sürüm matrisi paneli, backend'e göre alan gösteren create/update formu (static/php/proxy), durum/devre dışı bırak/sil ("document root KORUNUR" etiketi); görev sonucu poll edilip `web-report` kartında gösterilir; TR/EN sözlükler.
+- E2E: Playwright `web-hosting.spec.ts` (3 test) + `docs/reviews/screenshots/phase-08/` ekran görüntüleri (4 adet) repoda; mock'a web host şablonu (`web-` öneki) ve 7-op katalog + zengin görev sonuçları eklendi.
+- CI: `agent-web` job — runner'da GERÇEK nginx + php8.3-fpm ile tam lifecycle kanıtı (create→update→disable→delete, rollback dosyası varlığı, docroot korunması); `EXPECTED_WEB=1` gate'i sessiz atlanamaz (CI-17 dersi). Toplam 12 job.
+- Docs: ADR-0012 (broker-tekil opt-in yürütme, dosya-koruyucu delete, marker config disiplini), `docs/architecture/web-hosting.md` (destek matrisi + güvenlik modeli + dürüst sınırlar), dependency-registry notu (yeni harici bağımlılık YOK), deploy README (`--web-enable` semantiği), ADR dizini güncellendi.
+
+### Security
+- Web ailesi VARSAYILAN KAPALI: gerçek sistem mutasyonu (useradd/config yazımı/reload) yalnız `--web-enable` ile açılır; operatör bilinçli seçim yapar (ADR-0012).
+- Site adı tek tohumdur: kullanıcı/yol/docroot yalnız allowlist'li addan türetilir; docroot override yoktur (path traversal yapısal olarak imkânsız).
+- Kör yazım yasağı marker kanıtıyla zorlanır; syntax check + include kanıtı olmadan reload yok; her değişiklikte rollback kopyası.
+- proxy hedefi yalnız loopback/unix (SSRF guard); argv disiplini (useradd/nginx/systemctl sabit vektör); tüm broker istekleri JSONL audit.
+
 ## [0.8.0] — 2026-11-02 — Faz 07: Docker Engine ve Compose yönetimi
 
 ### Added

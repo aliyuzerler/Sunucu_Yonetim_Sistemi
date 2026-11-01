@@ -58,6 +58,7 @@ var platformFlags struct {
 	group        string // unix only
 	sddl         string // windows only
 	dockerSocket string // unix only (Faz 07)
+	webEnable    bool   // unix only (Faz 08): web hosting ailesi opt-in
 }
 
 func auditSinkOrDie(logger *slog.Logger, path string) (*broker.JSONLSink, error) {

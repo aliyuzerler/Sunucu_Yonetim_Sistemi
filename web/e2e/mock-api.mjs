@@ -82,6 +82,14 @@ const OPERATIONS = [
   { name: "docker.volume.remove", version: "1.0.0", class: "read_only", retry_safe: true, timeout_seconds: 60 },
   { name: "docker.compose.validate", version: "1.0.0", class: "read_only", retry_safe: true, timeout_seconds: 60 },
   { name: "docker.compose.deploy", version: "1.0.0", class: "read_only", retry_safe: true, timeout_seconds: 60 },
+  // Faz 08: web hosting ailesi (gerçek yürütme broker'da --web-enable; ADR-0012).
+  { name: "web.site.list", version: "1.0.0", class: "read_only", retry_safe: true, timeout_seconds: 60 },
+  { name: "web.site.status", version: "1.0.0", class: "read_only", retry_safe: true, timeout_seconds: 60 },
+  { name: "web.php.list", version: "1.0.0", class: "read_only", retry_safe: true, timeout_seconds: 60 },
+  { name: "web.site.create", version: "1.0.0", class: "idempotent_desired_state", retry_safe: true, timeout_seconds: 300 },
+  { name: "web.site.update", version: "1.0.0", class: "idempotent_desired_state", retry_safe: true, timeout_seconds: 300 },
+  { name: "web.site.disable", version: "1.0.0", class: "idempotent_desired_state", retry_safe: true, timeout_seconds: 180 },
+  { name: "web.site.delete", version: "1.0.0", class: "non_idempotent", retry_safe: false, timeout_seconds: 300 },
 ];
 
 // Faz 04 telemetri mock verisi: her node'a agent telemetrisi eklenir.
@@ -290,6 +298,43 @@ function attachDockerTelemetry(node) {
   nodeCapabilities.set(node.id, caps);
 }
 
+// Faz 08: web host şablonu — web hosting ailesi kabiliyetleriyle
+// (gerçek yürütme broker'da --web-enable; ADR-0012).
+function attachWebHost(node) {
+  const now = new Date().toISOString();
+  nodeFacts.set(node.id, {
+    node_id: node.id,
+    os_id: "ubuntu",
+    os_version_id: "24.04",
+    os_pretty_name: "Ubuntu 24.04.3 LTS (web host)",
+    os_home_url: "https://www.ubuntu.com/",
+    kernel_release: "6.8.0-49-generic",
+    arch: "amd64",
+    systemd_version: "255",
+    package_manager: "apt",
+    systemd_available: true,
+    source: "os-release+procfs+systemctl",
+    collected_at: now,
+  });
+  nodeMetrics.set(node.id, {
+    collected_at: now,
+    source: "procfs+statfs",
+    cpu: { percent: 12.5, logical_cores: 4, load_1m: 0.4, load_5m: 0.3, load_15m: 0.2 },
+    memory: { total_bytes: 8 * 1024 ** 3, available_bytes: 4 * 1024 ** 3, used_bytes: 4 * 1024 ** 3, used_percent: 50 },
+    disks: [{ device: "/dev/vda1", mount_point: "/", fs_type: "ext4", total_bytes: 60 * 1024 ** 3, used_bytes: 22 * 1024 ** 3, available_bytes: 38 * 1024 ** 3 }],
+    networks: [{ interface: "eth0", rx_bytes: 123456789, tx_bytes: 987654321 }],
+    uptime_seconds: 86400,
+  });
+  const caps = [];
+  for (const c of [
+    "web.site.list", "web.site.status", "web.php.list",
+    "web.site.create", "web.site.update", "web.site.disable", "web.site.delete",
+  ]) {
+    caps.push({ node_id: node.id, capability_id: c, version: "1.0.0", available: true, adapter_id: "web-broker" });
+  }
+  nodeCapabilities.set(node.id, caps);
+}
+
 function json(res, status, body) {
   const data = JSON.stringify(body);
   res.writeHead(status, { "Content-Type": "application/json; charset=utf-8" });
@@ -332,6 +377,67 @@ setInterval(() => {
           report.note = "PLAN — hiçbir kaynak oluşturulmadı (ADR-0011).";
         }
         t.result = report;
+      }
+      if (t.operation === "web.site.list") {
+        t.result = {
+          sites: [
+            { name: "blog", backend: "static", port: 80, enabled: true, user: "sc-web-blog", user_exists: true, docroot: "/var/www/server-control/blog/html", docroot_exists: true, server_names: ["blog.example.com"] },
+            { name: "shop", backend: "php", php_version: "8.3", port: 80, enabled: false, user: "sc-web-shop", user_exists: true, docroot: "/var/www/server-control/shop/html", docroot_exists: true, server_names: ["shop.example.com"] },
+          ],
+        };
+      }
+      if (t.operation === "web.site.status") {
+        t.result = {
+          status: {
+            site: { name: (t.payload && t.payload.site) || "blog", backend: "php", php_version: "8.3", port: 80, enabled: true, user: "sc-web-blog", user_exists: true, docroot: "/var/www/server-control/blog/html", docroot_exists: true },
+            config_path: "/etc/nginx/conf.d/srvctl-blog.conf",
+            rollback_path: "/etc/nginx/conf.d/srvctl-blog.conf.rollback",
+            has_rollback: true,
+            pool_path: "/etc/php/8.3/fpm/pool.d/srvctl-blog.conf",
+            pool_installed: true,
+            listener: "port 80: nginx (yönetilen vhost)",
+          },
+        };
+      }
+      if (t.operation === "web.php.list") {
+        t.result = {
+          php: {
+            supported: ["8.2", "8.3", "8.4", "8.5"],
+            installed: [{ version: "8.3", unit: "php8.3-fpm.service", pool_dir: "/etc/php/8.3/fpm/pool.d" }],
+            pools: [{ site: "blog", version: "8.3", path: "/etc/php/8.3/fpm/pool.d/srvctl-blog.conf" }],
+          },
+        };
+      }
+      if (t.operation === "web.site.create" || t.operation === "web.site.update") {
+        const site = (t.payload && t.payload.name) || "site";
+        const act = t.operation.split(".")[2];
+        t.result = {
+          result: {
+            site, action: act, executed: true,
+            config_path: "/etc/nginx/conf.d/srvctl-" + site + ".conf",
+            rollback_path: t.operation === "web.site.update" ? "/etc/nginx/conf.d/srvctl-" + site + ".conf.rollback" : undefined,
+            docroot: "/var/www/server-control/" + site + "/html",
+            user: "sc-web-" + site,
+            php_version: (t.payload && t.payload.php_version) || undefined,
+            pool_path: t.payload && t.payload.backend === "php" ? "/etc/php/" + (t.payload.php_version || "8.3") + "/fpm/pool.d/srvctl-" + site + ".conf" : undefined,
+            notes: ["syntax check (nginx -t) geçti; reload sinyali verildi"],
+          },
+        };
+      }
+      if (t.operation === "web.site.disable" || t.operation === "web.site.delete") {
+        const site = (t.payload && t.payload.site) || "site";
+        const act = t.operation.split(".")[2];
+        t.result = {
+          result: {
+            site, action: act, executed: true,
+            config_path: act === "disable" ? "/etc/nginx/conf.d/srvctl-" + site + ".conf.disabled" : "/etc/nginx/conf.d/srvctl-" + site + ".conf",
+            rollback_path: act === "delete" ? "/etc/nginx/conf.d/srvctl-" + site + ".conf.rollback" : undefined,
+            docroot: "/var/www/server-control/" + site + "/html",
+            docroot_preserved: act === "delete" ? true : undefined,
+            user: "sc-web-" + site,
+            notes: act === "disable" ? ["config .disabled uzantısıyla saklandı"] : ["document root KORUNDU (kullanıcı verisi silinmez — ADR-0012)"],
+          },
+        };
       }
       if (t.operation === "docker.container.remove" || t.operation === "docker.image.remove" ||
           t.operation === "docker.volume.remove" || t.operation === "docker.network.remove") {
@@ -520,6 +626,8 @@ const server = createServer(async (req, res) => {
       attachRockyTelemetry(node);
     } else if (String(body.display_name || "").startsWith("docker-") || body.os_family === "docker") {
       attachDockerTelemetry(node);
+    } else if (String(body.display_name || "").startsWith("web-") || body.os_family === "web") {
+      attachWebHost(node);
     } else {
       attachMockTelemetry(node);
     }

@@ -322,6 +322,9 @@ func BuildDefaultRegistry(tagSetter TagSetter) (*Registry, error) {
 	// Faz 07: Docker Engine + Compose yönetimi ayrı dosyada: ops_faz07.go
 	// (remove ailesi preview-only — ADR-0011).
 	specs = append(specs, buildFaz07Registry()...)
+	// Faz 08: Web hosting (nginx + PHP-FPM site yaşam döngüsü) ayrı dosyada:
+	// ops_faz08.go (delete dosya-koruyucu — ADR-0012).
+	specs = append(specs, buildFaz08Registry()...)
 	return NewRegistry(specs...)
 }
 

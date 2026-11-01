@@ -111,9 +111,10 @@ func TestRegistryDefaultDeny(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Faz 04+06+07: echo + 5 systemd + pkg.list + 3 firewall + 13 docker + 2 compose = 25.
-	if len(reg.Capabilities()) != 25 {
-		t.Fatalf("25 capability bekleniyordu: %d", len(reg.Capabilities()))
+	// Faz 04+06+07+08: echo + 5 systemd + pkg.list + 3 firewall + 13 docker
+	// + 2 compose + 7 web = 32.
+	if len(reg.Capabilities()) != 32 {
+		t.Fatalf("32 capability bekleniyordu: %d", len(reg.Capabilities()))
 	}
 	for _, name := range []string{"agent.echo", "linux.systemd.service.list", "linux.systemd.service.status",
 		"linux.systemd.service.start", "linux.systemd.service.stop", "linux.systemd.service.restart",
@@ -121,7 +122,9 @@ func TestRegistryDefaultDeny(t *testing.T) {
 		"docker.container.list", "docker.container.inspect", "docker.container.logs",
 		"docker.container.start", "docker.container.stop", "docker.container.restart", "docker.container.remove",
 		"docker.image.list", "docker.image.remove", "docker.network.list", "docker.network.remove",
-		"docker.volume.list", "docker.volume.remove", "docker.compose.validate", "docker.compose.deploy"} {
+		"docker.volume.list", "docker.volume.remove", "docker.compose.validate", "docker.compose.deploy",
+		"web.site.list", "web.site.status", "web.site.create", "web.site.update",
+		"web.site.disable", "web.site.delete", "web.php.list"} {
 		if _, ok := reg.Lookup(name); !ok {
 			t.Fatalf("registry %s içermeli", name)
 		}

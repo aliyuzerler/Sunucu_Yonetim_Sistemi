@@ -95,6 +95,84 @@ function validDockerRef(ref: string, image?: boolean): boolean {
 const REMOVE_KINDS = ["container", "image", "volume", "network"] as const;
 type RemoveKind = (typeof REMOVE_KINDS)[number];
 
+// Faz 08: Web hosting ailesi (nginx + PHP-FPM). Gerçek yürütme yalnız
+// broker'da --web-enable arkasındadır (ADR-0012); delete dosya-koruyucudur
+// (docroot korunur) ve UI da bunu açıkça etiketler.
+// WEB_SITE_PATTERN mirrors agent/internal/webops + backend validator.
+const WEB_SITE_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,22}[a-z0-9])?$/;
+const WEB_LABEL_PATTERN = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;
+const WEB_PHP_VERSIONS = ["8.2", "8.3", "8.4", "8.5"] as const;
+const WEB_BACKENDS = ["static", "php", "proxy"] as const;
+type WebBackend = (typeof WEB_BACKENDS)[number];
+
+function validWebServerName(host: string): boolean {
+  if (!host || host.length > 253 || host.includes("..")) return false;
+  return host.split(".").every((l) => WEB_LABEL_PATTERN.test(l));
+}
+function validWebProxyTarget(target: string): boolean {
+  const v4 = /^127\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}:[0-9]{1,5}$/;
+  const v6 = /^\[::1\]:[0-9]{1,5}$/;
+  const sock = /^unix:\/run\/[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/;
+  if (v4.test(target)) {
+    const [host, port] = target.split(":");
+    if (!port || Number(port) < 1 || Number(port) > 65535) return false;
+    const octets = host.split(".");
+    if (octets.length !== 4 || octets[0] !== "127") return false;
+    return octets.every((o) => o !== "" && Number(o) <= 255);
+  }
+  if (v6.test(target)) return Number(target.split("]:")[1]) >= 1 && Number(target.split("]:")[1]) <= 65535;
+  if (sock.test(target)) return !target.includes("..");
+  return false;
+}
+
+// Task result shapes (mirrors webops).
+interface WebSiteInfo {
+  name: string;
+  backend?: string;
+  php_version?: string;
+  port?: number;
+  enabled?: boolean;
+  user?: string;
+  user_exists?: boolean;
+  docroot?: string;
+  docroot_exists?: boolean;
+  server_names?: string[];
+}
+interface WebSiteResult {
+  site: string;
+  action: string;
+  executed?: boolean;
+  config_path?: string;
+  rollback_path?: string;
+  docroot?: string;
+  docroot_preserved?: boolean;
+  user?: string;
+  php_version?: string;
+  pool_path?: string;
+  notes?: string[];
+}
+interface WebSiteStatus {
+  site: WebSiteInfo;
+  config_path?: string;
+  rollback_path?: string;
+  has_rollback?: boolean;
+  pool_path?: string;
+  pool_installed?: boolean;
+  listener?: string;
+}
+interface WebPoolInfo { site: string; version: string; path: string }
+interface WebPHPMatrix {
+  supported: string[];
+  installed: { version: string; unit: string; pool_dir: string }[];
+  pools?: WebPoolInfo[];
+}
+interface WebReport {
+  sites?: WebSiteInfo[];
+  status?: WebSiteStatus;
+  result?: WebSiteResult;
+  php?: WebPHPMatrix;
+}
+
 // Compose analizi sonucu (agent composeops raporu — task result içinden).
 interface ComposeFinding { severity: string; rule: string; service?: string; message: string }
 interface ComposeReport {
@@ -181,6 +259,21 @@ export function NodeDetail({ node, onBack }: { node: NodeRecord; onBack: () => v
   const [composeTaskId, setComposeTaskId] = useState<string | null>(null);
   const [composeReport, setComposeReport] = useState<ComposeReport | null>(null);
   const [composeError, setComposeError] = useState<string | null>(null);
+
+  // Faz 08: web hosting işlemleri (web.site.* capability'li node'larda).
+  const [webLimit, setWebLimit] = useState(200);
+  const [webPending, setWebPending] = useState<string | null>(null);
+  const [webError, setWebError] = useState<string | null>(null);
+  const [webTaskId, setWebTaskId] = useState<string | null>(null);
+  const [webReport, setWebReport] = useState<WebReport | null>(null);
+  const [webTargetSite, setWebTargetSite] = useState("");
+  const [webName, setWebName] = useState("");
+  const [webServerNames, setWebServerNames] = useState("");
+  const [webBackend, setWebBackend] = useState<WebBackend>("static");
+  const [webPHPVersion, setWebPHPVersion] = useState<string>("8.3");
+  const [webPort, setWebPort] = useState(80);
+  const [webMaxChildren, setWebMaxChildren] = useState(10);
+  const [webProxyTarget, setWebProxyTarget] = useState("127.0.0.1:3000");
 
   const reload = useCallback(() => setReloadKey((k) => k + 1), []);
 
@@ -371,6 +464,9 @@ export function NodeDetail({ node, onBack }: { node: NodeRecord; onBack: () => v
   // Faz 07: docker capability tespiti.
   const isDocker = capabilities.some((c) => c.capability_id.startsWith("docker.container."));
 
+  // Faz 08: web hosting capability tespiti.
+  const isWeb = capabilities.some((c) => c.capability_id.startsWith("web.site."));
+
   async function submitTask(op: string, payload: Record<string, unknown>): Promise<TaskRecord | null> {
     try {
       const created = await apiFetch<TaskRecord>("/api/v1/tasks", {
@@ -493,6 +589,133 @@ export function NodeDetail({ node, onBack }: { node: NodeRecord; onBack: () => v
       cancelled = true;
     };
   }, [composeTaskId, t]);
+
+  // ---- Faz 08: web hosting işlemleri ----
+  // Tüm web işlemleri görev olarak kuyruğa girer; sonuç poll edilip
+  // webReport'ta gösterilir (compose kalıbı).
+  async function submitWeb(op: string, payload: Record<string, unknown>) {
+    setWebError(null);
+    setWebReport(null);
+    setWebPending(op);
+    const created = await submitTask(op, payload);
+    setWebPending(null);
+    if (!created) return;
+    setWebTaskId(created.id);
+  }
+
+  function submitWebList() {
+    const limit = webLimit || 200;
+    if (limit < 1 || limit > 500) {
+      setWebError(t("nodedetail.web.limitInvalid"));
+      return;
+    }
+    void submitWeb("web.site.list", { limit });
+  }
+
+  function submitWebPHP() {
+    void submitWeb("web.php.list", {});
+  }
+
+  function submitWebStatus() {
+    const site = webTargetSite.trim();
+    if (!WEB_SITE_PATTERN.test(site)) {
+      setWebError(t("nodedetail.web.nameInvalid"));
+      return;
+    }
+    void submitWeb("web.site.status", { site });
+  }
+
+  function webFormPayload(): Record<string, unknown> | null {
+    const name = webName.trim();
+    if (!WEB_SITE_PATTERN.test(name)) {
+      setWebError(t("nodedetail.web.nameInvalid"));
+      return null;
+    }
+    const names = webServerNames
+      .split(/[\s,]+/)
+      .map((h) => h.trim().toLowerCase())
+      .filter(Boolean);
+    if (names.length < 1 || names.length > 8 || !names.every(validWebServerName)) {
+      setWebError(t("nodedetail.web.serverNamesInvalid"));
+      return null;
+    }
+    if (names.length !== new Set(names).size) {
+      setWebError(t("nodedetail.web.serverNamesInvalid"));
+      return null;
+    }
+    const port = webPort || 80;
+    if (port < 1 || port > 65535) {
+      setWebError(t("nodedetail.web.portInvalid"));
+      return null;
+    }
+    const payload: Record<string, unknown> = { name, server_names: names, backend: webBackend, listen_port: port };
+    if (webBackend === "php") {
+      if (!WEB_PHP_VERSIONS.includes(webPHPVersion as (typeof WEB_PHP_VERSIONS)[number])) {
+        setWebError(t("nodedetail.web.phpInvalid"));
+        return null;
+      }
+      payload.php_version = webPHPVersion;
+      const mc = webMaxChildren || 10;
+      if (mc < 1 || mc > 200) {
+        setWebError(t("nodedetail.web.maxChildrenInvalid"));
+        return null;
+      }
+      payload.max_children = mc;
+    }
+    if (webBackend === "proxy") {
+      if (!validWebProxyTarget(webProxyTarget.trim())) {
+        setWebError(t("nodedetail.web.proxyInvalid"));
+        return null;
+      }
+      payload.proxy_target = webProxyTarget.trim();
+    }
+    return payload;
+  }
+
+  function submitWebForm(op: "web.site.create" | "web.site.update") {
+    const payload = webFormPayload();
+    if (payload === null) return;
+    void submitWeb(op, payload);
+  }
+
+  function submitWebSiteAction(op: "web.site.disable" | "web.site.delete") {
+    const site = webTargetSite.trim();
+    if (!WEB_SITE_PATTERN.test(site)) {
+      setWebError(t("nodedetail.web.nameInvalid"));
+      return;
+    }
+    void submitWeb(op, { site });
+  }
+
+  useEffect(() => {
+    if (!webTaskId) return;
+    let cancelled = false;
+    let attempts = 0;
+    const tick = async () => {
+      attempts += 1;
+      try {
+        const task = await apiFetch<TaskRecord>(`/api/v1/tasks/${encodeURIComponent(webTaskId)}`);
+        if (cancelled) return;
+        if (task.status === "succeeded") {
+          setWebReport((task.result ?? null) as WebReport | null);
+          return; // dur
+        }
+        if (task.status === "failed" || task.status === "cancelled" || task.status === "expired") {
+          setWebError(task.error_category ?? t("common.error.generic"));
+          return; // dur
+        }
+        if (attempts < 12) {
+          window.setTimeout(() => void tick(), 1000);
+        }
+      } catch {
+        if (!cancelled && attempts < 12) window.setTimeout(() => void tick(), 1000);
+      }
+    };
+    window.setTimeout(() => void tick(), 800);
+    return () => {
+      cancelled = true;
+    };
+  }, [webTaskId, t]);
 
   const taskBadge: Record<TaskRecord["status"], BadgeVariant> = {
     queued: "info",
@@ -1136,6 +1359,328 @@ export function NodeDetail({ node, onBack }: { node: NodeRecord; onBack: () => v
             <p role="alert" className="mt-2 text-xs text-err">
               {dockerError}
             </p>
+          )}
+        </section>
+      )}
+
+      {/* Faz 08: Web hosting işlemleri (yalnız web.site.* capability'li
+          node'lar). Gerçek yürütme yalnız broker'da --web-enable arkasındadır
+          (ADR-0012); delete docroot'u KORUR — UI açıkça etiketler. */}
+      {isWeb && (
+        <section aria-label={t("nodedetail.web.title")} className="rounded-xl border border-border bg-panel p-4 shadow-sm">
+          <h3 className="text-sm font-semibold text-ink">{t("nodedetail.web.title")}</h3>
+          <p className="mt-1 text-[11px] text-ink-soft">{t("nodedetail.web.note")}</p>
+
+          {/* salt-okuma: site listesi + php matrisi */}
+          <div className="mt-3 flex flex-wrap items-end gap-2">
+            <label className="flex flex-col gap-1">
+              <span className="text-xs font-medium text-ink">{t("nodedetail.web.limit")}</span>
+              <input
+                type="number"
+                min={1}
+                max={500}
+                value={webLimit}
+                onChange={(e) => {
+                  setWebLimit(Number(e.target.value));
+                  setWebError(null);
+                }}
+                className="w-24 rounded-lg border border-border bg-surface px-3 py-1.5 text-sm text-ink focus-visible:outline-2 focus-visible:outline-accent"
+              />
+            </label>
+            <button
+              type="button"
+              onClick={submitWebList}
+              disabled={webPending !== null}
+              className="rounded-lg border border-border bg-surface px-3 py-1.5 text-xs font-medium text-ink hover:bg-neutral-soft disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-accent"
+            >
+              {t("nodedetail.web.siteList")}
+            </button>
+            <button
+              type="button"
+              onClick={submitWebPHP}
+              disabled={webPending !== null}
+              className="rounded-lg border border-border bg-surface px-3 py-1.5 text-xs font-medium text-ink hover:bg-neutral-soft disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-accent"
+            >
+              {t("nodedetail.web.phpList")}
+            </button>
+          </div>
+
+          {/* create/update formu */}
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              submitWebForm("web.site.create");
+            }}
+            className="mt-3 flex flex-wrap items-end gap-2"
+          >
+            <label className="flex flex-col gap-1">
+              <span className="text-xs font-medium text-ink">{t("nodedetail.web.name")}</span>
+              <input
+                value={webName}
+                onChange={(e) => {
+                  setWebName(e.target.value);
+                  setWebError(null);
+                }}
+                placeholder="blog"
+                className="w-36 rounded-lg border border-border bg-surface px-3 py-1.5 text-sm text-ink focus-visible:outline-2 focus-visible:outline-accent"
+              />
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-xs font-medium text-ink">{t("nodedetail.web.serverNames")}</span>
+              <input
+                value={webServerNames}
+                onChange={(e) => {
+                  setWebServerNames(e.target.value);
+                  setWebError(null);
+                }}
+                placeholder="blog.example.com, www.blog.example.com"
+                className="w-72 rounded-lg border border-border bg-surface px-3 py-1.5 text-sm text-ink focus-visible:outline-2 focus-visible:outline-accent"
+              />
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-xs font-medium text-ink">{t("nodedetail.web.backend")}</span>
+              <select
+                value={webBackend}
+                onChange={(e) => {
+                  setWebBackend(e.target.value as WebBackend);
+                  setWebError(null);
+                }}
+                className="rounded-lg border border-border bg-surface px-3 py-1.5 text-sm text-ink focus-visible:outline-2 focus-visible:outline-accent"
+              >
+                {WEB_BACKENDS.map((b) => (
+                  <option key={b} value={b}>
+                    {t(`nodedetail.web.backend.${b}` as never)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {webBackend === "php" && (
+              <>
+                <label className="flex flex-col gap-1">
+                  <span className="text-xs font-medium text-ink">{t("nodedetail.web.phpVersion")}</span>
+                  <select
+                    value={webPHPVersion}
+                    onChange={(e) => setWebPHPVersion(e.target.value)}
+                    className="rounded-lg border border-border bg-surface px-3 py-1.5 text-sm text-ink focus-visible:outline-2 focus-visible:outline-accent"
+                  >
+                    {WEB_PHP_VERSIONS.map((v) => (
+                      <option key={v} value={v}>
+                        PHP {v}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="flex flex-col gap-1">
+                  <span className="text-xs font-medium text-ink">{t("nodedetail.web.maxChildren")}</span>
+                  <input
+                    type="number"
+                    min={1}
+                    max={200}
+                    value={webMaxChildren}
+                    onChange={(e) => setWebMaxChildren(Number(e.target.value))}
+                    className="w-24 rounded-lg border border-border bg-surface px-3 py-1.5 text-sm text-ink focus-visible:outline-2 focus-visible:outline-accent"
+                  />
+                </label>
+              </>
+            )}
+            {webBackend === "proxy" && (
+              <label className="flex flex-col gap-1">
+                <span className="text-xs font-medium text-ink">{t("nodedetail.web.proxyTarget")}</span>
+                <input
+                  value={webProxyTarget}
+                  onChange={(e) => {
+                    setWebProxyTarget(e.target.value);
+                    setWebError(null);
+                  }}
+                  placeholder="127.0.0.1:3000"
+                  className="w-48 rounded-lg border border-border bg-surface px-3 py-1.5 font-mono text-sm text-ink focus-visible:outline-2 focus-visible:outline-accent"
+                />
+              </label>
+            )}
+            <label className="flex flex-col gap-1">
+              <span className="text-xs font-medium text-ink">{t("nodedetail.web.listenPort")}</span>
+              <input
+                type="number"
+                min={1}
+                max={65535}
+                value={webPort}
+                onChange={(e) => {
+                  setWebPort(Number(e.target.value));
+                  setWebError(null);
+                }}
+                className="w-24 rounded-lg border border-border bg-surface px-3 py-1.5 text-sm text-ink focus-visible:outline-2 focus-visible:outline-accent"
+              />
+            </label>
+            <button
+              type="submit"
+              disabled={webPending !== null}
+              className="rounded-lg border border-border bg-surface px-3 py-1.5 text-xs font-medium text-ink hover:bg-neutral-soft disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-accent"
+            >
+              {t("nodedetail.web.create")}
+            </button>
+            <button
+              type="button"
+              onClick={() => submitWebForm("web.site.update")}
+              disabled={webPending !== null}
+              className="rounded-lg border border-border bg-surface px-3 py-1.5 text-xs font-medium text-ink hover:bg-neutral-soft disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-accent"
+            >
+              {t("nodedetail.web.update")}
+            </button>
+          </form>
+
+          {/* status / disable / delete hedefi */}
+          <div className="mt-3 flex flex-wrap items-end gap-2">
+            <label className="flex flex-col gap-1">
+              <span className="text-xs font-medium text-ink">{t("nodedetail.web.targetSite")}</span>
+              <input
+                value={webTargetSite}
+                onChange={(e) => {
+                  setWebTargetSite(e.target.value);
+                  setWebError(null);
+                }}
+                placeholder="blog"
+                className="w-36 rounded-lg border border-border bg-surface px-3 py-1.5 text-sm text-ink focus-visible:outline-2 focus-visible:outline-accent"
+              />
+            </label>
+            <button
+              type="button"
+              onClick={submitWebStatus}
+              disabled={webPending !== null}
+              className="rounded-lg border border-border bg-surface px-3 py-1.5 text-xs font-medium text-ink hover:bg-neutral-soft disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-accent"
+            >
+              {t("nodedetail.web.status")}
+            </button>
+            <button
+              type="button"
+              onClick={() => submitWebSiteAction("web.site.disable")}
+              disabled={webPending !== null}
+              className="rounded-lg border border-border bg-surface px-3 py-1.5 text-xs font-medium text-ink hover:bg-neutral-soft disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-accent"
+            >
+              {t("nodedetail.web.disable")}
+            </button>
+            <button
+              type="button"
+              onClick={() => submitWebSiteAction("web.site.delete")}
+              disabled={webPending !== null}
+              className="rounded-lg border border-warn/40 bg-warn-soft px-3 py-1.5 text-xs font-medium text-warn hover:bg-warn/20 disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-accent"
+            >
+              {t("nodedetail.web.delete")}
+            </button>
+            <span className="pb-1.5 text-[11px] text-ink-soft">{t("nodedetail.web.deleteNote")}</span>
+          </div>
+
+          {webError && (
+            <p role="alert" className="mt-2 text-xs text-err">
+              {webError}
+            </p>
+          )}
+
+          {/* görev sonucu poll edilip gösterilir */}
+          {webReport && (
+            <div className="mt-3 rounded-lg border border-border bg-surface p-3" data-testid="web-report">
+              {webReport.sites && (
+                <div>
+                  <p className="text-xs font-medium text-ink">{t("nodedetail.web.sitesTitle")}</p>
+                  {webReport.sites.length === 0 ? (
+                    <p className="mt-1 text-xs text-ink-soft">{t("nodedetail.web.sitesEmpty")}</p>
+                  ) : (
+                    <table className="mt-1 w-full text-left text-xs text-ink">
+                      <thead>
+                        <tr className="text-ink-soft">
+                          <th className="py-1 pr-2 font-medium">{t("nodedetail.web.colSite")}</th>
+                          <th className="py-1 pr-2 font-medium">{t("nodedetail.web.colBackend")}</th>
+                          <th className="py-1 pr-2 font-medium">{t("nodedetail.web.colPort")}</th>
+                          <th className="py-1 pr-2 font-medium">{t("nodedetail.web.colEnabled")}</th>
+                          <th className="py-1 font-medium">{t("nodedetail.web.colUser")}</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {webReport.sites.map((s) => (
+                          <tr key={s.name} className="border-t border-border">
+                            <td className="py-1 pr-2 font-mono">{s.name}</td>
+                            <td className="py-1 pr-2">
+                              {s.backend}
+                              {s.php_version ? ` (${s.php_version})` : ""}
+                            </td>
+                            <td className="py-1 pr-2 font-mono">{s.port ?? "—"}</td>
+                            <td className="py-1 pr-2">{s.enabled ? t("nodedetail.web.enabledYes") : t("nodedetail.web.enabledNo")}</td>
+                            <td className="py-1 font-mono">{s.user ?? "—"}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              )}
+              {webReport.php && (
+                <div>
+                  <p className="text-xs font-medium text-ink">{t("nodedetail.web.phpTitle")}</p>
+                  <p className="mt-1 text-xs text-ink-soft">
+                    {t("nodedetail.web.phpSupported")}: {webReport.php.supported.join(", ")}
+                  </p>
+                  <p className="text-xs text-ink-soft">
+                    {t("nodedetail.web.phpInstalled")}:{" "}
+                    {webReport.php.installed.length === 0
+                      ? t("nodedetail.web.phpNone")
+                      : webReport.php.installed.map((i) => i.version).join(", ")}
+                  </p>
+                  {(webReport.php.pools ?? []).map((p, i) => (
+                    <p key={`p${i}`} className="font-mono text-[11px] text-ink-soft">
+                      → {p.site} (php {p.version}): {p.path}
+                    </p>
+                  ))}
+                </div>
+              )}
+              {webReport.status && (
+                <div>
+                  <p className="text-xs font-medium text-ink">{t("nodedetail.web.statusTitle")}</p>
+                  <p className="mt-1 text-xs text-ink">
+                    {webReport.status.site.name} — {webReport.status.site.backend}
+                    {webReport.status.site.php_version ? ` (${webReport.status.site.php_version})` : ""} ·{" "}
+                    {t("nodedetail.web.colPort")} {webReport.status.site.port ?? "—"} ·{" "}
+                    {webReport.status.site.enabled ? t("nodedetail.web.enabledYes") : t("nodedetail.web.enabledNo")}
+                  </p>
+                  {webReport.status.config_path && (
+                    <p className="font-mono text-[11px] text-ink-soft">→ {webReport.status.config_path}</p>
+                  )}
+                  {webReport.status.pool_path && (
+                    <p className="font-mono text-[11px] text-ink-soft">→ {webReport.status.pool_path}</p>
+                  )}
+                  {webReport.status.rollback_path && (
+                    <p className="font-mono text-[11px] text-ink-soft">
+                      → {t("nodedetail.web.rollbackLabel")}: {webReport.status.rollback_path}
+                    </p>
+                  )}
+                  {webReport.status.listener && (
+                    <p className="text-[11px] text-ink-soft">{webReport.status.listener}</p>
+                  )}
+                </div>
+              )}
+              {webReport.result && (
+                <div>
+                  <p className="text-xs font-medium text-ink">
+                    {t("nodedetail.web.resultTitle", { action: webReport.result.action, site: webReport.result.site })}{" "}
+                    · {webReport.result.executed ? t("nodedetail.web.executedYes") : t("nodedetail.web.executedNo")}
+                  </p>
+                  {webReport.result.config_path && (
+                    <p className="font-mono text-[11px] text-ink-soft">→ {webReport.result.config_path}</p>
+                  )}
+                  {webReport.result.rollback_path && (
+                    <p className="font-mono text-[11px] text-ink-soft">
+                      → {t("nodedetail.web.rollbackLabel")}: {webReport.result.rollback_path}
+                    </p>
+                  )}
+                  {webReport.result.docroot_preserved && (
+                    <p className="text-[11px] text-ink-soft">{t("nodedetail.web.docPreserved")}</p>
+                  )}
+                  {(webReport.result.notes ?? []).map((n, i) => (
+                    <p key={`n${i}`} className="text-[11px] text-ink-soft">
+                      • {n}
+                    </p>
+                  ))}
+                </div>
+              )}
+            </div>
           )}
         </section>
       )}

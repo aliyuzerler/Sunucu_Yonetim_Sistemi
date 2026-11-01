@@ -23,6 +23,15 @@ Güvenlik modeli (docs/architecture/agent-architecture.md, ADR-0003):
   hiçbir silme/deploy yürütülmez, yalnız Engine çağrısı metin olarak döner.
   Bayrak boş geçilirse docker ailesi kapalıdır (operasyonlar
   `unsupported_operation` döner, kabiliyet beyan edilmez).
+- Faz 08 (opsiyonel, VARSAYILAN KAPALI): `server-privd --web-enable` ile web
+  hosting ailesi açılır (nginx + PHP-FPM site yaşam döngüsü — ADR-0012).
+  Bu aile GERÇEK mutasyon yapar (site başına sistem kullanıcısı, atomik
+  config yazımı + rollback, nginx/php-fpm reload); bu yüzden açıkça
+  seçilmelidir. site delete dosya-koruyucudur: document root ASLA silinmez,
+  yalnız broker'ın kendi marker'lı configleri ve türetilen `sc-web-*`
+  kullanıcısı kaldırılır (her kaldırılan dosya için `.rollback` kopyası
+  tutulur). nginx config'i yalnız `/etc/nginx/conf.d/srvctl-*.conf`
+  ad-uzayında yönetilir; marker'sız dosyalara asla dokunulmaz.
 
 ## Kurulum adımları (disposable VM'de doğrulayın)
 

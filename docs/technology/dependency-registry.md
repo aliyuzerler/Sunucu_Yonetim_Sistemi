@@ -57,4 +57,9 @@ Standart kütüphane tercih edilir (slog, net/http, crypto/rand, embed); başka 
 
 - `npm audit` (2026-11-01): 12 × **moderate**, tamamı eslint toolchain'i (dev-only, üretime çıkmaz). Kaynak: `minimatch` ve `@eslint-community/eslint-utils` danışmanlıkları. Her faz başında yeniden taranır (dependency-policy §7).
 - `@vitejs/plugin-react` 6.x oxc-transform tabanlıdır; rolldown/babel geçiş peer'ları opsiyoneldir ve kullanılmaz.
+- Faz 08 (2026-11-02): **yeni harici bağımlılık YOK** — web hosting adaptörü
+  (`agent/internal/webops`) tamamen stdlib'tir (useradd/nginx/systemctl
+  fixed argv exec + /proc/net.tcp parse + atomic rename). nginx/php-fpm
+  çalışma zamanı bağımlılığı node tarafında opsöneldir (CI'da `apt-get`
+  nginx + php8.3-fpm; sürüm kilitleri node'un kendi paket yöneticisindedir).
 - Otomatik SBOM üretimi Faz 15 paketleme fazında eklenir; bu dosya her fazda elle güncel tutulur.

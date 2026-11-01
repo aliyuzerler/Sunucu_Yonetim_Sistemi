@@ -21,6 +21,7 @@ import (
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/fwops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/pkgops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/svcops"
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/webops"
 )
 
 const (
@@ -37,6 +38,7 @@ func registerPlatformFlags() {
 	flag.StringVar(&platformFlags.identity, "allow-uid", "", "izinli UID listesi, virgüllerle (zorunlu)")
 	flag.StringVar(&platformFlags.group, "group", "server-agent", "socket grubu (agent kullanıcısının grubu)")
 	flag.StringVar(&platformFlags.dockerSocket, "docker-socket", defaultDockerSock, "Docker Engine unix soketi (boş = docker ailesi kapalı)")
+	flag.BoolVar(&platformFlags.webEnable, "web-enable", false, "Faz 08 web hosting ailesini etkinleştir (nginx/PHP-FPM site yaşam döngüsü; VARSAYILAN KAPALI)")
 }
 
 func run(logger *slog.Logger, cfg daemonConfig) error {
@@ -78,6 +80,7 @@ func run(logger *slog.Logger, cfg daemonConfig) error {
 		Pkg:           &pkgops.Runner{},                               // Faz 06: salt-okuma paket envanteri
 		Firewall:      &fwops.Runner{},                                // Faz 06: firewall tespit + salt-okuma liste
 		Docker:        dockerRunnerOrZero(platformFlags.dockerSocket), // Faz 07: Engine API (unix soket; ADR-0011)
+		Web:           webRunnerOrZero(platformFlags.webEnable),       // Faz 08: site yaşam döngüsü (opt-in; ADR-0012)
 		Audit:         sink,
 		Logger:        logger,
 	})
@@ -101,6 +104,16 @@ func dockerRunnerOrZero(socket string) *dockerx.Client {
 		return nil
 	}
 	return &dockerx.Client{Socket: socket}
+}
+
+// webRunnerOrZero wires the Faz 08 web hosting runner; the family is OPT-IN
+// (default OFF) because it performs real system mutations — useradd, atomic
+// config writes, service reloads (ADR-0012).
+func webRunnerOrZero(enabled bool) broker.WebRunner {
+	if !enabled {
+		return nil
+	}
+	return webops.NewRunner()
 }
 
 func parseUIDs(s string) ([]uint32, error) {

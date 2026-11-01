@@ -7,12 +7,13 @@ import (
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/composeops"
 )
 
-// DefaultRegistry returns the Faz 04/06/07 unix executor set: the echo
+// DefaultRegistry returns the Faz 04/06/07/08 unix executor set: the echo
 // proof, the systemd service operations, the read-only package inventory,
 // the firewall survey/preview family, the Docker Engine family (broker-only
-// socket access; preview-only removes — ADR-0011) and the compose analysis
-// family (agent-local, pure). dockerSocket is the PROBE path only; the agent
-// never dials the Engine socket itself.
+// socket access; preview-only removes — ADR-0011), the compose analysis
+// family (agent-local, pure) and the web hosting family (broker-only real
+// execution behind --web-enable — ADR-0012). dockerSocket is the PROBE path
+// only; the agent never dials the Engine socket itself.
 func DefaultRegistry(brokerPath, dockerSocket string) (*ExecutorRegistry, error) {
 	return NewRegistry(
 		EchoExecutor{},
@@ -42,5 +43,14 @@ func DefaultRegistry(brokerPath, dockerSocket string) (*ExecutorRegistry, error)
 		// Faz 07: Compose analizi (agent-local saf).
 		NewComposeExecutor(composeops.OpDockerComposeValidate),
 		NewComposeExecutor(composeops.OpDockerComposeDeploy),
+		// Faz 08: Web hosting ailesi (7 op — gerçek yürütme yalnız broker'da
+		// --web-enable ile; ADR-0012).
+		NewWebExecutor(broker.OpWebSiteList, brokerPath),
+		NewWebExecutor(broker.OpWebSiteStatus, brokerPath),
+		NewWebExecutor(broker.OpWebSiteCreate, brokerPath),
+		NewWebExecutor(broker.OpWebSiteUpdate, brokerPath),
+		NewWebExecutor(broker.OpWebSiteDisable, brokerPath),
+		NewWebExecutor(broker.OpWebSiteDelete, brokerPath),
+		NewWebExecutor(broker.OpWebPHPList, brokerPath),
 	)
 }

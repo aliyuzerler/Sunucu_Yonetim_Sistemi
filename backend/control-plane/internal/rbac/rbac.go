@@ -42,6 +42,10 @@ const (
 	// (start/stop/restart). Silme yüzeyi Faz 07'de yoktur (ADR-0011).
 	PermDockerRead    = "docker:read"
 	PermDockerControl = "docker:control"
+
+	// Faz 08: web hosting (nginx + PHP-FPM site yaşam döngüsü).
+	PermWebRead    = "web:read"
+	PermWebControl = "web:control"
 )
 
 // AllPermissions lists the seeded catalog in one place.
@@ -54,6 +58,7 @@ var AllPermissions = []string{
 	PermEventlogRead,
 	PermPkgRead, PermFirewallRead,
 	PermDockerRead, PermDockerControl,
+	PermWebRead, PermWebControl,
 }
 
 // Scope types.
