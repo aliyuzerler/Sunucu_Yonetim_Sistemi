@@ -674,3 +674,33 @@ func TestParseProcNetInodes(t *testing.T) {
 		t.Fatalf("inode→port yanlış: %v", inodes)
 	}
 }
+
+func TestUpdateDisabledSiteKeepsRollback(t *testing.T) {
+	// BAĞIMSIZ TEST BULGUSU (IT-01): disabled site update akışında eski
+	// .disabled config yedeksiz siliniyordu — kriter 3 rollback ruhu.
+	e := newTestEnv(t)
+	if _, err := e.r.Create(context.Background(), e.staticSpec()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.r.Disable(context.Background(), "blog"); err != nil {
+		t.Fatal(err)
+	}
+	disabled := ConfFileName(e.conf, "blog") + DisabledSuffix
+	old, err := os.ReadFile(disabled)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec := e.staticSpec()
+	spec.ServerNames = []string{"reenabled.example.com"}
+	res, err := e.r.Update(context.Background(), spec)
+	if err != nil || !res.Executed {
+		t.Fatalf("update: %v %+v", err, res)
+	}
+	if _, err := os.Stat(disabled); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("disabled config kaldırılmalı")
+	}
+	rb, err := os.ReadFile(disabled + RollbackSuffix)
+	if err != nil || !bytes.Equal(rb, old) {
+		t.Fatalf("eski disabled içerik rollback kopyasında kalmalı: %v", err)
+	}
+}

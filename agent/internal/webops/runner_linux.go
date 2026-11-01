@@ -713,10 +713,16 @@ func (r *Runner) Update(ctx context.Context, spec SiteSpec) (SiteResult, error) 
 	}
 	res.Executed = executedAny
 	res.ConfigPath = confPath
-	// A disabled copy is superseded by the re-enabled config.
+	// A disabled copy is superseded by the re-enabled config. The old
+	// disabled content is the site's last-known-good config — it is kept
+	// as a rollback copy before removal (criterion 3: rollback kopyası).
 	if disabledErr == nil {
+		if raw, rerr := readFileBounded(disabledPath, fileReadLimit); rerr == nil {
+			_ = os.WriteFile(disabledPath+RollbackSuffix, raw, 0o644)
+			res.RollbackPath = disabledPath + RollbackSuffix
+		}
 		_ = os.Remove(disabledPath)
-		res.Notes = append(res.Notes, "devre dışı config kaldırıldı (site yeniden etkin)")
+		res.Notes = append(res.Notes, "devre dışı config kaldırıldı (site yeniden etkin; eski içerik .rollback'te)")
 	}
 	if err := r.verifyAndReload(ctx, spec.Name, writes); err != nil {
 		return res, err
