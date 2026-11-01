@@ -44,22 +44,18 @@ async function openRocky01(page) {
 }
 
 test("rocky node detay: distro sınıflandırması ve dağıtım işlemleri bölümü görünür", async ({ page }) => {
+  test.skip(realBackend, "Gerçek modda node oluşturma smoke'un boş-liste önkoşulunu bozar; dürüst boş durumlar windows-node spec'inde kapsanır.");
   await login(page);
   await openRocky01(page);
 
-  if (realBackend) {
-    // Gerçek backend: agent bağlanmadı → dürüst boş durumlar.
-    await expect(page.getByText("Agent henüz sistem bilgisi bildirmedi.")).toBeVisible();
-  } else {
-    // Mock: Rocky telemetrisi dolu — destek rozeti + aile + survey bölümü.
-    await expect(page.getByText("Rocky Linux 9.5 (Blue Onyx)")).toBeVisible();
-    await expect(page.getByText(/5\.14\.0-503\.22\.1\.el9_5/)).toBeVisible();
-    await expect(page.getByText("Destekleniyor")).toBeVisible();
-    await expect(page.getByText(/desteklenen majör sürüm 9/)).toBeVisible();
-    await expect(page.getByText("rhel")).toBeVisible();
-    await expect(page.getByText(/Dağıtım işlemleri/)).toBeVisible();
-    await expect(page.getByText("linux.firewall.rule.preview")).toBeVisible();
-  }
+  // Mock: Rocky telemetrisi dolu — destek rozeti + aile + survey bölümü.
+  await expect(page.getByText("Rocky Linux 9.5 (Blue Onyx)")).toBeVisible();
+  await expect(page.getByText(/5\.14\.0-503\.22\.1\.el9_5/)).toBeVisible();
+  await expect(page.getByText("Destekleniyor")).toBeVisible();
+  await expect(page.getByText(/desteklenen majör sürüm 9/)).toBeVisible();
+  await expect(page.getByText("rhel")).toBeVisible();
+  await expect(page.getByText(/Dağıtım işlemleri/)).toBeVisible();
+  await expect(page.getByText("linux.firewall.rule.preview")).toBeVisible();
   await page.screenshot({ path: path.join(shotDir, "01-rocky-node.png"), fullPage: true });
 });
 

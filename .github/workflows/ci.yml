@@ -237,15 +237,28 @@ jobs:
         with:
           go-version-file: agent/go.mod
           cache-dependency-path: agent/go.sum
-      - name: Agent test ikilisini derle (runner)
-        run: cd agent && go build -buildvcs=false -o /tmp/osdetect.test ./internal/osdetect/ && go build -buildvcs=false -o /tmp/fwops.test ./internal/fwops/ && go build -buildvcs=false -o /tmp/pkgops.test ./internal/pkgops/
-      - name: systemd container başlat (${{ matrix.image }})
-        # privileged + cgroup host mount: container içinde GERÇEK systemd
-        # çalışır (disposable); dnf/firewalld gerçek çağrılarla sınanır.
+      - name: Agent test ikililerini derle (runner, go test -c)
+        # go build test paketi için ikili ÜRETEMEZ (arşiv üretir — CI-16);
+        # go test -c zorunlu.
         run: |
-          docker run --privileged --cgroupns=host -d --name rhel-test             -v /sys/fs/cgroup:/sys/fs/cgroup:rw             ${{ matrix.image }} /usr/lib/systemd/systemd --unit=multi-user.target
-          for i in $(seq 1 30); do
-            if docker exec rhel-test systemctl is-system-running >/dev/null 2>&1; then break; fi
+          cd agent
+          go test -c -buildvcs=false -o /tmp/osdetect.test ./internal/osdetect/
+          go test -c -buildvcs=false -o /tmp/fwops.test ./internal/fwops/
+          go test -c -buildvcs=false -o /tmp/pkgops.test ./internal/pkgops/
+      - name: systemd türetilmiş imaj hazırla
+        # rockylinux:9 temel imajında systemd paketi YOKTUR (CI-15); systemd
+        # türetilmiş disposable imaja kurulur (almalinux'ta da tutarlıdır).
+        run: |
+          printf 'FROM %s\nRUN dnf install -y -q systemd procps-ng && dnf clean all\n' '${{ matrix.image }}' > /tmp/Dockerfile.rhel-test
+          docker build -q -t rhel-agent-test:ci -f /tmp/Dockerfile.rhel-test /tmp
+      - name: systemd container başlat
+        # privileged + cgroup host mount: container içinde GERÇEK systemd
+        # PID1 olarak çalışır (disposable); firewalld gerçek çağrıyla sınanır.
+        run: |
+          docker run --privileged --cgroupns=host -d --name rhel-test -v /sys/fs/cgroup:/sys/fs/cgroup:rw rhel-agent-test:ci /usr/lib/systemd/systemd --unit=multi-user.target
+          for i in $(seq 1 45); do
+            state="$(docker exec rhel-test systemctl is-system-running 2>/dev/null || true)"
+            if [ "$state" = "running" ] || [ "$state" = "degraded" ]; then break; fi
             sleep 2
           done
           docker exec rhel-test systemctl is-system-running || true
