@@ -275,9 +275,9 @@ jobs:
           docker exec rhel-test systemctl start firewalld
           docker exec rhel-test firewall-cmd --state
           # Faz 06 paket envanteri runner'ı: gerçek rpm çıktısını ayrıştırır.
-          docker exec rhel-test sh -c "/tmp/pkgops.test -test.run TestRealPkgList -test.v" || true
-          # Faz 06 firewall runner'ı: gerçek firewalld üzerinde durum + liste + önizleme.
-          docker exec rhel-test sh -c "/tmp/fwops.test -test.run TestRealFirewall -test.v" || true
+          docker exec -e EXPECTED_OS_ID=${{ matrix.name == 'rockylinux-9' && 'rocky' || 'almalinux' }} rhel-test sh -c "/tmp/pkgops.test -test.run TestRealPkgList -test.v"
+          # Faz 06 firewall runner'ı: gerçek firewalld üzerinde durum + liste + önizleme (hata kanıtı bozar).
+          docker exec -e EXPECTED_OS_ID=${{ matrix.name == 'rockylinux-9' && 'rocky' || 'almalinux' }} rhel-test sh -c "/tmp/fwops.test -test.run TestRealFirewall -test.v"
           docker exec rhel-test firewall-cmd --zone=public --list-all || true
       - name: Temizlik
         if: always()
