@@ -39,7 +39,18 @@
 - **Kaynak koruması:** metrics yutumu node başına 10s hız sınırı + alan sınırları; facts sınırlı boyut.
 - **Bilinen boşluklar:** gerçek host doğrulaması yapılamadı (sandbox'ta systemd/Docker yok) — sahibi için `deploy/agent/README.md` prosedürü; broker audit rotasyonu yok; metrics prune işi periyodik job bekliyor.
 
+## CI koşusu (kanıt)
+
+- **Run 41309395227 (commit e0b0bb4): success — 7/7 job** — Backend (Go, PostgreSQL 18 entegrasyon dahil), Frontend (React/TS), Agent (Go, ubuntu-24.04), Agent (Go, **debian-13** container), E2E (Playwright, gerçek backend), Protokol (buf), Secret taraması.
+- **CI bulguları ve düzeltmeleri:**
+  - **CI-04 (kritik):** 0008 migration, admin'e CROSS JOIN ile 0002'de verilmiş 7 izni yeniden ekliyordu → `role_permissions_pkey` ihlali; yalnız YENİ izinlerin verilmesiyle düzeltildi. PG entegrasyon testleri bu hatayı lokalde (PG yok) yakalayamadı; CI yakaladı.
+  - **CI-05:** debian-13 container'da `go build` VCS damgası dubious-ownership hatası → `-buildvcs=false`.
+  - **CI-06:** `.gitignore` `bin/` kuralı `testdata/**/usr/bin` fixture'larını dışlıyordu (osdetect "unknown" paket yöneticisi hatası) → `!**/testdata/**/bin/`.
+  - **CI-07:** debian:13'te `-race` cgo ister → gcc+libc6-dev kuruldu, `CGO_ENABLED=1`.
+  - **CI-08:** telemetry prune test beklentisi düzeltildi (kod doğruydu; ikinci snapshot ilk cutoff'ta kalıyor).
+- Gerçek-host broker/systemd doğrulaması: **NOT RUN** (sandbox'ta systemd/VM yok) — `deploy/agent/README.md` prosedürü sahibine.
+
 ## Karar
 
-- **Kabul:** ACCEPTED (bekleyen: CI koşusu kanıtı)
-- **Sonraki faza geçiş:** READY — CI yeşil onayından sonra.
+- **Kabul:** ACCEPTED (CI kanıtı: run 41309395227, 7/7 yeşil)
+- **Sonraki faza geçiş:** READY
