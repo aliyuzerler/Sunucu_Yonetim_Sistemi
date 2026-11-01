@@ -22,6 +22,9 @@
 - Secret redaksiyonu: inspect env yok; compose bulgularında yalnız anahtar adları; log 64 KiB sınırı.
 - Yeni bağımlılık: `gopkg.in/yaml.v3 v3.0.1` (MIT) — tek yeni bağımlılık; lisans/SDK kaydı dependency-registry'de.
 
+### Fixed (bağımsız test koşusunda)
+- CI-18 (orta, test altyapısı): `TestCapabilityProbing` docker ailesi probe gerekçesi için tek dal varsayıyordu; docker'lı runner'larda socket VAR → dürüst gerekçe "broker_unreachable" oluyordu ve test kırmızıydı (run 41340951932). Test iki dürüst dalı da kabul edecek şekilde düzeltildi (`fdeb311`); unavailable SONUCU her ortamda değişmez. Doğrulama: CI run 41341230025 **11/11 success** (agent-docker gerçek lifecycle kanıtı dahil). Rapor: `docs/reviews/phase-07-test-report.md` (ACCEPTED/READY).
+
 ## [0.7.0] — 2026-11-01 — Faz 06: Ek Linux dağıtımı adaptörleri (Rocky Linux + AlmaLinux)
 
 ### Added
