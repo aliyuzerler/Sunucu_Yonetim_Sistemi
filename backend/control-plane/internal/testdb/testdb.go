@@ -1,36 +1,52 @@
 // Package testdb provides the shared PostgreSQL test harness. Tests skip
 // unless TEST_DATABASE_URL points at a disposable database (CI provisions
 // PostgreSQL 18 as a service container; locally use deploy/docker-compose).
+// Each test PROCESS (package) gets its own uniquely-named database so
+// parallel packages never share schema state; the disposable databases die
+// with the CI job and can be dropped locally at will.
 package testdb
 
 import (
 	"context"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/db/migrations"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/db/migrate"
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/testutil"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // URL returns the configured test database URL ("" when unset).
 func URL() string { return os.Getenv("TEST_DATABASE_URL") }
 
-// Pool connects to the test database and applies all migrations. Skips the
-// calling test when TEST_DATABASE_URL is not configured.
+var (
+	dbOnce  sync.Once
+	dbURL   string
+	dbSetup error
+)
+
+// Pool connects to this package's isolated database (one per test process,
+// via testutil.UniqueDB) and applies all migrations. Skips the calling test
+// when TEST_DATABASE_URL is not configured.
 func Pool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
-	url := URL()
-	if url == "" {
+	adminURL := URL()
+	if adminURL == "" {
 		t.Skip("TEST_DATABASE_URL tanımlı değil; PostgreSQL entegrasyon testi atlandı")
 	}
+	dbOnce.Do(func() {
+		dbURL = testutil.UniqueDB(t, adminURL)
+	})
+
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	cfg, err := pgxpool.ParseConfig(url)
+	cfg, err := pgxpool.ParseConfig(dbURL)
 	if err != nil {
-		t.Fatalf("TEST_DATABASE_URL geçersiz: %v", err)
+		t.Fatalf("test veritabanı URL'si geçersiz: %v", err)
 	}
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {

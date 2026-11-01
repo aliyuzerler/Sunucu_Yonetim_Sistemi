@@ -2,23 +2,23 @@ package migrate
 
 import (
 	"context"
-	"os"
 	"testing"
 	"time"
 
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/testutil"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// testPool connects to the integration database when TEST_DATABASE_URL is set.
-// CI provides a disposable PostgreSQL 18 container for this test; locally the
-// test is skipped with an explicit message (never silently passed).
+// testPool provides an ISOLATED database for this package so the fake test
+// pairs below never collide with the real migrations that other test packages
+// apply to their own databases (CI finding CI-1/CI-4, 2026-11-01).
 func testPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
-	url := os.Getenv("TEST_DATABASE_URL")
-	if url == "" {
+	adminURL := testutil.AdminURL()
+	if adminURL == "" {
 		t.Skip("TEST_DATABASE_URL tanımsız; migration entegrasyon testi atlandı (CI'da PostgreSQL 18 ile çalışır)")
 	}
-	pool, err := pgxpool.New(context.Background(), url)
+	pool, err := pgxpool.New(context.Background(), testutil.UniqueDB(t, adminURL))
 	if err != nil {
 		t.Fatalf("test veritabanına bağlanılamadı: %v", err)
 	}
