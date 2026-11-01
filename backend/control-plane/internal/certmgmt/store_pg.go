@@ -15,7 +15,11 @@ type Store struct{ pool *pgxpool.Pool }
 
 func NewStore(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
 
-const recordCols = `id, name, sans, provider_id, node_id, csr_pem, state, not_after,
+// recordCols: provider_id/node_id NULL olabilir (FK'li referanslar) —
+// okumada COALESCE ile "" e lenir (CI-23/24 dersi: UUID kolonlara boş
+// string ASLA yazılmaz, NULL'lar taranır).
+const recordCols = `id, name, sans, COALESCE(provider_id::text, '') AS provider_id,
+	COALESCE(node_id::text, '') AS node_id, csr_pem, state, not_after,
 	fingerprint, last_error, last_error_class, retry_after_secs,
 	issued_at, revoked_at, created_at, updated_at`
 
@@ -46,11 +50,19 @@ func (s *Store) Create(ctx context.Context, r Record) (Record, error) {
 	if err != nil {
 		return Record{}, err
 	}
+	// Boş referanslar NULL yazılır (UUID parse hatası değil).
+	var providerID, nodeID *string
+	if r.ProviderID != "" {
+		providerID = &r.ProviderID
+	}
+	if r.NodeID != "" {
+		nodeID = &r.NodeID
+	}
 	row := s.pool.QueryRow(ctx, `
 		INSERT INTO certificates (name, sans, provider_id, node_id, csr_pem, state)
 		VALUES ($1, $2, $3, $4, $5, $6)
 		RETURNING `+recordCols,
-		r.Name, sansJSON, r.ProviderID, r.NodeID, r.CSRPEM, r.State)
+		r.Name, sansJSON, providerID, nodeID, r.CSRPEM, r.State)
 	return scanRecord(row)
 }
 
@@ -177,7 +189,15 @@ func (s *Store) GetCertMaterial(ctx context.Context, id string) (certEnc, chainE
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil, ErrCertNotFound
 	}
-	return certEnc, chainEnc, err
+	if err != nil {
+		return nil, nil, err
+	}
+	// pending/issuing/renewal_failed→başarısız aşamalarda materyal YOK:
+	// NULL → tipli sinyal (sessiz boş blob değil).
+	if certEnc == nil {
+		return nil, nil, fmtWrap("materyal", ErrCertNotFound)
+	}
+	return certEnc, chainEnc, nil
 }
 
 // Watcher periodically persists expiry transitions. Interval is injectable

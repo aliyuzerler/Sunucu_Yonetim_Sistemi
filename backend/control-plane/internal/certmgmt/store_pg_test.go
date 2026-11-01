@@ -16,9 +16,11 @@ func TestStoreLifecycle(t *testing.T) {
 	ctx := t.Context()
 
 	rec, err := store.Create(ctx, Record{
-		Name:       "example.internal",
-		SANs:       []string{"example.internal", "www.example.internal"},
-		ProviderID: "6f9a1c3e-1111-4222-8333-444455556666",
+		Name: "example.internal",
+		SANs: []string{"example.internal", "www.example.internal"},
+		// CI-24 dersi: provider_id FK'lidir — satırı olmayan UUID yazılamaz;
+		// referanssız kayıt NULL (boş string) bırakılır.
+		ProviderID: "",
 		NodeID:     "0aa1c3e1-1111-4222-8333-444455556666",
 		CSRPEM:     "-----BEGIN CERTIFICATE REQUEST-----\nTEST\n-----END CERTIFICATE REQUEST-----",
 	})
@@ -99,7 +101,7 @@ func TestStoreExpiryWatcher(t *testing.T) {
 	store := NewStore(pool)
 	ctx := t.Context()
 
-	rec, err := store.Create(ctx, Record{Name: "short.internal", ProviderID: "p"})
+	rec, err := store.Create(ctx, Record{Name: "short.internal"}) // ProviderID boş → NULL
 	if err != nil {
 		t.Fatal(err)
 	}
