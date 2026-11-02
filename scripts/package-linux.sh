@@ -16,6 +16,10 @@ REPO="$(cd "$(dirname "$0")/.." && pwd)"
 STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE"' EXIT
 
+# DIST mutlaklaştırılır: script ilerleyen adımlarda cd $STAGE yapar; göreli
+# dist yolu orada bozulur (CI-55 dersi: zip 'No such file or directory').
+mkdir -p "$DIST"
+DIST="$(cd "$DIST" && pwd)"
 echo "== Faz 15 paketleme: sürüm=$VERSION dist=$DIST arch=$ARCH"
 
 # ---- Derleme (yalnız go, -buildvcs=false — CI-05 dersi) ----
