@@ -547,12 +547,14 @@ func (r *Runner) GrantSet(ctx context.Context, kind, user, host, database, level
 		// Mevcut db-düzeyi yetki var mı sorgulanır; yoksa REVOKE atlanır
 		// ("yetkisiz" istenen durum zaten sağlıdır). PostgreSQL REVOKE'u
 		// no-op'tur — koşulsuz kalır.
-		// grantee sütun biçimi: 'user'@'host' (tek tırnaklar dahil) →
-		// SQL literalinde kaçış: '''user'@'host'''. user/host/database
-		// allowlist RE ile doğrulanmıştır (tırnak içeremez).
+		// grantee sütun biçimi: 'user'@'host' (tek tırnaklar DAHİL) →
+		// SQL literalinde her içerik tırnağı ikiye katlanır: değer
+		// 'user'@'host' için literal '''user''@''host''' olur (CI-35:
+		// iç '@' tırnağı unutulursa literal bozuktur → istemci exit 1).
+		// user/host/database allowlist RE ile doğrulanmıştır.
 		probe := `SELECT COUNT(*) FROM information_schema.SCHEMA_PRIVILEGES ` +
 			`WHERE table_schema = '` + database + `' ` +
-			`AND grantee = '''` + user + `'@'` + host + `'''`
+			`AND grantee = '''` + user + `''@''` + host + `'''`
 		out, err := r.query(ctx, kind, probe)
 		if err != nil {
 			return nil, err

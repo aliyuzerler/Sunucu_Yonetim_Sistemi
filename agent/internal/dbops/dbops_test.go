@@ -382,8 +382,9 @@ func TestGrantSetMySQLConditionalRevoke(t *testing.T) {
 			if hasRevoke != tc.wantRevoke {
 				t.Fatalf("REVOKE varlığı %v bekleniyordu; log: %s", tc.wantRevoke, executed)
 			}
-			// Probe, kaçışlı grantee biçimiyle sorulmalı.
-			if !strings.Contains(executed, `'''app_ro'@'localhost'''`) {
+			// Probe, kaçışlı grantee biçimiyle sorulmalı: değer
+			// 'app_ro'@'localhost' → literal '''app_ro''@''localhost'''.
+			if !strings.Contains(executed, `'''app_ro''@''localhost'''`) {
 				t.Fatalf("probe grantee kaçışı hatalı: %s", executed)
 			}
 		})
