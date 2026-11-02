@@ -367,6 +367,56 @@ jobs:
           sudo rm -rf /var/www/server-control/citest || true
           sudo rm -rf /etc/nginx/ssl/srvctl-citest || true
 
+  agent-dbfs:
+    name: "Agent (gerçek PostgreSQL + MariaDB — db/fs lifecycle)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Faz 10: GERÇEK veritabanı + dosya yöneticisi kanıtı — runner'da
+    # gerçek PostgreSQL + MariaDB ile tam DB lifecycle (create → user +
+    # grant → backup → restore → delete; pg_dump/mysqldump DB-native
+    # tutarlılık) ve gerçek docroot üzerinde FS lifecycle (upload/download/
+    # chmod/chown + gerçek symlink-escape reddi). EXPECTED_DB=1/EXPECTED_FS=1
+    # gate'leri CI-17 dersi gereği SESSİZ ATLANMAZ: ortam eksikse test
+    # BAŞARISIZ olur. Runner disposable'dır; yalnız citest- önekli adlar
+    # kullanılır.
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Setup Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: agent/go.mod
+          cache-dependency-path: agent/go.sum
+      - name: PostgreSQL + MariaDB kur ve başlat
+        run: |
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq postgresql mariadb-server
+          sudo systemctl enable --now postgresql mariadb
+          psql --version && mariadb --version
+      - name: DBops test ikilisini derle
+        run: |
+          cd agent
+          go test -c -buildvcs=false -o /tmp/dbops.test ./internal/dbops/
+      - name: DB adapter gerçek lifecycle kanıtı
+        run: |
+          sudo -E env EXPECTED_DB=1 /tmp/dbops.test -test.run 'TestRealDBLifecycle|TestRealDBBackupContent' -test.v
+      - name: FSops test ikilisini derle
+        run: |
+          cd agent
+          go test -c -buildvcs=false -o /tmp/fsops.test ./internal/fsops/
+      - name: FS adapter gerçek lifecycle kanıtı
+        run: |
+          sudo -E env EXPECTED_FS=1 /tmp/fsops.test -test.run 'TestRealFSLifecycle' -test.v
+      - name: Temizlik
+        if: always()
+        run: |
+          sudo -u postgres psql -c "DROP DATABASE IF EXISTS citest_faz10" || true
+          sudo -u postgres psql -c "DROP DATABASE IF EXISTS citest_faz10b" || true
+          sudo mysql -e "DROP DATABASE IF EXISTS citest_faz10" || true
+          sudo mysql -e "DROP USER IF EXISTS 'citest_ro'@'localhost'" || true
+          sudo userdel sc-web-citest 2>/dev/null || true
+          sudo rm -rf /var/www/server-control/citest || true
+
   agent-windows:
     name: Agent (Go, windows-2025)
     runs-on: windows-2025

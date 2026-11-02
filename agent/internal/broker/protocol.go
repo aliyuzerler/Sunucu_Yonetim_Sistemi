@@ -20,7 +20,9 @@ import (
 	"strings"
 
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/composeops"
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/dbops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/dockerx"
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/fsops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/fwops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/pkgops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/tlsops"
@@ -84,6 +86,30 @@ const (
 	OpWebCertRequest = tlsops.OpWebCertRequest
 	OpWebCertInstall = tlsops.OpWebCertInstall
 	OpWebCertStatus  = tlsops.OpWebCertStatus
+
+	// Faz 10: veritabanı ailesi (node-local instance'lar; panel DB'sine
+	// yapısal erişim yok — ADR-0014). Yürütme yüzü YALNIZ broker'dadır
+	// (--db-enable ile seçilir; VARSAYILAN KAPALI).
+	OpDBInstanceList   = dbops.OpDBInstanceList
+	OpDBDatabaseList   = dbops.OpDBDatabaseList
+	OpDBDatabaseCreate = dbops.OpDBDatabaseCreate
+	OpDBDatabaseDelete = dbops.OpDBDatabaseDelete
+	OpDBUserList       = dbops.OpDBUserList
+	OpDBUserCreate     = dbops.OpDBUserCreate
+	OpDBUserDelete     = dbops.OpDBUserDelete
+	OpDBGrantSet       = dbops.OpDBGrantSet
+	OpDBBackup         = dbops.OpDBBackup
+	OpDBBackupList     = dbops.OpDBBackupList
+	OpDBRestore        = dbops.OpDBRestore
+
+	// Faz 10: scoped dosya yöneticisi (kökler yalnız webops site
+	// docroot'ları; --fs-enable ile seçilir; VARSAYILAN KAPALI —
+	// ADR-0014). Dolaşım openat+O_NOFOLLOW yarışsızdır.
+	OpFSList     = fsops.OpFSList
+	OpFSDownload = fsops.OpFSDownload
+	OpFSUpload   = fsops.OpFSUpload
+	OpFSChmod    = fsops.OpFSChmod
+	OpFSChown    = fsops.OpFSChown
 
 	OpWinServiceList    = winops.OpWinServiceList
 	OpWinServiceStatus  = winops.OpWinServiceStatus
@@ -149,8 +175,12 @@ type ListParams struct {
 	Limit int `json:"limit,omitempty"`
 }
 
-// maxRequestBytes bounds a single request line.
-const maxRequestBytes = 16 << 10
+// maxRequestBytes bounds a single request line. Faz 10: 16 KiB → 1 MiB —
+// fs.upload gövdesi (base64 ≤ 768 KiB) tek JSONL satırında taşınır. Sınır
+// kasıtlıdır: peer çekirdek-kimlikli UID allowlist'li agent'tır, eşzamanlı
+// yürütme semaforu (4) sınırlıdır; 1 MiB bellek tavanı görev motorundaki
+// MaxPayload tavanıyla aynıdır (ADR-0014).
+const maxRequestBytes = 1 << 20
 
 // dockerCall carries the Faz 07 docker-family parameters extracted at
 // validation time (ref/tail/timeout/remove-kind).
@@ -183,6 +213,30 @@ type tlsInstallCall struct {
 	chainPEM string
 }
 
+// dbCall carries the Faz 10 database-family parameters extracted at
+// validation time (every field is RE-validated here — the broker trusts
+// nothing).
+type dbCall struct {
+	kind     string
+	database string
+	owner    string
+	user     string
+	host     string
+	level    string
+	limit    int
+	backup   string
+}
+
+// fsCall carries the Faz 10 file-manager parameters.
+type fsCall struct {
+	root      string
+	path      string
+	content   string
+	mode      string
+	overwrite bool
+	limit     int
+}
+
 // validatedCall is the typed outcome of request validation.
 type validatedCall struct {
 	target    string              // unit/service name (service families)
@@ -190,6 +244,8 @@ type validatedCall struct {
 	preview   fwops.PreviewParams // firewall preview payload
 	docker    dockerCall          // docker family payload
 	web       webCall             // web hosting family payload
+	db        dbCall              // Faz 10 database family payload
+	fs        fsCall              // Faz 10 file-manager payload
 }
 
 // validateRequest enforces the allowlist + payload schema for one request.
@@ -407,11 +463,228 @@ func validateRequest(req *Request) (validatedCall, error) {
 			return empty, reject(CatInvalidParams, "cert status şeması uyumsuz (boş obje beklenir)")
 		}
 		return validatedCall{}, nil
+	// ---- Faz 10: veritabanı ailesi ----
+	case OpDBInstanceList:
+		if err := emptyObject(req.Params); err != nil {
+			return empty, reject(CatInvalidParams, "instance.list şeması uyumsuz (boş obje beklenir)")
+		}
+		return empty, nil
+	case OpDBDatabaseList, OpDBUserList, OpDBBackupList:
+		var p struct {
+			Kind  string `json:"kind"`
+			Limit int    `json:"limit,omitempty"`
+		}
+		if err := strictDecode(orEmpty(req.Params), &p); err != nil {
+			return empty, reject(CatInvalidParams, "db list şeması uyumsuz")
+		}
+		if !dbops.ValidKind(p.Kind) || !dbops.ValidLimit(p.Limit) {
+			return empty, reject(CatInvalidParams, "kind/limit geçersiz")
+		}
+		return validatedCall{db: dbCall{kind: p.Kind, limit: p.Limit}}, nil
+	case OpDBDatabaseCreate:
+		var p struct {
+			Kind  string `json:"kind"`
+			Name  string `json:"name"`
+			Owner string `json:"owner,omitempty"`
+		}
+		if err := strictDecode(orEmpty(req.Params), &p); err != nil {
+			return empty, reject(CatInvalidParams, "database.create şeması uyumsuz")
+		}
+		if !dbops.ValidKind(p.Kind) || !dbops.ValidName(p.Name) ||
+			(p.Owner != "" && !dbops.ValidName(p.Owner)) {
+			return empty, reject(CatInvalidParams, "kind/name/owner geçersiz")
+		}
+		if dbops.IsProtectedDatabase(p.Name) {
+			return empty, reject(CatInvalidParams, "korumalı veritabanı adı")
+		}
+		return validatedCall{db: dbCall{kind: p.Kind, database: p.Name, owner: p.Owner}, target: p.Name}, nil
+	case OpDBDatabaseDelete, OpDBBackup:
+		var p struct {
+			Kind     string `json:"kind"`
+			Database string `json:"database"`
+		}
+		if err := strictDecode(orEmpty(req.Params), &p); err != nil {
+			return empty, reject(CatInvalidParams, "database şeması uyumsuz")
+		}
+		if !dbops.ValidKind(p.Kind) || !dbops.ValidName(p.Database) {
+			return empty, reject(CatInvalidParams, "kind/database geçersiz")
+		}
+		if dbops.IsProtectedDatabase(p.Database) {
+			return empty, reject(CatInvalidParams, "korumalı veritabanı adı")
+		}
+		return validatedCall{db: dbCall{kind: p.Kind, database: p.Database}, target: p.Database}, nil
+	case OpDBUserCreate, OpDBUserDelete:
+		var p struct {
+			Kind string `json:"kind"`
+			Name string `json:"name"`
+			Host string `json:"host,omitempty"`
+		}
+		if err := strictDecode(orEmpty(req.Params), &p); err != nil {
+			return empty, reject(CatInvalidParams, "user şeması uyumsuz")
+		}
+		if !dbops.ValidKind(p.Kind) || !dbops.ValidName(p.Name) {
+			return empty, reject(CatInvalidParams, "kind/name geçersiz")
+		}
+		if dbops.IsProtectedUser(p.Name) {
+			return empty, reject(CatInvalidParams, "korumalı kullanıcı adı")
+		}
+		if p.Kind == dbops.KindMySQL {
+			if p.Host == "" {
+				p.Host = "localhost"
+			}
+			if !dbops.ValidHost(p.Host) {
+				return empty, reject(CatInvalidParams, "host geçersiz")
+			}
+		} else if p.Host != "" {
+			return empty, reject(CatInvalidParams, "postgres user host almaz")
+		}
+		return validatedCall{db: dbCall{kind: p.Kind, user: p.Name, host: p.Host}, target: p.Name}, nil
+	case OpDBGrantSet:
+		var p struct {
+			Kind     string `json:"kind"`
+			User     string `json:"user"`
+			Host     string `json:"host,omitempty"`
+			Database string `json:"database"`
+			Level    string `json:"level"`
+		}
+		if err := strictDecode(orEmpty(req.Params), &p); err != nil {
+			return empty, reject(CatInvalidParams, "grant şeması uyumsuz")
+		}
+		if !dbops.ValidKind(p.Kind) || !dbops.ValidName(p.User) ||
+			!dbops.ValidName(p.Database) || !dbops.ValidLevel(p.Level) {
+			return empty, reject(CatInvalidParams, "kind/user/database/level geçersiz")
+		}
+		if dbops.IsProtectedUser(p.User) {
+			return empty, reject(CatInvalidParams, "korumalı kullanıcı adı")
+		}
+		if p.Kind == dbops.KindMySQL {
+			if p.Host == "" {
+				p.Host = "localhost"
+			}
+			if !dbops.ValidHost(p.Host) {
+				return empty, reject(CatInvalidParams, "host geçersiz")
+			}
+		} else if p.Host != "" {
+			return empty, reject(CatInvalidParams, "postgres grant host almaz")
+		}
+		return validatedCall{db: dbCall{kind: p.Kind, user: p.User, host: p.Host, database: p.Database, level: p.Level}, target: p.User}, nil
+	case OpDBRestore:
+		var p struct {
+			Kind     string `json:"kind"`
+			Database string `json:"database"`
+			Backup   string `json:"backup"`
+		}
+		if err := strictDecode(orEmpty(req.Params), &p); err != nil {
+			return empty, reject(CatInvalidParams, "restore şeması uyumsuz")
+		}
+		if !dbops.ValidKind(p.Kind) || !dbops.ValidName(p.Database) || !dbops.ValidBackupName(p.Backup) {
+			return empty, reject(CatInvalidParams, "kind/database/backup geçersiz")
+		}
+		if dbops.IsProtectedDatabase(p.Database) {
+			return empty, reject(CatInvalidParams, "korumalı veritabanı adı")
+		}
+		return validatedCall{db: dbCall{kind: p.Kind, database: p.Database, backup: p.Backup}, target: p.Database}, nil
+
+	// ---- Faz 10: scoped dosya yöneticisi ----
+	case OpFSList:
+		var p struct {
+			Root  string `json:"root"`
+			Path  string `json:"path,omitempty"`
+			Limit int    `json:"limit,omitempty"`
+		}
+		if err := strictDecode(orEmpty(req.Params), &p); err != nil {
+			return empty, reject(CatInvalidParams, "fs.list şeması uyumsuz")
+		}
+		if !fsops.ValidRoot(p.Root) {
+			return empty, reject(CatInvalidParams, "root geçersiz")
+		}
+		if _, err := fsops.ValidRelPath(p.Path); err != nil {
+			return empty, reject(CatInvalidParams, err.Error())
+		}
+		if p.Limit < 0 || p.Limit > fsops.MaxListEntries {
+			return empty, reject(CatInvalidParams, "limit geçersiz")
+		}
+		return validatedCall{fs: fsCall{root: p.Root, path: p.Path, limit: p.Limit}, target: p.Root}, nil
+	case OpFSDownload, OpFSChown:
+		var p struct {
+			Root string `json:"root"`
+			Path string `json:"path"`
+		}
+		if err := strictDecode(orEmpty(req.Params), &p); err != nil {
+			return empty, reject(CatInvalidParams, "fs şeması uyumsuz")
+		}
+		if !fsops.ValidRoot(p.Root) {
+			return empty, reject(CatInvalidParams, "root geçersiz")
+		}
+		if _, err := fsops.ValidRelPath(p.Path); err != nil || p.Path == "" {
+			return empty, reject(CatInvalidParams, "path geçersiz")
+		}
+		return validatedCall{fs: fsCall{root: p.Root, path: p.Path}, target: p.Root}, nil
+	case OpFSUpload:
+		if len(req.Params) > fsops.MaxPayloadBytes {
+			return empty, reject(CatInvalidParams, "payload çok büyük")
+		}
+		var p struct {
+			Root      string `json:"root"`
+			Path      string `json:"path"`
+			Content   string `json:"content_b64"`
+			Mode      string `json:"mode,omitempty"`
+			Overwrite bool   `json:"overwrite,omitempty"`
+		}
+		if err := strictDecode(orEmpty(req.Params), &p); err != nil {
+			return empty, reject(CatInvalidParams, "fs.upload şeması uyumsuz")
+		}
+		if !fsops.ValidRoot(p.Root) {
+			return empty, reject(CatInvalidParams, "root geçersiz")
+		}
+		if _, err := fsops.ValidRelPath(p.Path); err != nil || p.Path == "" {
+			return empty, reject(CatInvalidParams, "path geçersiz")
+		}
+		if p.Mode != "" {
+			if _, err := fsops.ParseMode(p.Mode); err != nil {
+				return empty, reject(CatInvalidParams, err.Error())
+			}
+		}
+		return validatedCall{fs: fsCall{root: p.Root, path: p.Path, content: p.Content, mode: p.Mode, overwrite: p.Overwrite}, target: p.Root}, nil
+	case OpFSChmod:
+		var p struct {
+			Root string `json:"root"`
+			Path string `json:"path"`
+			Mode string `json:"mode"`
+		}
+		if err := strictDecode(orEmpty(req.Params), &p); err != nil {
+			return empty, reject(CatInvalidParams, "fs.chmod şeması uyumsuz")
+		}
+		if !fsops.ValidRoot(p.Root) {
+			return empty, reject(CatInvalidParams, "root geçersiz")
+		}
+		if _, err := fsops.ValidRelPath(p.Path); err != nil || p.Path == "" {
+			return empty, reject(CatInvalidParams, "path geçersiz")
+		}
+		if _, err := fsops.ParseMode(p.Mode); err != nil {
+			return empty, reject(CatInvalidParams, err.Error())
+		}
+		return validatedCall{fs: fsCall{root: p.Root, path: p.Path, mode: p.Mode}, target: p.Root}, nil
+
 	case "":
 		return empty, reject(CatInvalidRequest, "operasyon boş")
 	default:
 		return empty, reject(CatUnsupportedOp, "operasyon allowlist dışı")
 	}
+}
+
+// orEmpty normalizes a missing params field to the empty JSON object.
+func orEmpty(raw json.RawMessage) []byte {
+	if len(raw) == 0 {
+		return []byte("{}")
+	}
+	return raw
+}
+
+// emptyObject enforces the params to be exactly {}.
+func emptyObject(raw json.RawMessage) error {
+	var p struct{}
+	return strictDecode(orEmpty(raw), &p)
 }
 
 // removeKind maps a preview-only remove op to its resource kind.

@@ -55,6 +55,17 @@ const (
 	PermDNSControl = "dns:control"
 	PermCertRead   = "cert:read"
 	PermCertCtrl   = "cert:control"
+
+	// Faz 10: veritabanı yönetimi + scoped dosya yöneticisi.
+	// db:read → instance/database/user/backup listeleri (salt okuma);
+	// db:control → create/delete/grant/backup/restore + db_credentials
+	// tek-seferlik reveal (şifre mutasyon yüzeyi); files:read → fs.list +
+	// fs.download; files:control → fs.upload/chmod/chown. Dosya kökleri
+	// yalnız atanmış site docroot'larıdır (ADR-0014).
+	PermDBRead    = "db:read"
+	PermDBCtrl    = "db:control"
+	PermFilesRead = "files:read"
+	PermFilesCtrl = "files:control"
 )
 
 // AllPermissions lists the seeded catalog in one place.
@@ -70,6 +81,8 @@ var AllPermissions = []string{
 	PermWebRead, PermWebControl,
 	PermDNSRead, PermDNSControl,
 	PermCertRead, PermCertCtrl,
+	PermDBRead, PermDBCtrl,
+	PermFilesRead, PermFilesCtrl,
 }
 
 // Scope types.

@@ -54,6 +54,8 @@ Standart kütüphane tercih edilir (slog, net/http, crypto/rand, embed); başka 
 | `postgres:18-alpine` | sha256:10a5c69a83035ab5239f5620d708520e8b28f5aa1f2b20143e6024532edadfb5 (2026-11-01) | Geliştirme DB + CI servis konteyneri |
 
 ## Bilinen riskler / notlar
+- **Faz 10 notu:** Yeni harici bağımlılık YOK — dbops/fsops yalnız stdlib + `golang.org/x/sys/unix` (mevcut doğrudan bağımlılık, BSD-3-Clause) kullanır; `net/http.DetectContentType` upload içerik denetimindedir (stdlib).
+
 
 - `npm audit` (2026-11-01): 12 × **moderate**, tamamı eslint toolchain'i (dev-only, üretime çıkmaz). Kaynak: `minimatch` ve `@eslint-community/eslint-utils` danışmanlıkları. Her faz başında yeniden taranır (dependency-policy §7).
 - `@vitejs/plugin-react` 6.x oxc-transform tabanlıdır; rolldown/babel geçiş peer'ları opsiyoneldir ve kullanılmaz.

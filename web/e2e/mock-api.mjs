@@ -121,6 +121,24 @@ const OPERATIONS = [
   { name: "web.site.update", version: "1.0.0", class: "idempotent_desired_state", retry_safe: true, timeout_seconds: 300 },
   { name: "web.site.disable", version: "1.0.0", class: "idempotent_desired_state", retry_safe: true, timeout_seconds: 180 },
   { name: "web.site.delete", version: "1.0.0", class: "non_idempotent", retry_safe: false, timeout_seconds: 300 },
+  // Faz 10: veritabanı + scoped dosya yöneticisi (şifre node'da üretilir,
+  // seal edilir, tek-seferlik reveal — ADR-0014).
+  { name: "db.instance.list", version: "1.0.0", class: "read_only", retry_safe: true, timeout_seconds: 60 },
+  { name: "db.database.list", version: "1.0.0", class: "read_only", retry_safe: true, timeout_seconds: 60 },
+  { name: "db.database.create", version: "1.0.0", class: "idempotent_desired_state", retry_safe: true, timeout_seconds: 60 },
+  { name: "db.database.delete", version: "1.0.0", class: "destructive", retry_safe: false, timeout_seconds: 120 },
+  { name: "db.user.list", version: "1.0.0", class: "read_only", retry_safe: true, timeout_seconds: 60 },
+  { name: "db.user.create", version: "1.0.0", class: "idempotent_desired_state", retry_safe: true, timeout_seconds: 60 },
+  { name: "db.user.delete", version: "1.0.0", class: "destructive", retry_safe: false, timeout_seconds: 60 },
+  { name: "db.grant.set", version: "1.0.0", class: "idempotent_desired_state", retry_safe: true, timeout_seconds: 60 },
+  { name: "db.backup", version: "1.0.0", class: "non_idempotent", retry_safe: true, timeout_seconds: 300 },
+  { name: "db.backup.list", version: "1.0.0", class: "read_only", retry_safe: true, timeout_seconds: 60 },
+  { name: "db.restore", version: "1.0.0", class: "destructive", retry_safe: false, timeout_seconds: 300 },
+  { name: "fs.list", version: "1.0.0", class: "read_only", retry_safe: true, timeout_seconds: 60 },
+  { name: "fs.download", version: "1.0.0", class: "read_only", retry_safe: true, timeout_seconds: 60 },
+  { name: "fs.upload", version: "1.0.0", class: "idempotent_desired_state", retry_safe: true, timeout_seconds: 120 },
+  { name: "fs.chmod", version: "1.0.0", class: "idempotent_desired_state", retry_safe: true, timeout_seconds: 60 },
+  { name: "fs.chown", version: "1.0.0", class: "idempotent_desired_state", retry_safe: true, timeout_seconds: 60 },
   // Faz 09: DNS + SSL (sağlayıcı kimlik bilgileri şifreli; anahtar node'da — ADR-0013).
   { name: "dns.zone.list", version: "1.0.0", class: "read_only", retry_safe: true, timeout_seconds: 60 },
   { name: "dns.record.list", version: "1.0.0", class: "read_only", retry_safe: true, timeout_seconds: 60 },
@@ -343,6 +361,58 @@ function attachDockerTelemetry(node) {
 
 // Faz 08: web host şablonu — web hosting ailesi kabiliyetleriyle
 // (gerçek yürütme broker'da --web-enable; ADR-0012).
+// Faz 10: db + fs kabiliyet şablonu — "dbfs-" önekli node'lar (E2E).
+const mockDbCredentials = []; // {id, node_id, kind, username, host, fingerprint, revealed_at}
+
+function attachDbFsTelemetry(node) {
+  const now = new Date().toISOString();
+  nodeFacts.set(node.id, {
+    node_id: node.id,
+    os_id: "ubuntu",
+    os_version_id: "24.04",
+    os_pretty_name: "Ubuntu 24.04.3 LTS (db+fs host)",
+    os_home_url: "https://www.ubuntu.com/",
+    kernel_release: "6.8.0-49-generic",
+    arch: "amd64",
+    systemd_version: "255",
+    package_manager: "apt",
+    systemd_available: true,
+    source: "os-release+procfs+systemctl",
+    collected_at: now,
+  });
+  nodeMetrics.set(node.id, {
+    collected_at: now,
+    source: "procfs+statfs",
+    cpu: { percent: 9.1, logical_cores: 2, load_1m: 0.2, load_5m: 0.2, load_15m: 0.1 },
+    memory: { total_bytes: 4 * 1024 ** 3, available_bytes: 2 * 1024 ** 3, used_bytes: 2 * 1024 ** 3, used_percent: 50 },
+    disks: [{ device: "/dev/vda1", mount_point: "/", fs_type: "ext4", total_bytes: 40 * 1024 ** 3, used_bytes: 12 * 1024 ** 3, available_bytes: 28 * 1024 ** 3 }],
+    networks: [{ interface: "eth0", rx_bytes: 1111, tx_bytes: 2222 }],
+    uptime_seconds: 7200,
+  });
+  const caps = [];
+  for (const c of [
+    "db.instance.list", "db.database.list", "db.database.create", "db.database.delete",
+    "db.user.list", "db.user.create", "db.user.delete", "db.grant.set",
+    "db.backup", "db.backup.list", "db.restore",
+  ]) {
+    caps.push({ node_id: node.id, capability_id: c, version: "1.0.0", available: true, adapter_id: "db-broker" });
+  }
+  for (const c of ["fs.list", "fs.download", "fs.upload", "fs.chmod", "fs.chown"]) {
+    caps.push({ node_id: node.id, capability_id: c, version: "1.0.0", available: true, adapter_id: "fs-broker" });
+  }
+  nodeCapabilities.set(node.id, caps);
+  // Demo kimlik: app_ro — henüz gösterilmemiş (reveal tek seferlik mock'u).
+  mockDbCredentials.push({
+    id: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+    node_id: node.id,
+    kind: "postgres",
+    username: "app_ro",
+    host: "",
+    fingerprint: "demo1234demo1234",
+    revealed_at: null,
+  });
+}
+
 function attachWebHost(node) {
   const now = new Date().toISOString();
   nodeFacts.set(node.id, {
@@ -573,6 +643,155 @@ setInterval(() => {
           ],
         };
       }
+      // Faz 10: db.* simülasyonları (şifre TEK SEFERLİK reveal yüzeyine
+      // ayrıştırılır — task sonucunda düz şifre TAŞINMAZ, kriter 2).
+      if (t.operation === "db.instance.list") {
+        t.result = {
+          instances: [
+            { kind: "postgres", version: "18.2", socket: "/run/postgresql/.s.PGSQL.5432", active: "active" },
+            { kind: "mysql", version: "11.4-MariaDB", socket: "/run/mysqld/mysqld.sock", active: "active" },
+          ],
+        };
+      }
+      if (t.operation === "db.database.list") {
+        const kind = (t.payload && t.payload.kind) || "postgres";
+        t.result = {
+          databases: kind === "mysql"
+            ? [{ name: "shop_db", size: "2.5 MiB" }, { name: "wordpress", size: "48 MiB" }]
+            : [{ name: "app_db", size: "17 MB" }, { name: "analytics", size: "1.2 GB" }],
+        };
+      }
+      if (t.operation === "db.user.list") {
+        t.result = { users: [{ name: "app_ro", host: "" }, { name: "shop_u", host: "localhost" }] };
+      }
+      if (t.operation === "db.backup.list") {
+        t.result = {
+          backups: [
+            { file: "app_db-20261102T090507Z.sql", bytes: 2458624, created: "2026-11-02T09:05:09Z" },
+          ],
+        };
+      }
+      if (t.operation === "db.database.create") {
+        t.result = { kind: t.payload && t.payload.kind, database: t.payload && t.payload.name, created: true };
+      }
+      if (t.operation === "db.database.delete") {
+        t.result = { kind: t.payload && t.payload.kind, database: t.payload && t.payload.database, deleted: true };
+      }
+      if (t.operation === "db.user.create") {
+        const kind = (t.payload && t.payload.kind) || "postgres";
+        const name = (t.payload && t.payload.name) || "app_ro";
+        const host = (t.payload && t.payload.host) || "";
+        const fp = "f1" + Math.random().toString(16).slice(2, 14);
+        mockDbCredentials.push({
+          id: uuid(),
+          node_id: t.node_id,
+          kind,
+          username: name,
+          host,
+          fingerprint: fp,
+          revealed_at: null,
+        });
+        t.result = {
+          kind,
+          user: { name, host },
+          credentials: { credential_id: mockDbCredentials[mockDbCredentials.length - 1].id, fingerprint: fp, one_time_reveal: true },
+        };
+      }
+      if (t.operation === "db.user.delete") {
+        t.result = { kind: t.payload && t.payload.kind, user: { name: t.payload && t.payload.name, host: (t.payload && t.payload.host) || "" }, deleted: true, credentials_removed: true };
+      }
+      if (t.operation === "db.grant.set") {
+        t.result = {
+          kind: t.payload && t.payload.kind,
+          user: { name: t.payload && t.payload.user, host: (t.payload && t.payload.host) || "" },
+          database: t.payload && t.payload.database,
+          level: t.payload && t.payload.level,
+          set: true,
+        };
+      }
+      if (t.operation === "db.backup") {
+        const db = (t.payload && t.payload.database) || "app_db";
+        t.result = {
+          kind: t.payload && t.payload.kind,
+          database: db,
+          file: db + "-20261102T090507Z.sql",
+          bytes: 2458624,
+          sha256: "b7f2" + "a".repeat(60),
+          duration: "1.24s",
+        };
+      }
+      if (t.operation === "db.restore") {
+        t.result = {
+          kind: t.payload && t.payload.kind,
+          database: t.payload && t.payload.database,
+          file: t.payload && t.payload.backup,
+          bytes: 2458624,
+          restored: true,
+          duration: "2.02s",
+        };
+      }
+      // Faz 10: fs.* simülasyonları (kök = site docroot; symlink'ler listede
+      // görünür ama işlem kabul etmez — broker O_NOFOLLOW disiplini).
+      if (t.operation === "fs.list") {
+        t.result = {
+          listing: {
+            root: (t.payload && t.payload.root) || "blog",
+            path: (t.payload && t.payload.path) || "",
+            truncated: false,
+            entries: [
+              { name: "index.html", type: "file", size: 1024, mode: "0644", mod_time: "2026-11-02T09:00:00Z" },
+              { name: "uploads", type: "dir", size: 4096, mode: "0750", mod_time: "2026-11-02T08:30:00Z" },
+              { name: "logo.svg", type: "file", size: 15360, mode: "0644", mod_time: "2026-11-01T17:12:00Z" },
+            ],
+          },
+        };
+      }
+      if (t.operation === "fs.download") {
+        t.result = {
+          file: {
+            path: (t.payload && t.payload.path) || "index.html",
+            size: 11,
+            mode: "0644",
+            sha256: "c1a0" + "3".repeat(60),
+            mime: "text/plain; charset=utf-8",
+            content_b64: Buffer.from("hello world").toString("base64"),
+          },
+        };
+      }
+      if (t.operation === "fs.upload") {
+        t.result = {
+          result: {
+            path: t.payload && t.payload.path,
+            bytes: Math.ceil(((t.payload && t.payload.content_b64) || "").length * 0.75),
+            mode: (t.payload && t.payload.mode) || "0644",
+            mime: "text/plain; charset=utf-8",
+            created: !(t.payload && t.payload.overwrite),
+            overwritten: !!(t.payload && t.payload.overwrite),
+          },
+        };
+      }
+      if (t.operation === "fs.chmod") {
+        t.result = {
+          result: {
+            path: t.payload && t.payload.path,
+            old_mode: "0644",
+            new_mode: (t.payload && t.payload.mode) || "0600",
+            type: "file",
+          },
+        };
+      }
+      if (t.operation === "fs.chown") {
+        t.result = {
+          result: {
+            path: t.payload && t.payload.path,
+            uid: 997,
+            gid: 997,
+            user: "sc-web-" + ((t.payload && t.payload.root) || "blog"),
+            old_uid: 0,
+            old_gid: 0,
+          },
+        };
+      }
       if (t.operation === "web.site.disable" || t.operation === "web.site.delete") {
         const site = (t.payload && t.payload.site) || "site";
         const act = t.operation.split(".")[2];
@@ -653,7 +872,34 @@ const server = createServer(async (req, res) => {
     nodeMetrics.clear();
     nodeCapabilities.clear();
     dnsProviders.length = 0;
+    mockDbCredentials.length = 0;
         json(res, 200, { status: "reset", mock: true });
+    return;
+  }
+
+  // ---- Faz 10: db-credentials (tek-seferlik reveal mock'u) ----
+  const credsMatch = /^\/api\/v1\/nodes\/([^/]+)\/db-credentials$/.exec(path);
+  if (method === "GET" && credsMatch) {
+    json(res, 200, { credentials: mockDbCredentials.filter((c) => c.node_id === credsMatch[1]) });
+    return;
+  }
+  const revealMatch = /^\/api\/v1\/db-credentials\/([^/]+)\/reveal$/.exec(path);
+  if (method === "POST" && revealMatch) {
+    const cred = mockDbCredentials.find((c) => c.id === revealMatch[1]);
+    if (!cred) {
+      json(res, 404, errorBody("not_found", "Kimlik kaydı bulunamadı.", 404));
+      return;
+    }
+    if (cred.revealed_at) {
+      json(res, 409, errorBody("already_revealed", "Şifre daha önce bir kez gösterildi; tekrar gösterilemez.", 409));
+      return;
+    }
+    cred.revealed_at = new Date().toISOString();
+    json(res, 200, {
+      credential: { id: cred.id, node_id: cred.node_id, kind: cred.kind, username: cred.username, host: cred.host, fingerprint: cred.fingerprint, revealed_at: cred.revealed_at },
+      password: "MockDemo-" + cred.fingerprint.slice(0, 8) + "-x7K9",
+      one_time: true,
+    });
     return;
   }
 
@@ -778,6 +1024,8 @@ const server = createServer(async (req, res) => {
       attachDockerTelemetry(node);
     } else if (String(body.display_name || "").startsWith("web-") || body.os_family === "web") {
       attachWebHost(node);
+    } else if (String(body.display_name || "").startsWith("dbfs-") || body.os_family === "dbfs") {
+      attachDbFsTelemetry(node);
     } else {
       attachMockTelemetry(node);
     }

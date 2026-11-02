@@ -63,6 +63,18 @@ type Services struct {
 	Telemetry *telemetry.Service
 	Audit     audit.Recorder
 	Logger    *slog.Logger
+
+	// ResultScrubber (Faz 10, optional) rewrites a node operation result
+	// BEFORE it is persisted — the storage-boundary secret redaction hook.
+	// db.user.create passwords are sealed into db_credentials and stripped
+	// from tasks.result here (nil = no scrubbing; db.user.create then
+	// degrades honestly on the CP side — see internal/dbcred).
+	ResultScrubber ResultScrubber
+}
+
+// ResultScrubber rewrites one succeeded node task result before persistence.
+type ResultScrubber interface {
+	ScrubNodeResult(ctx context.Context, t *tasks.Task, result map[string]any) error
 }
 
 // Server implements agentv1.EnrollServiceServer and AgentServiceServer.
@@ -457,6 +469,15 @@ func (s *Server) handleOperationResult(ctx context.Context, ns *nodeStream, res 
 		result := map[string]any{}
 		if len(res.GetResult()) > 0 {
 			_ = json.Unmarshal(res.GetResult(), &result)
+		}
+		// Faz 10: persist ÖNCESİ secret redaksiyonu (storage-boundary hook).
+		// Şifre burada seal edilip sonuçtan AYRIŞTIRILIR — tasks.result,
+		// audit ve outbox'a asla düz metin giremez (kriter 2).
+		if s.svc.ResultScrubber != nil {
+			if serr := s.svc.ResultScrubber.ScrubNodeResult(ctx, t, result); serr != nil {
+				s.logger.Warn("agent_result_scrub_failed",
+					slog.String("task_id", res.GetTaskId()), slog.String("error", serr.Error()))
+			}
 		}
 		ok, cerr := s.svc.TaskStore.CompleteExecution(ctx, res.GetTaskId(), attemptNo, result)
 		if cerr != nil || !ok {

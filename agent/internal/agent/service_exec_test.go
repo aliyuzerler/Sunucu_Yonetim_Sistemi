@@ -111,8 +111,8 @@ func TestCapabilityProbing(t *testing.T) {
 	// Faz 06+07+08+09: echo + 5 systemd + pkg.list + 3 firewall + 2 compose
 	// = 11 available; 12 docker op'unun probe'u /var/run/docker.sock
 	// varlığına, 7 web + 3 web.cert op'unun probe'u broker ping'ine bakar.
-	if len(caps) != 35 {
-		t.Fatalf("35 capability: %d", len(caps))
+	if len(caps) != 51 {
+		t.Fatalf("51 capability: %d", len(caps))
 	}
 	avail := map[string]bool{}
 	for _, c := range caps {

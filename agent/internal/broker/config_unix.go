@@ -7,7 +7,9 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/dbops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/dockerx"
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/fsops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/fwops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/pkgops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/svcops"
@@ -41,6 +43,12 @@ type Config struct {
 	// Faz 09: TLS sertifika runner (nil = cert ailesi reddedilir; web
 	// ailesiyle aynı --web-enable kapısı — ADR-0013).
 	TLS TLSRunner
+	// Faz 10: veritabanı runner'ı (nil = db ailesi tipli red; --db-enable
+	// ile seçilir, VARSAYILAN KAPALI — ADR-0014).
+	DB DBRunner
+	// Faz 10: scoped dosya yöneticisi runner'ı (nil = fs ailesi tipli red;
+	// --fs-enable ile seçilir, VARSAYILAN KAPALI — ADR-0014).
+	Fs FsRunner
 
 	// Audit receives one entry per handled request (incl. rejections).
 	Audit  AuditSink
@@ -119,3 +127,38 @@ type TLSRunner interface {
 
 // compile-time: the real runner satisfies the interface.
 var _ TLSRunner = (*tlsops.Runner)(nil)
+
+// DBRunner executes the Faz 10 database operations against LOCAL instances
+// (node-local unix sockets only; the payload schema has no host/port fields
+// — the control plane's own PostgreSQL is structurally out of reach,
+// ADR-0014). *dbops.Runner implements it; the interface keeps tests hermetic.
+type DBRunner interface {
+	InstancesList(ctx context.Context) ([]dbops.Instance, error)
+	DatabasesList(ctx context.Context, kind string, limit int) ([]dbops.DatabaseInfo, error)
+	DatabaseCreate(ctx context.Context, kind, name, owner string) (map[string]any, error)
+	DatabaseDelete(ctx context.Context, kind, name string) (map[string]any, error)
+	UsersList(ctx context.Context, kind string, limit int) ([]dbops.UserInfo, error)
+	UserCreate(ctx context.Context, kind, name, host string) (dbops.UserCreateResult, error)
+	UserDelete(ctx context.Context, kind, name, host string) (map[string]any, error)
+	GrantSet(ctx context.Context, kind, user, host, database, level string) (map[string]any, error)
+	Backup(ctx context.Context, kind, database string) (map[string]any, error)
+	BackupsList(ctx context.Context, kind string, limit int) ([]dbops.BackupInfo, error)
+	Restore(ctx context.Context, kind, database, backup string) (map[string]any, error)
+}
+
+// compile-time: the real runner satisfies the interface.
+var _ DBRunner = (*dbops.Runner)(nil)
+
+// FsRunner executes the Faz 10 scoped file-manager operations (roots are
+// webops site docroots only; openat+O_NOFOLLOW race-free traversal,
+// ADR-0014). *fsops.Runner implements it.
+type FsRunner interface {
+	List(ctx context.Context, root, path string, limit int) (fsops.ListResult, error)
+	Download(ctx context.Context, root, path string) (fsops.DownloadResult, error)
+	Upload(ctx context.Context, root, path, content string, mode uint32, overwrite bool) (fsops.UploadResult, error)
+	Chmod(ctx context.Context, root, path string, mode uint32) (fsops.ChmodResult, error)
+	Chown(ctx context.Context, root, path string) (fsops.ChownResult, error)
+}
+
+// compile-time: the real runner satisfies the interface.
+var _ FsRunner = (*fsops.Runner)(nil)

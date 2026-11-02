@@ -329,6 +329,10 @@ func BuildDefaultRegistry(tagSetter TagSetter, faz09 Faz09Services) (*Registry, 
 	// Faz 09: DNS sağlayıcı adaptörü + ACME sertifika yaşam döngüsü ayrı
 	// dosyada: ops_faz09.go (anahtar-node'da, kimlik-şifreli — ADR-0013).
 	specs = append(specs, buildFaz09Registry(faz09)...)
+	// Faz 10: veritabanı yönetimi + scoped dosya yöneticisi ayrı dosyada:
+	// ops_faz10.go (şifre node'da üretilir ve seal edilir; dosya kökleri
+	// site docroot'ları — ADR-0014).
+	specs = append(specs, buildFaz10Registry()...)
 	return NewRegistry(specs...)
 }
 

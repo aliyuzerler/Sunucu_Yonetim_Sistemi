@@ -15,7 +15,9 @@ import (
 
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/broker"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/composeops"
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/dbops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/dockerx"
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/fsops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/fwops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/tlsops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/webops"
@@ -804,4 +806,116 @@ func decodeStrict(raw []byte, v any) error {
 		return fmt.Errorf("payload sonrası veri")
 	}
 	return nil
+}
+
+// DbExecutor relays one db.* operation (Faz 10 database family) to the
+// local privileged broker. The agent does NOT interpret DB payloads: the
+// control-plane registry validator and the broker's strict schemas both
+// fully re-validate; this relay only enforces the transport byte cap and
+// never touches the node-local database sockets itself (ADR-0014).
+type DbExecutor struct {
+	op         string
+	brokerPath string
+}
+
+// NewDbExecutor builds one broker-backed database executor.
+func NewDbExecutor(op, brokerPath string) *DbExecutor {
+	return &DbExecutor{op: op, brokerPath: brokerPath}
+}
+
+// Info describes the capability; availability refined by ProbeAvailable.
+func (d *DbExecutor) Info() *agentv1.Capability {
+	return &agentv1.Capability{
+		CapabilityId:   d.op,
+		Version:        "1.0.0",
+		Available:      false,
+		AdapterId:      "db-broker",
+		AdapterVersion: Version,
+	}
+}
+
+// ProbeAvailable: broker ayakta mı (istemci varlığı yürütme anında tipli
+// hata verir — tahmin yok).
+func (d *DbExecutor) ProbeAvailable(ctx context.Context) (bool, string) {
+	cli := broker.NewClient(d.brokerPath)
+	probeCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	return cli.Ping(probeCtx)
+}
+
+// Execute relays the payload (byte-capped) to the broker.
+func (d *DbExecutor) Execute(ctx context.Context, payload []byte) ([]byte, string, error) {
+	if len(payload) > dbops.MaxPayloadBytes {
+		return nil, "", fmt.Errorf("payload %d bayt > %d sınırı", len(payload), dbops.MaxPayloadBytes)
+	}
+	req := &broker.Request{Operation: d.op, Params: payload}
+	res, err := broker.NewClient(d.brokerPath).Call(ctx, req)
+	if err != nil {
+		return nil, "", fmt.Errorf("broker erişilemiyor: %w", err)
+	}
+	switch res.Status {
+	case broker.StatusSucceeded:
+		return res.Result, "broker işlemi tamamlandı", nil
+	case broker.StatusRejected:
+		return nil, res.Output, fmt.Errorf("broker reddetti: %s", res.ErrorCategory)
+	default:
+		return nil, res.Output, fmt.Errorf("broker işlemi başarısız: %s", res.ErrorCategory)
+	}
+}
+
+// FsExecutor relays one fs.* operation (Faz 10 scoped file manager) to the
+// privileged broker. The relay adds NO path logic — scoping/validation is
+// enforced by the control plane validator AND the broker; the byte cap
+// keeps the transport honest (fs.upload ≤ 768 KiB, ADR-0014).
+type FsExecutor struct {
+	op         string
+	brokerPath string
+}
+
+// NewFsExecutor builds one broker-backed file-manager executor.
+func NewFsExecutor(op, brokerPath string) *FsExecutor {
+	return &FsExecutor{op: op, brokerPath: brokerPath}
+}
+
+// Info describes the capability; availability refined by ProbeAvailable.
+func (f *FsExecutor) Info() *agentv1.Capability {
+	return &agentv1.Capability{
+		CapabilityId:   f.op,
+		Version:        "1.0.0",
+		Available:      false,
+		AdapterId:      "fs-broker",
+		AdapterVersion: Version,
+	}
+}
+
+// ProbeAvailable: broker ayakta mı.
+func (f *FsExecutor) ProbeAvailable(ctx context.Context) (bool, string) {
+	cli := broker.NewClient(f.brokerPath)
+	probeCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	return cli.Ping(probeCtx)
+}
+
+// Execute relays the payload (byte-capped) to the broker.
+func (f *FsExecutor) Execute(ctx context.Context, payload []byte) ([]byte, string, error) {
+	capBytes := fsops.MaxPayloadBytes
+	if f.op != broker.OpFSUpload {
+		capBytes = 4 << 10
+	}
+	if len(payload) > capBytes {
+		return nil, "", fmt.Errorf("payload %d bayt > %d sınırı", len(payload), capBytes)
+	}
+	req := &broker.Request{Operation: f.op, Params: payload}
+	res, err := broker.NewClient(f.brokerPath).Call(ctx, req)
+	if err != nil {
+		return nil, "", fmt.Errorf("broker erişilemiyor: %w", err)
+	}
+	switch res.Status {
+	case broker.StatusSucceeded:
+		return res.Result, "broker işlemi tamamlandı", nil
+	case broker.StatusRejected:
+		return nil, res.Output, fmt.Errorf("broker reddetti: %s", res.ErrorCategory)
+	default:
+		return nil, res.Output, fmt.Errorf("broker işlemi başarısız: %s", res.ErrorCategory)
+	}
 }

@@ -8,6 +8,7 @@ import (
 	"net/http"
 
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/certmgmt"
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/dbcred"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/dns"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/enroll"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/identity"
@@ -54,6 +55,7 @@ type Options struct {
 	Enroll    EnrollmentManager
 	DNS       *dns.Service    // Faz 09: sağlayıcı kayıt CRUD (kimlik bilgileri yaz-amaçlı)
 	Certs     *certmgmt.Store // Faz 09: sertifika durum okuma
+	DBCreds   *dbcred.Service // Faz 10: DB kullanıcı şifreleri (tek-seferlik reveal)
 }
 
 // api holds handler dependencies.
@@ -71,6 +73,7 @@ type api struct {
 	auditList AuditLister
 	dns       *dns.Service
 	certs     *certmgmt.Store
+	dbcreds   *dbcred.Service
 }
 
 // New assembles the HTTP handler with the full middleware chain.
@@ -99,6 +102,9 @@ func New(opts Options) http.Handler {
 		audit:     opts.Audit,
 		auditList: opts.AuditList,
 		enroll:    opts.Enroll,
+		dns:       opts.DNS,
+		certs:     opts.Certs,
+		dbcreds:   opts.DBCreds,
 	}
 
 	r := chi.NewRouter()
@@ -171,6 +177,23 @@ func New(opts Options) http.Handler {
 			r.With(a.requirePermission(rbac.PermAuditRead)).Get("/audit", a.handleListAudit)
 			r.With(a.requirePermission(rbac.PermUsersRead)).Get("/users", a.handleListUsers)
 			r.With(a.requirePermission(rbac.PermNodesRead)).Get("/overview", a.handleOverview)
+
+			// Faz 09 DÜZELTME (Faz 10'da saptandı): route'lar Faz 09
+			// implementasyonunda server.go'ya hiç kaydedilmemişti
+			// (yalnız import + alanlar eklenmişti) — gerçek backend'de
+			// /dns-providers ve /certificates 404 döndürüyordu; e2e
+			// bu uçları gerçek modda skip ettiği için CI yakalamamıştı.
+			// Rotalar + constructor alan atamaları burada tamamlanır
+			// ve server_test.go regresyonla güvenceye alınır.
+			r.With(a.requirePermission(rbac.PermDNSRead)).Get("/dns-providers", a.handleListDNSProviders)
+			r.With(a.requirePermission(rbac.PermDNSControl)).With(a.requireCSRF).Post("/dns-providers", a.handleCreateDNSProvider)
+			r.With(a.requirePermission(rbac.PermDNSControl)).With(a.requireCSRF).Delete("/dns-providers/{providerID}", a.handleDeleteDNSProvider)
+			r.With(a.requirePermission(rbac.PermCertRead)).Get("/certificates", a.handleListCertificates)
+			r.With(a.requirePermission(rbac.PermCertRead)).Get("/certificates/{certID}", a.handleGetCertificate)
+
+			// Faz 10: DB kullanıcı şifreleri (tek-seferlik reveal).
+			r.With(a.requirePermission(rbac.PermDBRead)).Get("/nodes/{nodeID}/db-credentials", a.handleListDBCredentials)
+			r.With(a.requirePermission(rbac.PermDBCtrl)).With(a.requireCSRF).Post("/db-credentials/{credID}/reveal", a.handleRevealDBCredential)
 		})
 	})
 

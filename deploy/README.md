@@ -46,6 +46,17 @@ TLS: anahtar üretimi, sertifika sahneleme, nginx reload) yalnız opt-in ile yap
 
 ```bash
 server-privd --web-enable ...   # VARSAYILAN KAPALI — her iki aile için tek kapı
+
+### Faz 10: veritabanı ve dosya yöneticisi kapıları
+
+```
+server-privd --db-enable   # VARSAYILAN KAPALI — node-local PostgreSQL/MariaDB-MySQL yönetimi
+server-privd --fs-enable   # VARSAYILAN KAPALI — scoped dosya yöneticisi (yalnız site docroot'ları)
+```
+
+- db ailesi yalnız node-local unix soketlerine dokunur; panelin kendi PostgreSQL'i yapısal olarak erişilemez (ADR-0014). Korumalı adlar (sistem + panel DB'leri) tipli red ile korunur.
+- DB kullanıcı şifresi node'da üretilir, control-plane'de AES-256-GCM seal edilir ve TEK SEFERLİK reveal edilir — `CP_SECRETS_KEY` ayarlı OLMALI (ayarsızsa şifre kalıcı saklanmaz ve dürüstçe redakte edilir).
+- Dosya yöneticisi kökleri yalnız web hosting site docroot'larıdır (`/var/www/server-control/<site>/html`); upload/indirme 512 KiB ile sınırlıdır.
 ```
 
 Kapalıyken ilgili operasyonlar tipli `unsupported_operation` döndürür (sessiz

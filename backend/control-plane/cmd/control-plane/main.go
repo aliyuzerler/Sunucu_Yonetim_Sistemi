@@ -24,6 +24,7 @@ import (
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/certs"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/config"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/db"
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/dbcred"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/dns"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/enroll"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/httpapi"
@@ -327,6 +328,11 @@ func run() error {
 		opts.Enroll = enrollSvc
 		opts.DNS = dnsSvc
 		opts.Certs = certStore
+		// Faz 10: DB kullanıcı şifreleri — şifre seal edilip tek-seferlik
+		// reveal yüzeyine ayrıştırılır (CP_SECRETS_KEY yoksa da kurulur:
+		// redaksiyon daima kazanır, sadece reveal imkânsızlaşır).
+		dbCredSvc := &dbcred.Service{Store: dbcred.NewStore(p), Key: secretsKey, KeyConfigured: cfg.SecretsKey != ""}
+		opts.DBCreds = dbCredSvc
 
 		// Agent gRPC sunucusu: yalnızca CA yapılandırıldığında başlar.
 		if ca != nil {
@@ -344,14 +350,15 @@ func run() error {
 				MinVersion:   tls.VersionTLS12,
 			}
 			agentServer := agentsrv.New(agentsrv.Services{
-				CA:        ca,
-				Enroll:    enrollSvc,
-				Inventory: inventorySvc,
-				Tasks:     tasksSvc,
-				TaskStore: taskStore,
-				Telemetry: telemetrySvc,
-				Audit:     auditRec,
-				Logger:    logger,
+				CA:             ca,
+				Enroll:         enrollSvc,
+				Inventory:      inventorySvc,
+				Tasks:          tasksSvc,
+				TaskStore:      taskStore,
+				Telemetry:      telemetrySvc,
+				Audit:          auditRec,
+				Logger:         logger,
+				ResultScrubber: dbCredSvc, // Faz 10: persist öncesi şifre seal+ayrıştırma
 			}, logger)
 			grpcSrv := grpc.NewServer(grpc.Creds(credentials.NewTLS(tlsCfg)))
 			agentServer.RegisterGRPC(grpcSrv)

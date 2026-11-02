@@ -10,7 +10,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/dbops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/dockerx"
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/fsops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/fwops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/pkgops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/svcops"
@@ -83,6 +85,20 @@ func (s *Server) execute(req *Request, call validatedCall) *Response {
 		res.Status = StatusRejected
 		res.ErrorCategory = CatUnsupportedOp
 		res.Output = "web hosting ailesi kapalı (--web-enable)"
+		return res
+	}
+	// Faz 10: db/fs aileleri kendi opt-in kapılarında (VARSAYILAN KAPALI —
+	// ADR-0014). Kapalıyken dürüst unsupported; sessiz kalabalık yok.
+	if isDbOp(req.Operation) && s.cfg.DB == nil {
+		res.Status = StatusRejected
+		res.ErrorCategory = CatUnsupportedOp
+		res.Output = "veritabanı ailesi kapalı (--db-enable)"
+		return res
+	}
+	if isFsOp(req.Operation) && s.cfg.Fs == nil {
+		res.Status = StatusRejected
+		res.ErrorCategory = CatUnsupportedOp
+		res.Output = "dosya yöneticisi ailesi kapalı (--fs-enable)"
 		return res
 	}
 	select {
@@ -236,6 +252,88 @@ func (s *Server) execute(req *Request, call validatedCall) *Response {
 		var sts []tlsops.CertStatus
 		sts, err = s.cfg.TLS.Status(ctx)
 		result = map[string]any{"certificates": sts}
+	// ---- Faz 10: veritabanı ailesi ----
+	case OpDBInstanceList:
+		var rows []dbops.Instance
+		rows, err = s.cfg.DB.InstancesList(ctx)
+		result = map[string]any{"instances": rows}
+	case OpDBDatabaseList:
+		var rows []dbops.DatabaseInfo
+		rows, err = s.cfg.DB.DatabasesList(ctx, call.db.kind, call.db.limit)
+		result = map[string]any{"databases": rows}
+	case OpDBDatabaseCreate:
+		var cr map[string]any
+		cr, err = s.cfg.DB.DatabaseCreate(ctx, call.db.kind, call.db.database, call.db.owner)
+		result = cr
+	case OpDBDatabaseDelete:
+		var dr map[string]any
+		dr, err = s.cfg.DB.DatabaseDelete(ctx, call.db.kind, call.db.database)
+		result = dr
+	case OpDBUserList:
+		var rows []dbops.UserInfo
+		rows, err = s.cfg.DB.UsersList(ctx, call.db.kind, call.db.limit)
+		result = map[string]any{"users": rows}
+	case OpDBUserCreate:
+		var uc dbops.UserCreateResult
+		uc, err = s.cfg.DB.UserCreate(ctx, call.db.kind, call.db.user, call.db.host)
+		result = map[string]any{"kind": uc.Kind, "user": uc.User, "credentials": uc.Credentials}
+	case OpDBUserDelete:
+		var ur map[string]any
+		ur, err = s.cfg.DB.UserDelete(ctx, call.db.kind, call.db.user, call.db.host)
+		result = ur
+	case OpDBGrantSet:
+		var gr map[string]any
+		gr, err = s.cfg.DB.GrantSet(ctx, call.db.kind, call.db.user, call.db.host, call.db.database, call.db.level)
+		result = gr
+	case OpDBBackup:
+		var br map[string]any
+		br, err = s.cfg.DB.Backup(ctx, call.db.kind, call.db.database)
+		result = br
+	case OpDBBackupList:
+		var rows []dbops.BackupInfo
+		rows, err = s.cfg.DB.BackupsList(ctx, call.db.kind, call.db.limit)
+		result = map[string]any{"backups": rows}
+	case OpDBRestore:
+		var rr map[string]any
+		rr, err = s.cfg.DB.Restore(ctx, call.db.kind, call.db.database, call.db.backup)
+		result = rr
+
+	// ---- Faz 10: scoped dosya yöneticisi ----
+	case OpFSList:
+		var lr fsops.ListResult
+		lr, err = s.cfg.Fs.List(ctx, call.fs.root, call.fs.path, call.fs.limit)
+		result = map[string]any{"listing": lr}
+	case OpFSDownload:
+		var dl fsops.DownloadResult
+		dl, err = s.cfg.Fs.Download(ctx, call.fs.root, call.fs.path)
+		result = map[string]any{"file": dl}
+	case OpFSUpload:
+		mode := uint32(0)
+		if call.fs.mode != "" {
+			m, merr := fsops.ParseMode(call.fs.mode)
+			if merr != nil {
+				err = merr
+				break
+			}
+			mode = m
+		}
+		var up fsops.UploadResult
+		up, err = s.cfg.Fs.Upload(ctx, call.fs.root, call.fs.path, call.fs.content, mode, call.fs.overwrite)
+		result = map[string]any{"result": up}
+	case OpFSChmod:
+		var cm fsops.ChmodResult
+		mode, merr := fsops.ParseMode(call.fs.mode)
+		if merr != nil {
+			err = merr
+			break
+		}
+		cm, err = s.cfg.Fs.Chmod(ctx, call.fs.root, call.fs.path, mode)
+		result = map[string]any{"result": cm}
+	case OpFSChown:
+		var cw fsops.ChownResult
+		cw, err = s.cfg.Fs.Chown(ctx, call.fs.root, call.fs.path)
+		result = map[string]any{"result": cw}
+
 	case OpServiceList:
 		var units []svcops.UnitInfo
 		units, err = sysd.List(ctx)
@@ -296,9 +394,29 @@ func (s *Server) execute(req *Request, call validatedCall) *Response {
 		case errors.Is(err, webops.ErrPHPUnsupported), errors.Is(err, webops.ErrPHPNotInstalled):
 			res.Status = StatusRejected
 			res.ErrorCategory = CatUnsupportedOp
-		case errors.Is(err, webops.ErrUnavailable):
+		case errors.Is(err, webops.ErrUnavailable),
+			errors.Is(err, dbops.ErrUnavailable),
+			errors.Is(err, fsops.ErrUnavailable):
 			res.Status = StatusRejected
 			res.ErrorCategory = CatUnsupportedOp
+		case errors.Is(err, dbops.ErrInvalidKind), errors.Is(err, dbops.ErrInvalidName),
+			errors.Is(err, dbops.ErrInvalidHost), errors.Is(err, dbops.ErrInvalidLevel),
+			errors.Is(err, dbops.ErrInvalidBackup), errors.Is(err, dbops.ErrNotFound),
+			errors.Is(err, dbops.ErrLimit),
+			errors.Is(err, fsops.ErrInvalidRoot), errors.Is(err, fsops.ErrInvalidPath),
+			errors.Is(err, fsops.ErrNotFound), errors.Is(err, fsops.ErrTooManyEntries),
+			errors.Is(err, fsops.ErrExists), errors.Is(err, fsops.ErrForbiddenExt),
+			errors.Is(err, fsops.ErrForbiddenMime), errors.Is(err, fsops.ErrInvalidMode),
+			errors.Is(err, fsops.ErrNoSiteUser), errors.Is(err, fsops.ErrInvalidPayload),
+			errors.Is(err, fsops.ErrSymlink), errors.Is(err, fsops.ErrScope),
+			errors.Is(err, fsops.ErrTooLarge):
+			res.Status = StatusRejected
+			res.ErrorCategory = CatInvalidParams
+		case errors.Is(err, dbops.ErrProtected), errors.Is(err, dbops.ErrNoSpace),
+			errors.Is(err, dbops.ErrConflict), errors.Is(err, dbops.ErrForeignBackup),
+			errors.Is(err, fsops.ErrNotSiteRoot):
+			res.Status = StatusFailed
+			res.ErrorCategory = CatExecutorFailed
 		default:
 			res.Status = StatusFailed
 			res.ErrorCategory = CatExecutorFailed
@@ -326,6 +444,26 @@ func isWebOp(op string) bool {
 		OpWebSiteDisable, OpWebSiteDelete, OpWebPHPList,
 		// Faz 09: TLS sertifika ailesi aynı opt-in kapısında (ADR-0013).
 		OpWebCertRequest, OpWebCertInstall, OpWebCertStatus:
+		return true
+	}
+	return false
+}
+
+// isDbOp reports whether an operation belongs to the Faz 10 database family.
+func isDbOp(op string) bool {
+	switch op {
+	case OpDBInstanceList, OpDBDatabaseList, OpDBDatabaseCreate, OpDBDatabaseDelete,
+		OpDBUserList, OpDBUserCreate, OpDBUserDelete, OpDBGrantSet,
+		OpDBBackup, OpDBBackupList, OpDBRestore:
+		return true
+	}
+	return false
+}
+
+// isFsOp reports whether an operation belongs to the Faz 10 file-manager family.
+func isFsOp(op string) bool {
+	switch op {
+	case OpFSList, OpFSDownload, OpFSUpload, OpFSChmod, OpFSChown:
 		return true
 	}
 	return false

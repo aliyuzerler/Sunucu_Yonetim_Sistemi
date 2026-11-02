@@ -59,6 +59,8 @@ var platformFlags struct {
 	sddl         string // windows only
 	dockerSocket string // unix only (Faz 07)
 	webEnable    bool   // unix only (Faz 08): web hosting ailesi opt-in
+	dbEnable     bool   // unix only (Faz 10): veritabanı ailesi opt-in
+	fsEnable     bool   // unix only (Faz 10): scoped dosya yöneticisi opt-in
 }
 
 func auditSinkOrDie(logger *slog.Logger, path string) (*broker.JSONLSink, error) {

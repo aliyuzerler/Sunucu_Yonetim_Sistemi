@@ -462,11 +462,22 @@ func (r *Runner) nologinShell() string {
 	return DefaultNologin
 }
 
+// DocRoot derives the site document root from the site name ONLY (Faz 10:
+// the file manager roots are these docroots; the path is never accepted
+// from a payload — ADR-0014). Single source of truth shared by webops
+// (ensureDocRoot) and fsops.
+func DocRoot(webRoot, name string) string {
+	if webRoot == "" {
+		webRoot = DefaultWebRoot
+	}
+	return filepath.Join(webRoot, name, "html")
+}
+
 // ensureDocRoot creates the document root with site-user ownership and
 // web-server group read+traverse (0750, no world access).
 func (r *Runner) ensureDocRoot(name string) (string, error) {
 	_, webRoot, _ := r.paths()
-	root := filepath.Join(webRoot, name, "html")
+	root := DocRoot(webRoot, name)
 	if err := os.MkdirAll(root, 0o750); err != nil {
 		return "", err
 	}

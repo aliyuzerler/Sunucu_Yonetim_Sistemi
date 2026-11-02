@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { apiFetch, isApiError } from "../api/client";
+import { DbFsPanel } from "../components/DbFsPanel";
 import type {
   CapabilityRecord,
   MetricsSnapshot,
@@ -466,6 +467,10 @@ export function NodeDetail({ node, onBack }: { node: NodeRecord; onBack: () => v
 
   // Faz 08: web hosting capability tespiti.
   const isWeb = capabilities.some((c) => c.capability_id.startsWith("web.site."));
+
+  // Faz 10: veritabanı + scoped dosya yöneticisi capability tespiti.
+  const isDb = capabilities.some((c) => c.capability_id.startsWith("db."));
+  const isFs = capabilities.some((c) => c.capability_id.startsWith("fs."));
 
   async function submitTask(op: string, payload: Record<string, unknown>): Promise<TaskRecord | null> {
     try {
@@ -1754,6 +1759,23 @@ export function NodeDetail({ node, onBack }: { node: NodeRecord; onBack: () => v
             </p>
           )}
         </section>
+      )}
+
+      {/* Faz 10: Veritabanları + scoped dosya yöneticisi (yalnız db./fs.*
+          capability'li node'lar). Şifre node'da üretilir, CP'de seal edilir
+          ve TEK SEFERLİK reveal edilir (ADR-0014); dosya kökleri yalnız
+          site docroot'larıdır. */}
+      {(isDb || isFs) && (
+        <DbFsPanel
+          nodeId={node.id}
+          isDb={isDb}
+          isFs={isFs}
+          submitTask={async (op, payload) => {
+            const created = await submitTask(op, payload);
+            return created as unknown as { id: string; status: string; result?: unknown; error_category?: string } | null;
+          }}
+          t={(k) => t(k as Parameters<typeof t>[0])}
+        />
       )}
     </div>
   );

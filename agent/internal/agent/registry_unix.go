@@ -57,5 +57,25 @@ func DefaultRegistry(brokerPath, dockerSocket string) (*ExecutorRegistry, error)
 		NewWebExecutor(broker.OpWebCertRequest, brokerPath),
 		NewWebExecutor(broker.OpWebCertInstall, brokerPath),
 		NewWebExecutor(broker.OpWebCertStatus, brokerPath),
+		// Faz 10: veritabanı ailesi (11 op — gerçek yürütme yalnız
+		// broker'da --db-enable ile; ADR-0014).
+		NewDbExecutor(broker.OpDBInstanceList, brokerPath),
+		NewDbExecutor(broker.OpDBDatabaseList, brokerPath),
+		NewDbExecutor(broker.OpDBDatabaseCreate, brokerPath),
+		NewDbExecutor(broker.OpDBDatabaseDelete, brokerPath),
+		NewDbExecutor(broker.OpDBUserList, brokerPath),
+		NewDbExecutor(broker.OpDBUserCreate, brokerPath),
+		NewDbExecutor(broker.OpDBUserDelete, brokerPath),
+		NewDbExecutor(broker.OpDBGrantSet, brokerPath),
+		NewDbExecutor(broker.OpDBBackup, brokerPath),
+		NewDbExecutor(broker.OpDBBackupList, brokerPath),
+		NewDbExecutor(broker.OpDBRestore, brokerPath),
+		// Faz 10: scoped dosya yöneticisi (5 op — gerçek yürütme yalnız
+		// broker'da --fs-enable ile; ADR-0014).
+		NewFsExecutor(broker.OpFSList, brokerPath),
+		NewFsExecutor(broker.OpFSDownload, brokerPath),
+		NewFsExecutor(broker.OpFSUpload, brokerPath),
+		NewFsExecutor(broker.OpFSChmod, brokerPath),
+		NewFsExecutor(broker.OpFSChown, brokerPath),
 	)
 }
