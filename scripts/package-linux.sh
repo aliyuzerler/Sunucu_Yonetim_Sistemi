@@ -95,9 +95,13 @@ if command -v rpmbuild >/dev/null 2>&1; then
   mkdir -p "$RPMTOP/BUILD" "$RPMTOP/RPMS" "$RPMTOP/SOURCES" "$RPMTOP/SPECS" "$RPMTOP/SRPMS"
   install -m 0755 "$STAGE/server-agent" "$RPMTOP/BUILD/server-agent"
   install -m 0755 "$STAGE/server-privd" "$RPMTOP/BUILD/server-privd"
+  # NOT: sürümdeki '-' rpm'de '~' olur; tilde-expansion'a karşı sed ile
+  # ön-hesaplanır (CI-51 dersi: heredoc içi ${var/-/~} ~'yu $HOME'a açar).
+  local RPM_VERSION
+  RPM_VERSION="$(printf '%s' "$VERSION" | sed 's/-/~/')"
   cat > "$RPMTOP/SPECS/server-control-agent.spec" <<EOF
 Name:           server-control-agent
-Version:        ${VERSION/-/~}
+Version:        ${RPM_VERSION}
 Release:        1%{?dist}
 Summary:        Server Control agent (server-agent + privileged broker)
 License:        Proprietary
