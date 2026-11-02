@@ -100,7 +100,7 @@
 | `cd web && npm run build` | temiz |
 | `cd web && npx playwright test` | 34/34 (4 yeni vm.spec) |
 | `bash scripts/secret-scan.sh` | temiz ✓ |
-| CI `agent-vm`: `EXPECTED_VM=1 TestRealVMLifecycle + TestRealVMForeignVolumeRefusal` | **NOT RUN (sandbox)** — CI'da zorunlu; gate sessiz atlanamaz (CI-17 dersi: ortam eksikse job BAŞARISIZ) |
+| CI `agent-vm`: `EXPECTED_VM=1 TestRealVMLifecycle + TestRealVMForeignVolumeRefusal` | **PASS — run 41465331984 (commit 26879b9 = tag v0.13.0), CI 15/15 yeşil**: gerçek libvirt 10.0 + QEMU 8.2.2 + KVM ile pool→create(kvm)→disk.add→gerçek qemu-img format doğrulaması→snapshot create/revert→start running→force stop→clone→delete (yönetilen birim silimi diskten doğrulanır) + gerçek yabancı-birim reddi |
 | Gerçek KVM/VM diski üzerinde test | **BLOCKED/YAPILMADI** — tasarım gereği; disposable runner yalnız CI'da |
 
 ## Bulunan hatalar ve düzeltmeler (bu bağımsız koşuda)
@@ -159,6 +159,17 @@
 - Secret: vm payload'ında parola/gizli değer yok (reddilecek bir şey de
   yok — scrubber'a taşınacak materyal üretilmiyor); staged XML dosyaları
   0600 + staging dizini 0750.
+
+## CI gerçek-koşu bulguları (run 41465331984 yeşil — yedi koşuluk seri, her biri gerçek kanıt değeri)
+
+- **CI-42 (define başarısız — kök neden görünmez):** libvirt domain parser'ı `os/type` İÇERİĞİNİ zorunlu kılar ("domain os type unspecified") — `renderDomain` + clone XML + fixture `<type arch='x86_64' machine='pc'>hvm</type>` olarak düzeltildi. Ayrıca runArgv artık stderr kuyruğunu (tek satır, 200 karakter) hataya ekliyor — CI-37 tanı dersi bu adaptöre de uygulandı.
+- **CI-43 (start "Permission denied" — /tmp):** libvirt'in AppArmor `libvirt-qemu` abstraction'ı qemu sürecine dünya-yazılabilir dizinleri (/tmp, /var/tmp, /dev/shm) yasaklar; disposable pool /var/lib/libvirt/ altına taşındı (yalnız test altyapısı).
+- **CI-44 (start hâlâ denied — /var/lib/libvirt + manuel chown sonrası):** DAC değil MAC katmanı; chownQemuTree helper'ı (libvirt-qemu/qemu lookup'lı DAC-relabel aynası) yine de eklendi — distro farklarına dayanıklı test altyapısı.
+- **CI-45 (çözüm — dürüst açıklandırma):** disposable runner'da `qemu.conf`: user/group=root + security_driver=none + libvirtd restart. Yaşam döngüsü kanıtı gerçek libvirt+qemu+KVM ile kalır; ÜRÜNÜN kendi güvenlik yüzeyleri (yol yokluğu, sc- kapısı, allowlist'ler, tipli redler) broker/runner kodundadır ve red testleriyle ayrıca kanıtlanır. Üretimde bu ayar YAPILMAZ (job yorumunda belirtildi).
+- **CI-46 (GERÇEK ÜRÜN BULGUSU, düzeltildi):** libvirt, snapshot'ı olan inaktif domain'in undefine'ını tipli reddeder ("cannot delete inactive domain with N snapshots") — `vm.delete` artık undefine ÖNCESİ iç snapshot'ları siler (snapshot silme reddi tipli ErrConflict, durum kurtarılabilir); `TestDeleteRemovesSnapshotsBeforeUndefine` + virtualization.md tablosu güncellendi.
+- **CI-47 (GERÇEK ÜRÜN BULGUSU, düzeltildi):** `vm.clone` disk kopyasını qemu-img ile doğrudan havuz hedefine yazıyordu — libvirt birimi envanterine almıyor, clone'un sonradan silmesi `vol-path` çözümlenemediği için yabancı-disk redine takılıyordu. Düzeltme: convert sonrası `virsh pool-refresh --pool <anchor>` ZORUNLU (başarısızsa tipli ErrConflict + oluşturulan birimler rollback).
+- **CI-48 (test beklentisi):** tam klon kaynak VM'in TÜM disklerini kopyalar (vda+vdb) — delete iki yönetilen birim kaldırır; assertion düzeltildi (ürün davranışı doğrusu buydu).
+- Runner'da /dev/kvm MEVCUTTU (nested virt): `accelerator=kvm` — kanıt gerçek KVM hızlandırmasıyla üretildi.
 
 ## Karar
 
