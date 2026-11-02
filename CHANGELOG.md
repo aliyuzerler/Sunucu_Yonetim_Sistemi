@@ -16,6 +16,10 @@
 - **CI:** yeni `agent-backup` job — runner'da GERÇEK restic ile tam lifecycle (repo init idempotent → backup → snapshot list → verify --read-data-subset → İZOLE dizine restore + geri yüklenen dosya İÇERİK kanıtı); EXPECTED_BACKUP=1 sessiz atlanamaz; 16 job.
 - **Dokümanlar:** ADR-0018 + `docs/architecture/backup.md` (biçim, doğrulama sözleşmesi, tatbikat prosedürü, dürüst sınırlar) + `docs/architecture/cloud.md` (matris, mühelleme, onay kapısı) + deploy README (`--backup-enable`/`--backup-source`, repo/parola yerleşimi, `CP_BACKUP_DIR`) + .env.example + dependency-registry + ADR index.
 
+### Fixed (bağımsız test koşusunda)
+- **IT-01 (ORTA, yalnız test):** `TestRealResticLifecycle` geri yüklenen dosyayı `<target>/citest-source/etc-backup.txt` bekliyordu; restic'in GERÇEK davranışı (0.18.0 ile elle doğrulandı) snapshot'taki mutlak yolu hedef altında yeniden oluşturmaktır (`<target>/tmp/.../citest-source/...`). Beklenti restic düzenine göre yazıldı (`realhost_test.go` — `TrimPrefix(src, "/")`); ürün kodu etkilenmedi. Commit CI'dan geçmeden yakalandı — ilk push'ta `agent-backup` job'ını kırmızı yapacaktı (CI-48 ile aynı sınıf).
+- **Bağımsız test ortamı:** sandbox'a CI service container karşılığı kuruldu (PostgreSQL 16.1 portable + `server_control_test` DB + restic 0.18.0 resmi ikilisi) — CP entegrasyon testleri ilk kez YERELDE gerçek PostgreSQL üzerinde koştu: backend **20/20 paket -race**, agent **18/18 paket -race** (gerçek restic lifecycle dahil), vitest 50/50, Playwright 43/43, secret-scan temiz; `proto/`+`gen/` diff'siz. Rapor: `docs/reviews/phase-14-test-report.md` (5/5 kriter PASS — ACCEPTED/READY).
+
 ## [0.14.0] — 2026-11-03 — Faz 13: İzleme, log, alarm ve güvenlik merkezi
 
 ### Added

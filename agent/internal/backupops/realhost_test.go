@@ -126,7 +126,12 @@ func TestRealResticLifecycle(t *testing.T) {
 	if !strings.HasPrefix(tgt, root+string(filepath.Separator)) {
 		t.Fatalf("restore hedefi izole kök dışında: %s", rr.Target)
 	}
-	data, derr := os.ReadFile(filepath.Join(rr.Target, "citest-source", "etc-backup.txt"))
+	// restic restore, snapshot'taki mutlak yolu hedef altında yeniden
+	// oluşturur (baştaki '/' atılır): <target>/tmp/<TempDir>/citest-source/...
+	// Beklenti restic'in GERÇEK düzenine göre yazılır (bağımsız test
+	// bulgusu: elle doğrulanmış restic 0.18 davranışı).
+	rel := strings.TrimPrefix(src, string(filepath.Separator))
+	data, derr := os.ReadFile(filepath.Join(rr.Target, rel, "etc-backup.txt"))
 	if derr != nil {
 		t.Fatalf("geri yüklenen dosya: %v", derr)
 	}
