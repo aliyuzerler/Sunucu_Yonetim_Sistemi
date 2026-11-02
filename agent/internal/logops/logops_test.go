@@ -137,6 +137,11 @@ func TestSearchContainsFilterAfterRedaction(t *testing.T) {
 }
 
 func TestSearchPermissionDenied(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		// #!/bin/sh fake ikili windows runner'da calistirilamaz (journald yalniz
+		// Linux; windows yuzeyi windows.eventlog.read — Faz 05). Dürüst skip.
+		t.Skip("journald yalniz Linux; windows runner'da fake journalctl calistirilamaz")
+	}
 	dir := t.TempDir()
 	bin := filepath.Join(dir, "journalctl-deny")
 	script := "#!/bin/sh\nprintf 'Hint: Access denied; see journalctl -h' >&2\nexit 1\n"
