@@ -365,6 +365,41 @@ func TestMailboxCreateFullFlow(t *testing.T) {
 	}
 }
 
+// CI-40: MkdirAll ARA dizinleri root olarak yaratır; virtual agent
+// uid 5000 olarak teslim eder — zincir boyunca chown ZORUNLUDUR.
+func TestMailboxCreateChownsWholeChain(t *testing.T) {
+	r, _ := shims(t)
+	ctx := context.Background()
+	if _, err := r.DomainCreate(ctx, "example.com"); err != nil {
+		t.Fatal(err)
+	}
+	var chowned []string
+	base := r.chownFn
+	r.chownFn = func(path string, uid, gid int) error {
+		chowned = append(chowned, path)
+		return base(path, uid, gid)
+	}
+	if _, err := r.MailboxCreate(ctx, "example.com", "user"); err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(r.VMailBase, "example.com") // ARA bileşen
+	if !containsStr(chowned, want) {
+		t.Fatalf("ara dizin chown edilmedi: %v (chowned=%v)", want, chowned)
+	}
+	if !containsStr(chowned, filepath.Join(r.VMailBase)) {
+		t.Fatalf("vmail kökü chown edilmedi: %v", chowned)
+	}
+}
+
+func containsStr(list []string, want string) bool {
+	for _, s := range list {
+		if s == want {
+			return true
+		}
+	}
+	return false
+}
+
 func TestMailboxCreateRequiresManagedDomain(t *testing.T) {
 	r, _ := shims(t)
 	if _, err := r.MailboxCreate(context.Background(), "ghost.example", "user"); err == nil ||

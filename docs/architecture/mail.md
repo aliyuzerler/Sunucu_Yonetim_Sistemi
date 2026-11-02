@@ -79,6 +79,11 @@ Extra alanlar boşlukla ayrılır (Dovecot dokümantasyonu); kota değerindeki
 - DKIM imzalama anahtarı üretimi/kaydı bu fazda yok (UI açıklar).
 - Quota Dovecot userdb üzerinden uygulanır; Postfix `mailbox_size_limit`
   global bir değerdir ve `mail.limits.set` kapalı enum'undadır.
+- Maildir zinciri (`/var/vmail` → domain → localpart → Maildir →
+  cur/new/tmp) TAMAMI vmail (5000:5000) chown edilir: MkdirAll ara
+  dizinleri root yaratır ve virtual agent uid 5000 olarak teslim eder —
+  root-owned ara dizin teslimi sessizce kırar (CI-40; regresyon birim
+  testi zinciri güvenceye alır).
 - Dovecot userdb 0600 root-owned'dır: passwd-file doğrulaması auth-worker
   tarafından root olarak okunur; IMAP oturumu bu fazda test edilmez.
   Postfix tarafı için map dosyaları 0644 + dizin 0755 zorunludur

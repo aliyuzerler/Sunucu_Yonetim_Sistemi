@@ -908,15 +908,34 @@ func (r *Runner) restoreMainCF(backup []byte) error {
 }
 
 // ensureMaildir creates the Maildir hierarchy owned by vmail AFTER all
-// syntax gates passed.
+// syntax gates passed. EVERY component from the vmail base down to the
+// Maildir subdirs is chowned: MkdirAll creates INTERMEDIATE parents
+// root-owned, and the virtual agent delivers as uid/gid 5000 — an un-
+// traversable root-owned parent silently breaks delivery (CI-40).
 func (r *Runner) ensureMaildir(absMaildir string, uid, gid uint32) error {
-	for _, sub := range []string{"", "cur", "new", "tmp"} {
-		p := filepath.Join(absMaildir, sub)
-		if err := os.MkdirAll(p, 0o700); err != nil {
-			return fmt.Errorf("Maildir oluşturulamadı: %w", err)
+	if err := os.MkdirAll(absMaildir, 0o700); err != nil {
+		return fmt.Errorf("Maildir oluşturulamadı: %w", err)
+	}
+	chain := []string{}
+	for p := absMaildir; ; p = filepath.Dir(p) {
+		chain = append([]string{p}, chain...)
+		base := r.vmailBase()
+		if p == base || p == filepath.Dir(base) || p == string(filepath.Separator) {
+			break
 		}
+		if !strings.HasPrefix(p, base+string(filepath.Separator)) {
+			break
+		}
+	}
+	for _, sub := range []string{"cur", "new", "tmp"} {
+		chain = append(chain, filepath.Join(absMaildir, sub))
+		if err := os.MkdirAll(filepath.Join(absMaildir, sub), 0o700); err != nil {
+			return fmt.Errorf("Maildir alt dizini: %w", err)
+		}
+	}
+	for _, p := range chain {
 		if err := r.chownTo(p, uid, gid); err != nil {
-			return fmt.Errorf("Maildir sahibi ayarlanamadı: %w", err)
+			return fmt.Errorf("Maildir sahibi ayarlanamadı (%s): %w", p, err)
 		}
 	}
 	return nil
