@@ -1,3 +1,5 @@
+//go:build unix
+
 package broker
 
 // Faz 10: db/fs aileleri broker testleri — opt-in kapıları (VARSAYILAN

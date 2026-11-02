@@ -19,6 +19,12 @@
 ### Fixed
 - **Faz 09'dan taşın hata (Faz 10'da saptandı):** `/dns-providers` ve `/certificates` REST route'ları Faz 09 implementasyonunda server.go'ya **hiç kaydedilmemişti** (yalnız import + Options/api alanları eklenmişti; constructor ataması da yoktu) — gerçek backend'de 404 döndürüyorlardı. e2e dns-ssl spec'i gerçek modda `test.skip` olduğu için CI yakalamamıştı. Düzeltme: route kayıtları + constructor alan atamaları tamamlandı; **regresyon testi** (`routes_regression_test.go`) rota varlığını auth katmanı üzerinden güvenceye aldı. Rapor: `docs/reviews/phase-10-test-report.md`.
 
+### Fixed (CI gerçek koşusundan — run 41368133074)
+- **CI-28 (gerçek-host kanıtı — restore izin hatası):** PostgreSQL restore'u `runuser -u postgres -- psql -f <path>` ile yapılıyordu; yedek dosyası root'a ait 0700 dizinde (0600) olduğundan postgres OS kullanıcısı dosyayı OKUYAMADI (TestRealDBLifecycle exit 1 — CI'nın varlık sebebi tam buydu). Düzeltme: dosya root tarafından açılır ve STDIN üzerinden psql'e akıtılır; izinler gevşetilmez (yedek 0600 kalır), veri node dışına çıkmaz.
+- **CI-29:** `broker/dbfs_test.go`'da build tag eksikti — GOOS=windows vet `dbops.Instance` undefined (dbops.Instance linux-only). `//go:build unix` eklendi.
+- **CI-30 (flake):** vitest DbFsPanel testinde `db-credentials` kartı async yüklendiği halde `waitFor` olmadan erişiliyordu — 3 koşuda 1 flake. `waitFor` eklendi; 6/6 stabil doğrulandı. Ders (IT-02): async yüklenebilecek HER kart waitFor ile beklenir.
+- gofmt: son düzenlemelerden sonra üç dosya (ops_faz10.go, dbops/runner_linux.go, fsops/realhost_test.go) format dışı kalmıştı — CI gofmt kapısı yakaladı; `gofmt -l` her iki modülde temiz.
+
 ### Security
 - Panelin kendi PostgreSQL'i ile yönetilen müşteri instance'ları **şema düzeyinde** ayrıdır (host/port/DSN alanı yok; yalnız node-local soket).
 - DB şifreleri node'da üretilir, GCM bütünlük kanıtlı seal ile saklanır, **tekrar asla düz metin gösterilmez** (tek-seferlik reveal; audit'li; 2. deneme tipli 409).

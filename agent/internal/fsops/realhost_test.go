@@ -47,7 +47,7 @@ func TestRealFSLifecycle(t *testing.T) {
 		t.Fatalf("chown docroot: %v %s", err, out)
 	}
 	t.Cleanup(func() {
-		_ = exec.Command("sudo", "userdel", user).Run() //nolint:gosec // fixed argv
+		_ = exec.Command("sudo", "userdel", user).Run()                              //nolint:gosec // fixed argv
 		_ = exec.Command("sudo", "rm", "-rf", "/var/www/server-control/"+site).Run() //nolint:gosec // test cleanup
 	})
 

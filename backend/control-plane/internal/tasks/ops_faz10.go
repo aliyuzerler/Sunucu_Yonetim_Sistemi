@@ -30,11 +30,11 @@ import (
 
 // Mirrors of the agent-side bounds (dbops/fsops).
 const (
-	MaxDBNameLen  = 63
-	MaxDBHostLen  = 255
-	MaxDBList     = 500
-	MaxFSList     = 500
-	MaxFSPathLen  = 400
+	MaxDBNameLen = 63
+	MaxDBHostLen = 255
+	MaxDBList    = 500
+	MaxFSList    = 500
+	MaxFSPathLen = 400
 	// MaxFSPayloadBytes: fs.upload gövde tavanı (base64 ≤ 768 KiB; broker
 	// istek satırı tavanı 1 MiB ile hizalı — ADR-0014).
 	MaxFSPayloadBytes = 768 << 10

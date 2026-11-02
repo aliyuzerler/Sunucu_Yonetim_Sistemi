@@ -117,7 +117,11 @@ describe("NodeDetail DB + Dosya yöneticisi bölümü (Faz 10)", () => {
     });
     expect(screen.getByTestId("fs-panel")).toBeInTheDocument();
 
-    // Kimlik kartı: parmak izi görünür, şifre ASLA.
+    // Kimlik kartı: parmak izi görünür, şifre ASLA. (Kart async yüklenir —
+    // IT-02 flake dersi: waitFor'sız erişim yarış koşusudur.)
+    await waitFor(() => {
+      expect(screen.getByTestId("db-credentials")).toBeInTheDocument();
+    });
     const creds = within(screen.getByTestId("db-credentials"));
     expect(creds.getByText("fp12")).toBeInTheDocument();
     expect(screen.queryByTestId("revealed-password")).not.toBeInTheDocument();

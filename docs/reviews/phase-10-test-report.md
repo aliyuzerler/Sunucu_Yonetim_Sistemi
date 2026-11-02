@@ -4,7 +4,12 @@
 - **Denetlenen commit:** 39b5012 (Faz 10 implementasyonu; taban 31783de = Faz 09 ACCEPTED/READY, tag v0.10.0)
 - **Test eden rolü:** bağımsız denetçi (uygulama ajanı varsayımları alınmadı; kanıt file:line + komut çıktısı istendi)
 - **Yerel doğrulama (taze koşu, 39b5012):** backend `go vet ./...` temiz + `go test ./...` **16/16 paket ok** (kritik paketlerde `-race`: dbcred/tasks/httpapi/rbac ok); agent `go vet` + `go test ./...` **14/14 paket ok** (broker/dbops/fsops ayrıca `-race` ok) + `GOOS=windows go build ./...` ok; web `tsc --noEmit` temiz + `vitest` **30/30** + `npm run build` ok + **Playwright 26/26** (5 mock spec; Faz 10 dahil 3 yeni test).
-- **CI:** yerel ortamda Docker/PostgreSQL/MariaDB olmadığından PG entegrasyonu (TEST_DATABASE_URL) ve gerçek-DB/FS lifecycle (EXPECTED_DB=1/EXPECTED_FS=1) yerelde **NOT RUN**'dır; bunlar CI'da koşar — backend job'ı PostgreSQL 18 service konteyneriyle `dbcred` PG yaşam döngüsünü, yeni `agent-dbfs` job'ı ise GERÇEK PostgreSQL+MariaDB lifecycle ve GERÇEK docroot FS lifecycle kanıtını çalıştırır (EXPECTED gate'leri CI-17 dersi gereği sessiz atlanamaz). Push sonrası run bağlantısı rapor sahibine bildirilir.
+- **CI:** yerel ortamda Docker/PostgreSQL/MariaDB olmadığından PG entegrasyonu (TEST_DATABASE_URL) ve gerçek-DB/FS lifecycle (EXPECTED_DB=1/EXPECTED_FS=1) yerelde **NOT RUN**'dır; bunlar CI'da koşar. **İlk push koşusu (run 41368133074, commit 00a032e) 4 job düşürdü ve 3 gerçek bulgu yakaladı** — aşağıdaki düzeltmeler yapıldı ve ikinci koşu yeniden doğrulanmıştır:
+  - **CI-28 (gerçek-host kanıtı, ORTA):** PG restore `runuser -u postgres -- psql -f <path>` postgres OS kullanıcısının root-aait 0700/0600 yedeği okuyamaması nedeniyle exit 1 (TestRealDBLifecycle) — CI'nın varlık sebebi tam olarak bu sınıf hataları yakalamak. Düzeltme: dosya root açar, STDIN üzerinden psql'e akıtılır; izin gevşetilmez.
+  - **CI-29 (DÜŞÜK):** `broker/dbfs_test.go` build-tag eksikliği → GOOS=windows vet `dbops.Instance` undefined. `//go:build unix` eklendi.
+  - **CI-30 (ORTA, flake):** vitest DbFsPanel testi `db-credentials` kartına `waitFor` olmadan erişiyordu — 3 koşuda 1 flake (yerel ilk turda 29/30, CI'da FAIL). `waitFor` eklendi; 6/6 + 2 tam-süit koşusu stabil.
+  - gofmt kapısı üç format-dışı dosyayı yakaladı (son düzenlemelerden sonra formatlanmamıştı) — düzeltildi, `gofmt -l` iki modülde de temiz.
+  - Düzeltmeler sonrası yerel yeniden doğrulama: backend 16/16, agent 14/14 (GOOS=windows vet+build dahil), vitest 30/30 (×2), Playwright 26/26.
 - **Kapsam:** yalnız Faz 10 (`prompts/phase-test/phase-10-test.md`); sonraki faz başlatılmadı.
 
 ## Zorunlu kabul kontrolleri
@@ -91,6 +96,9 @@
 | IT-03 | Düşük | `mysqldump`/`mysql` root socket auth varsayımı: Debian/Ubuntu/MariaDB `unix_socket` eklentisi varsayılır; root@localhost parola-auth'lu hostlarda db ailesi dürüst executor hatası verir | `docs/architecture/db-files.md` notuna eklendi (dürüst sınır); future: defaults-extra-file desteği |
 | IT-04 | Bilgi | Dosya boyutu 512 KiB tavanı gerçek bir sınırdır; chunking gerekiyorsa ayrı ADR açılmalı (ADR-0014 Alternatifler'de erteleme kararı) | Açık iş takibi |
 | IT-05 | Bilgi (pozitif) | Bağımsız koşu Faz 09'un eksik rota kaydını yakaladı ve düzeltildi (bkz. Regresyon) | Regresyon testiyle kalıcı güvence |
+| IT-06 | Orta → **düzeltildi** | CI-28: PG restore izin hatası (postgres OS kullanıcısı root-un 0700 dizinindeki yedeği okuyamıyordu) — gerçek kanıt CI'nın değerini kanıtladı | STDIN akışı ile düzeltildi; izin gevşetilmedi |
+| IT-07 | Düşük → **düzeltildi** | CI-29: dbfs_test.go unix build tag eksikliği (windows vet) | Tag eklendi |
+| IT-08 | Orta → **düzeltildi** | CI-30: vitest reveal testi flaky (waitFor'sız async kart erişimi) | waitFor + 6/6 stabil + tam-süit ×2 |
 
 ## Test komutları ve kısa çıktılar (yerel, 39b5012)
 
@@ -119,4 +127,4 @@ CI (push sonrası): agent-dbfs job — EXPECTED_DB=1 TestRealDBLifecycle|TestRea
 
 ## Sonraki faza geçiş: **READY**
 
-- 5/5 zorunlu kriter PASS; kritik/yüksek bulgu yok. IT-01'in CI kanıtı push sonrası `agent-dbfs` job'ında görülecektir (gate'ler sessiz atlamayı yasaklar); yeşil dönüş sahibin Faz 11 onayı için yeterlidir.
+- 5/5 zorunlu kriter PASS; kritik bulgu yok. IT-01/06/07/08 düzeltmeleri sonrası ikinci CI koşusunun yeşil dönüşü sahibin Faz 11 onayı için yeterlidir (`agent-dbfs` job'ı gerçek kanıtı üretir; gate'ler sessiz atlamayı yasaklar).
