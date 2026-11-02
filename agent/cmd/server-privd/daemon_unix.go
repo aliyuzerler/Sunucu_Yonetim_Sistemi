@@ -16,6 +16,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/backupops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/broker"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/dbops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/dockerx"
@@ -48,6 +49,8 @@ func registerPlatformFlags() {
 	flag.BoolVar(&platformFlags.fsEnable, "fs-enable", false, "Faz 10 scoped dosya yöneticisini etkinleştir (yalnız site docroot'ları; VARSAYILAN KAPALI)")
 	flag.BoolVar(&platformFlags.mailEnable, "mail-enable", false, "Faz 11 e-posta ailesini etkinleştir (Postfix/Dovecot/Rspamd yönetimi; VARSAYILAN KAPALI)")
 	flag.BoolVar(&platformFlags.vmEnable, "vm-enable", false, "Faz 12 sanallaştırma ailesini etkinleştir (KVM/QEMU/libvirt VM yönetimi; VARSAYILAN KAPALI)")
+	flag.BoolVar(&platformFlags.backupEnable, "backup-enable", false, "Faz 14 yedekleme ailesini etkinleştir (restic node yedeği; VARSAYILAN KAPALI)")
+	flag.StringVar(&platformFlags.backupSources, "backup-source", backupops.DefaultSource, "virgüllü yedek kaynak kökleri (yollar bu köklerin ALTINDA olmalı)")
 }
 
 func run(logger *slog.Logger, cfg daemonConfig) error {
@@ -86,15 +89,16 @@ func run(logger *slog.Logger, cfg daemonConfig) error {
 		MaxConcurrent: cfg.maxConc,
 		ExecTimeout:   timeoutDuration(cfg.timeout),
 		Systemd:       &svcops.Manager{},
-		Pkg:           &pkgops.Runner{},                               // Faz 06: salt-okuma paket envanteri
-		Firewall:      &fwops.Runner{},                                // Faz 06: firewall tespit + salt-okuma liste
-		Docker:        dockerRunnerOrZero(platformFlags.dockerSocket), // Faz 07: Engine API (unix soket; ADR-0011)
-		Web:           webRunnerOrZero(platformFlags.webEnable),       // Faz 08: site yaşam döngüsü (opt-in; ADR-0012)
-		TLS:           tlsRunnerOrZero(platformFlags.webEnable),       // Faz 09: sertifika yaşam döngüsü (aynı opt-in; ADR-0013)
-		DB:            dbRunnerOrZero(platformFlags.dbEnable),         // Faz 10: DB yönetimi (opt-in; ADR-0014)
-		Fs:            fsRunnerOrZero(platformFlags.fsEnable),         // Faz 10: dosya yöneticisi (opt-in; ADR-0014)
-		Mail:          mailRunnerOrZero(platformFlags.mailEnable),     // Faz 11: e-posta yönetimi (opt-in; ADR-0015)
-		VM:            vmRunnerOrZero(platformFlags.vmEnable),         // Faz 12: sanallaştırma yönetimi (opt-in; ADR-0016)
+		Pkg:           &pkgops.Runner{},                                                            // Faz 06: salt-okuma paket envanteri
+		Firewall:      &fwops.Runner{},                                                             // Faz 06: firewall tespit + salt-okuma liste
+		Docker:        dockerRunnerOrZero(platformFlags.dockerSocket),                              // Faz 07: Engine API (unix soket; ADR-0011)
+		Web:           webRunnerOrZero(platformFlags.webEnable),                                    // Faz 08: site yaşam döngüsü (opt-in; ADR-0012)
+		TLS:           tlsRunnerOrZero(platformFlags.webEnable),                                    // Faz 09: sertifika yaşam döngüsü (aynı opt-in; ADR-0013)
+		DB:            dbRunnerOrZero(platformFlags.dbEnable),                                      // Faz 10: DB yönetimi (opt-in; ADR-0014)
+		Fs:            fsRunnerOrZero(platformFlags.fsEnable),                                      // Faz 10: dosya yöneticisi (opt-in; ADR-0014)
+		Mail:          mailRunnerOrZero(platformFlags.mailEnable),                                  // Faz 11: e-posta yönetimi (opt-in; ADR-0015)
+		VM:            vmRunnerOrZero(platformFlags.vmEnable),                                      // Faz 12: sanallaştırma yönetimi (opt-in; ADR-0016)
+		Backup:        backupRunnerOrZero(platformFlags.backupEnable, platformFlags.backupSources), // Faz 14: restic yedeği (opt-in; ADR-0018)
 		Audit:         sink,
 		Logger:        logger,
 	})
@@ -179,6 +183,31 @@ func vmRunnerOrZero(enabled bool) broker.VMRunner {
 		return nil
 	}
 	return &vmops.Runner{}
+}
+
+// backupRunnerOrZero wires the Faz 14 restic runner; OPT-IN (default OFF) —
+// real repository/snapshot mutations (ADR-0018). The repo path and the
+// password file are node-managed constants; --backup-source only narrows the
+// allowlisted source roots (the payload can never widen them).
+func backupRunnerOrZero(enabled bool, sources string) broker.BackupRunner {
+	if !enabled {
+		return nil
+	}
+	r := &backupops.Runner{}
+	if strings.TrimSpace(sources) != "" {
+		var roots []string
+		for _, part := range strings.Split(sources, ",") {
+			part = strings.TrimSpace(part)
+			if part == "" || !strings.HasPrefix(part, "/") || strings.Contains(part, "..") {
+				continue
+			}
+			roots = append(roots, part)
+		}
+		if len(roots) > 0 {
+			r.Sources = roots
+		}
+	}
+	return r
 }
 
 func parseUIDs(s string) ([]uint32, error) {

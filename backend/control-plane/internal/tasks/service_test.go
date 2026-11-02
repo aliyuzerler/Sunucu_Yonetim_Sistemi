@@ -207,15 +207,16 @@ func TestRegistryValidation(t *testing.T) {
 	if err == nil {
 		t.Fatal("geçersiz operasyon adı reddedilmeli")
 	}
-	reg, err := BuildDefaultRegistry(&fakeTagSetter{}, Faz09Services{})
+	reg, err := BuildDefaultRegistry(&fakeTagSetter{}, Faz09Services{}, Faz14Services{})
 	if err != nil {
 		t.Fatalf("varsayılan kayıt defteri: %v", err)
 	}
-	// Faz 04+05+06+07+08+09+10+11+12: echo/noop/tag + 5 systemd + 5 SCM +
-	// eventlog + pkg.list + 3 firewall + 15 docker/compose + 7 web + 5 dns
-	// + 3 cert + 3 web.cert + 11 db + 5 fs + 16 mail + 16 vm + 1 logs = 100.
-	if len(reg.Names()) != 100 {
-		t.Fatalf("100 operasyon bekleniyordu: %v", reg.Names())
+	// Faz 04..13 + Faz 14 node ailesi (CP yedeği executor'suz kurulumda
+	// kayda girmez): echo/noop/tag + 5 systemd + 5 SCM + eventlog + pkg.list
+	// + 3 firewall + 15 docker/compose + 7 web + 5 dns + 3 cert + 3 web.cert
+	// + 11 db + 5 fs + 16 mail + 16 vm + 1 logs + 5 backup.node = 105.
+	if len(reg.Names()) != 105 {
+		t.Fatalf("105 operasyon bekleniyordu: %v", reg.Names())
 	}
 	// Faz 05: Windows ailesi RBAC katmanı — SCM okuma service:read,
 	// SCM kontrol service:control, eventlog eventlog:read.
@@ -298,7 +299,7 @@ func TestPayloadValidators(t *testing.T) {
 func newTestService(t *testing.T) (*Service, *fakeStore, *spyAudit) {
 	t.Helper()
 	store := newFakeStore()
-	reg, err := BuildDefaultRegistry(&fakeTagSetter{}, Faz09Services{})
+	reg, err := BuildDefaultRegistry(&fakeTagSetter{}, Faz09Services{}, Faz14Services{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -460,7 +461,7 @@ func (c *collectPublisher) Publish(_ context.Context, ev *OutboxEvent) error {
 
 func TestWorkerExecutesQueuedTask(t *testing.T) {
 	svc, store, _ := newTestService(t)
-	reg, _ := BuildDefaultRegistry(&fakeTagSetter{}, Faz09Services{})
+	reg, _ := BuildDefaultRegistry(&fakeTagSetter{}, Faz09Services{}, Faz14Services{})
 	w, spy, pub := runWorker(t, store, reg)
 	ctx := context.Background()
 
@@ -556,7 +557,7 @@ func TestWorkerFailsOnExecutorPanic(t *testing.T) {
 
 func TestWorkerUnsupportedOperation(t *testing.T) {
 	store := newFakeStore()
-	reg, _ := BuildDefaultRegistry(&fakeTagSetter{}, Faz09Services{})
+	reg, _ := BuildDefaultRegistry(&fakeTagSetter{}, Faz09Services{}, Faz14Services{})
 	w, _, _ := runWorker(t, store, reg)
 	ctx := context.Background()
 

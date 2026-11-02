@@ -108,12 +108,12 @@ func TestCapabilityProbing(t *testing.T) {
 	}
 	env := capabilityEnvelope(context.Background(), "node-1", reg)
 	caps := env.GetCapabilityReport().GetCapabilities()
-	// Faz 06+07+08+09+10+11: echo + 5 systemd + pkg.list + 3 firewall + 2
-	// compose = 11 available; 12 docker op'unun probe'u /var/run/docker.sock
-	// varlığına, 7 web + 3 web.cert + 11 db + 5 fs + 16 mail op'unun probe'u
-	// broker ping'ine bakar (toplam 83).
-	if len(caps) != 84 {
-		t.Fatalf("84 capability: %d", len(caps))
+	// Faz 06..14: echo + 5 systemd + pkg.list + 3 firewall + 2 compose +
+	// 1 logs = 12 available; 12 docker op'unun probe'u /var/run/docker.sock
+	// varlığına, 7 web + 3 web.cert + 11 db + 5 fs + 16 mail + 5 backup
+	// op'unun probe'u broker ping'ine bakar (toplam 89).
+	if len(caps) != 89 {
+		t.Fatalf("89 capability: %d", len(caps))
 	}
 	avail := map[string]bool{}
 	for _, c := range caps {

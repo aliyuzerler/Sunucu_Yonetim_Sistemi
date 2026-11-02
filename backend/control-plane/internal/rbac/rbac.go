@@ -93,6 +93,17 @@ const (
 	PermAlertsRead   = "alerts:read"
 	PermAlertsCtrl   = "alerts:control"
 	PermSecurityRead = "security:read"
+
+	// Faz 14: yedekleme/geri yükleme ve bulut sağlayıcı bağdaştırıcıları.
+	// backup:read → yedek + restore tatbikatı kayıtlarını listeleme;
+	// backup:control → yedek alma/doğrulama/İZOLE restore tatbikatı
+	// başlatma (canlı veriye restore BU fazda yoktur); cloud:read →
+	// sağlayıcı kayıtları + kaynak listeleri; cloud:control → sağlayıcı
+	// CRUD + verify + KAYNAK SİLME (confirm zorunlu — kriter 5).
+	PermBackupRead = "backup:read"
+	PermBackupCtrl = "backup:control"
+	PermCloudRead  = "cloud:read"
+	PermCloudCtrl  = "cloud:control"
 )
 
 // AllPermissions lists the seeded catalog in one place.
@@ -113,6 +124,7 @@ var AllPermissions = []string{
 	PermMailRead, PermMailCtrl,
 	PermVMRead, PermVMCtrl,
 	PermLogsRead, PermAlertsRead, PermAlertsCtrl, PermSecurityRead,
+	PermBackupRead, PermBackupCtrl, PermCloudRead, PermCloudCtrl,
 }
 
 // Scope types.

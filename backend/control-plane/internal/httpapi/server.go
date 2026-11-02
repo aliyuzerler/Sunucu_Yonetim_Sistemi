@@ -16,6 +16,8 @@ import (
 
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/alerts"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/audit"
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/backup"
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/cloud"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/config"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/inventory"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/monitoring"
@@ -72,6 +74,10 @@ type Options struct {
 	Security     *securitycenter.Service
 	Metrics      MetricsExporter
 	HTTPObserver *monitoring.HTTPObserver
+
+	// Faz 14: yedekleme kayıtları + bulut sağlayıcı bağdaştırıcıları.
+	Backup *backup.Service
+	Cloud  *cloud.Service
 }
 
 // api holds handler dependencies.
@@ -94,6 +100,9 @@ type api struct {
 	alerts   alerts.Store
 	security *securitycenter.Service
 	metrics  MetricsExporter
+
+	backup *backup.Service
+	cloud  *cloud.Service
 }
 
 // New assembles the HTTP handler with the full middleware chain.
@@ -128,6 +137,8 @@ func New(opts Options) http.Handler {
 		alerts:    opts.Alerts,
 		security:  opts.Security,
 		metrics:   opts.Metrics,
+		backup:    opts.Backup,
+		cloud:     opts.Cloud,
 	}
 
 	r := chi.NewRouter()
@@ -235,6 +246,18 @@ func New(opts Options) http.Handler {
 			r.With(a.requirePermission(rbac.PermAlertsCtrl)).With(a.requireCSRF).Post("/alerts/{alertID}/silence", a.handleSilenceAlert)
 			r.With(a.requirePermission(rbac.PermAlertsCtrl)).With(a.requireCSRF).Post("/alerts/{alertID}/resolve", a.handleResolveAlert)
 			r.With(a.requirePermission(rbac.PermSecurityRead)).Get("/security/overview", a.handleSecurityOverview)
+
+			// Faz 14: yedek kayıtları + izole restore tatbikatları.
+			r.With(a.requirePermission(rbac.PermBackupRead)).Get("/backups", a.handleListBackups)
+			r.With(a.requirePermission(rbac.PermBackupRead)).Get("/restore-drills", a.handleListRestoreDrills)
+
+			// Faz 14: bulut sağlayıcı bağdaştırıcıları (ilk: S3-uyumlu).
+			r.With(a.requirePermission(rbac.PermCloudRead)).Get("/cloud-providers", a.handleListCloudProviders)
+			r.With(a.requirePermission(rbac.PermCloudCtrl)).With(a.requireCSRF).Post("/cloud-providers", a.handleCreateCloudProvider)
+			r.With(a.requirePermission(rbac.PermCloudCtrl)).With(a.requireCSRF).Delete("/cloud-providers/{providerID}", a.handleDeleteCloudProvider)
+			r.With(a.requirePermission(rbac.PermCloudCtrl)).With(a.requireCSRF).Post("/cloud-providers/{providerID}/verify", a.handleVerifyCloudProvider)
+			r.With(a.requirePermission(rbac.PermCloudRead)).Get("/cloud-providers/{providerID}/resources", a.handleListCloudResources)
+			r.With(a.requirePermission(rbac.PermCloudCtrl)).With(a.requireCSRF).Delete("/cloud-providers/{providerID}/resources/{resourceID}", a.handleDeleteCloudResource)
 		})
 	})
 

@@ -2,6 +2,8 @@ import { Sidebar } from "./components/layout/Sidebar";
 import { TopBar } from "./components/layout/TopBar";
 import { useAuth } from "./auth/AuthProvider";
 import { AuditPage } from "./pages/AuditPage";
+import { BackupsPage } from "./pages/BackupsPage";
+import { CloudPage } from "./pages/CloudPage";
 import { ComingSoonPage } from "./pages/ComingSoonPage";
 import { EnrollmentPage } from "./pages/EnrollmentPage";
 import { LoginPage } from "./pages/LoginPage";
@@ -50,7 +52,24 @@ export function App() {
           {active === "monitoring" && <MonitoringPage />}
           {active === "logs" && <LogsPage />}
           {active === "security" && <SecurityPage />}
-          {!["overview", "nodes", "tasks", "audit", "users", "enrollment", "dns", "ssl", "monitoring", "logs", "security"].includes(active) && (
+          {/* Faz 14: yedekleme ve bulut sağlayıcı entegrasyonları. */}
+          {active === "backups" && <BackupsPage />}
+          {active === "integrations" && <CloudPage />}
+          {![
+            "overview",
+            "nodes",
+            "tasks",
+            "audit",
+            "users",
+            "enrollment",
+            "dns",
+            "ssl",
+            "monitoring",
+            "logs",
+            "security",
+            "backups",
+            "integrations",
+          ].includes(active) && (
             <ComingSoonPage moduleId={active} />
           )}
         </main>

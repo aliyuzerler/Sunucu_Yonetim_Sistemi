@@ -43,6 +43,80 @@ const alertList = [
     resolved_at: null,
   },
 ];
+// Faz 14 mock state: yedek kayıtları + restore tatbikatları + bulut
+// sağlayıcıları (kriter 1: CP ve node kapsamları ayrı kayıt sınıfları;
+// kriter 5: kaynak silme confirm kapısı mock'ta da zorlanır).
+const cpBackups = [];
+const nodeBackups = [];
+const restoreDrills = [];
+const cloudProviders = [];
+const cloudBuckets = new Map(); // provider id -> Set<bucket adı>
+let drillSeq = 0;
+
+function seedFaz14Demo() {
+  cpBackups.splice(0, cpBackups.length, {
+    id: "bbbb1111-0000-4000-8000-0000000000b1",
+    scope: "control_plane",
+    node_id: null,
+    kind: "control_plane_db",
+    status: "success",
+    verify_state: "verified",
+    verify_at: new Date().toISOString(),
+    verify_detail: "tablo=27 satır=142",
+    size_bytes: 286720,
+    sha256: "77aa11bb22cc33dd44".padEnd(64, "0"),
+    snapshot_id: "",
+    storage_path: "/var/backups/server-control/control-plane/control-plane-20261103T090000Z-1a2b3c4d.scpbackup",
+    task_id: null,
+    detail: "",
+    created_at: new Date(Date.now() - 3600_000).toISOString(),
+    updated_at: new Date().toISOString(),
+  });
+  nodeBackups.splice(0, nodeBackups.length, {
+    id: "bbbb1111-0000-4000-8000-0000000000b2",
+    scope: "node",
+    node_id: null, // reset sonrası node tohumu ile eşlenir (seedFaz14Node)
+    kind: "restic",
+    status: "success",
+    verify_state: "verified",
+    verify_at: new Date().toISOString(),
+    verify_detail: "restic check --read-data-subset=10% tamamlandı",
+    size_bytes: 524288,
+    sha256: "",
+    snapshot_id: "abcd1234ef567890",
+    storage_path: "",
+    task_id: null,
+    detail: "",
+    created_at: new Date(Date.now() - 1800_000).toISOString(),
+    updated_at: new Date().toISOString(),
+  });
+  restoreDrills.splice(0, restoreDrills.length, {
+    id: "dddd1111-0000-4000-8000-0000000000d1",
+    backup_id: "bbbb1111-0000-4000-8000-0000000000b1",
+    node_id: null,
+    target: "scp_drill_deadbeef",
+    status: "success",
+    detail: "hedef=scp_drill_deadbeef tablo=27 satır=142; tatbikat veritabanı düşürüldü",
+    tables_restored: 27,
+    rows_restored: 142,
+    task_id: null,
+    actor: "admin",
+    created_at: new Date(Date.now() - 900_000).toISOString(),
+  });
+  cloudProviders.splice(0, cloudProviders.length, {
+    id: "cccc1111-0000-4000-8000-0000000000c1",
+    name: "demo-object-storage",
+    kind: "s3",
+    endpoint: "https://s3.demo.internal",
+    region: "demo-1",
+    credential_keys: ["access_key_id", "secret_access_key"],
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  });
+  cloudBuckets.set("cccc1111-0000-4000-8000-0000000000c1", new Set(["site-backups", "db-dumps-full"]));
+}
+seedFaz14Demo();
+
 // Faz 09 mock state: sağlayıcılar reset ile temizlenir; sertifikalar demo
 // içerikle yeniden tohumlanır (yenileme başarısızlığı + rate_limit görünür
 // örnek — kriter 3'ün mock modda doğrulanması).
@@ -214,6 +288,15 @@ const OPERATIONS = [
   { name: "web.cert.request", version: "1.0.0", class: "idempotent_desired_state", retry_safe: true, timeout_seconds: 60 },
   { name: "web.cert.install", version: "1.0.0", class: "idempotent_desired_state", retry_safe: true, timeout_seconds: 120 },
   { name: "web.cert.status", version: "1.0.0", class: "read_only", retry_safe: true, timeout_seconds: 60 },
+  // Faz 14: yedekleme ailesi (node restic + control plane — ADR-0018).
+  { name: "backup.repo.init", version: "1.0.0", class: "idempotent_desired_state", retry_safe: true, timeout_seconds: 120 },
+  { name: "backup.run", version: "1.0.0", class: "non_idempotent", retry_safe: false, timeout_seconds: 300 },
+  { name: "backup.snapshot.list", version: "1.0.0", class: "read_only", retry_safe: true, timeout_seconds: 60 },
+  { name: "backup.verify", version: "1.0.0", class: "read_only", retry_safe: true, timeout_seconds: 300 },
+  { name: "backup.restore", version: "1.0.0", class: "non_idempotent", retry_safe: false, timeout_seconds: 300 },
+  { name: "backup.cp.run", version: "1.0.0", class: "non_idempotent", retry_safe: false, timeout_seconds: 300 },
+  { name: "backup.cp.verify", version: "1.0.0", class: "idempotent_desired_state", retry_safe: true, timeout_seconds: 120 },
+  { name: "backup.cp.restore_drill", version: "1.0.0", class: "non_idempotent", retry_safe: false, timeout_seconds: 300 },
 ];
 
 // Faz 04 telemetri mock verisi: her node'a agent telemetrisi eklenir.
@@ -1392,6 +1475,91 @@ setInterval(() => {
       // Faz 13: logs.search simülasyonu — gerçek agent mesajı node'da
       // redakte etmeden dışarı vermez (logops redact); mock da redakte
       // edilmiş mesaj taşır ve UI redaksiyonun göründüğünü kanıtlar.
+      // Faz 14: yedek iş sonuçları — mock worker kayıt üretir (kayıt
+      // sink'i simülasyonu): CP yedeği → control_plane kaydı, node yedeği →
+      // node kaydı, restore → izole tatbikat kaydı.
+      if (t.operation === "backup.cp.run") {
+        t.result = { backup_id: uuid(), status: "success", verify_state: "verified", size_bytes: 300000 };
+        cpBackups.unshift({
+          id: t.result.backup_id,
+          scope: "control_plane",
+          node_id: null,
+          kind: "control_plane_db",
+          status: "success",
+          verify_state: "verified",
+          verify_at: now,
+          verify_detail: "tablo=27 satır=143",
+          size_bytes: 300000,
+          sha256: "88aa11bb22cc33dd44".padEnd(64, "0"),
+          snapshot_id: "",
+          storage_path: "/var/backups/server-control/control-plane/control-plane-mock.scpbackup",
+          task_id: t.id,
+          detail: "",
+          created_at: now,
+          updated_at: now,
+        });
+      }
+      if (t.operation === "backup.cp.verify") {
+        t.result = { backup_id: t.payload && t.payload.backup_id, verify_state: "verified", verify_detail: "tablo=27 satır=142" };
+      }
+      if (t.operation === "backup.cp.restore_drill") {
+        drillSeq += 1;
+        const target = "scp_drill_" + String(drillSeq).padStart(8, "0").slice(-8);
+        t.result = { drill_id: uuid(), status: "success", target, tables_restored: 27, rows_restored: 143 };
+        restoreDrills.unshift({
+          id: t.result.drill_id,
+          backup_id: (t.payload && t.payload.backup_id) || null,
+          node_id: null,
+          target,
+          status: "success",
+          detail: "hedef=" + target + " tablo=27 satır=143; tatbikat veritabanı düşürüldü",
+          tables_restored: 27,
+          rows_restored: 143,
+          task_id: t.id,
+          actor: t.actor,
+          created_at: now,
+        });
+      }
+      if (t.operation === "backup.run") {
+        t.result = { snapshot_id: "deadbeef" + String(drillSeq).padStart(8, "0").slice(0, 8), size_bytes: 640000, files: 42, verify_state: "verified", verify_detail: "restic check tamamlandı" };
+        nodeBackups.unshift({
+          id: uuid(),
+          scope: "node",
+          node_id: t.node_id,
+          kind: "restic",
+          status: "success",
+          verify_state: "verified",
+          verify_at: now,
+          verify_detail: "restic check tamamlandı",
+          size_bytes: 640000,
+          sha256: "",
+          snapshot_id: t.result.snapshot_id,
+          storage_path: "",
+          task_id: t.id,
+          detail: "",
+          created_at: now,
+          updated_at: now,
+        });
+      }
+      if (t.operation === "backup.verify") {
+        t.result = { backup_id: t.payload && t.payload.backup_id, verify_state: "verified", verify_detail: "restic check --read-data-subset=10% tamamlandı" };
+      }
+      if (t.operation === "backup.restore") {
+        t.result = { backup_id: t.payload && t.payload.backup_id, target: "/var/backups/server-control/restore/rest-deadbeef", files: 7, bytes: 4096, detail: "izole hedefe restore tamamlandı" };
+        restoreDrills.unshift({
+          id: uuid(),
+          backup_id: (t.payload && t.payload.backup_id) || null,
+          node_id: t.node_id,
+          target: "/var/backups/server-control/restore/rest-deadbeef",
+          status: "success",
+          detail: "snapshot → izole dizin (7 dosya, 4096 bayt)",
+          tables_restored: 0,
+          rows_restored: 0,
+          task_id: t.id,
+          actor: t.actor,
+          created_at: now,
+        });
+      }
       if (t.operation === "logs.search") {
         t.result = {
           entries: [
@@ -1471,6 +1639,7 @@ const server = createServer(async (req, res) => {
     nodeCapabilities.clear();
     dnsProviders.length = 0;
     mockDbCredentials.length = 0;
+    seedFaz14Demo();
     // Faz 13: alarm durumuna sıfırlanır — tohumlu açık alarm geri gelir.
     alertRules.length = 0;
     alertList.splice(0, alertList.length, {
@@ -1966,6 +2135,130 @@ const server = createServer(async (req, res) => {
     json(res, 200, a);
     return;
   }
+  // ---- Faz 14: yedekler + restore tatbikatları + bulut sağlayıcılar ----
+  if (method === "GET" && path === "/api/v1/backups") {
+    const scope = url.searchParams.get("scope") || "";
+    const nodeId = url.searchParams.get("node_id") || "";
+    let rows = [...cpBackups, ...nodeBackups];
+    if (scope) rows = rows.filter((b) => b.scope === scope);
+    if (nodeId) rows = rows.filter((b) => b.node_id === nodeId);
+    rows.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    json(res, 200, { backups: rows.slice(0, Number(url.searchParams.get("limit") || 50)) });
+    return;
+  }
+  if (method === "GET" && path === "/api/v1/restore-drills") {
+    const nodeId = url.searchParams.get("node_id") || "";
+    let rows = [...restoreDrills];
+    if (nodeId) rows = rows.filter((d) => d.node_id === nodeId);
+    json(res, 200, { drills: rows.slice(0, Number(url.searchParams.get("limit") || 50)) });
+    return;
+  }
+  if (method === "GET" && path === "/api/v1/cloud-providers") {
+    json(res, 200, { providers: [...cloudProviders] });
+    return;
+  }
+  if (method === "POST" && path === "/api/v1/cloud-providers") {
+    const body = await readBody();
+    if (!body.name || body.name.length < 3 || !/^https:/.test(body.endpoint || "")) {
+      json(res, 400, errorBody("invalid_request", "Sağlayıcı adı/enpoint geçersiz (https zorunlu).", 400));
+      return;
+    }
+    if (!body.credentials || !body.credentials.access_key_id || !body.credentials.secret_access_key) {
+      json(res, 400, errorBody("invalid_request", "Kimlik bilgisi eksik.", 400));
+      return;
+    }
+    const row = {
+      id: uuid(),
+      name: body.name,
+      kind: body.kind || "s3",
+      endpoint: body.endpoint,
+      region: body.region || "",
+      credential_keys: Object.keys(body.credentials),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    cloudProviders.push(row);
+    cloudBuckets.set(row.id, new Set(["new-provider-bucket"]));
+    logAudit(actor, "cloud.provider.create", "cloud_provider", row.id, "success");
+    json(res, 201, row);
+    return;
+  }
+  const providerDelMatch = /^\/api\/v1\/cloud-providers\/([^/]+)$/.exec(path);
+  if (method === "DELETE" && providerDelMatch) {
+    const idx = cloudProviders.findIndex((p) => p.id === providerDelMatch[1]);
+    if (idx < 0) {
+      json(res, 404, errorBody("cloud_provider_not_found", "Sağlayıcı bulunamadı.", 404));
+      return;
+    }
+    cloudProviders.splice(idx, 1);
+    logAudit(actor, "cloud.provider.delete", "cloud_provider", providerDelMatch[1], "success");
+    json(res, 200, { deleted: true });
+    return;
+  }
+  const providerVerifyMatch = /^\/api\/v1\/cloud-providers\/([^/]+)\/verify$/.exec(path);
+  if (method === "POST" && providerVerifyMatch) {
+    const p = cloudProviders.find((x) => x.id === providerVerifyMatch[1]);
+    if (!p) {
+      json(res, 404, errorBody("cloud_provider_not_found", "Sağlayıcı bulunamadı.", 404));
+      return;
+    }
+    logAudit(actor, "cloud.provider.verify", "cloud_provider", p.id, "success");
+    json(res, 200, {
+      provider: p.kind,
+      endpoint: p.endpoint,
+      region: p.region,
+      matrix: {
+        provider: p.kind,
+        entries: [
+          { action: "list", provider_permission: "s3:ListAllMyBuckets", risk: "read", confirm_required: false },
+          { action: "read", provider_permission: "s3:ListBucket", risk: "read", confirm_required: false },
+          { action: "delete", provider_permission: "s3:DeleteBucket", risk: "destructive", confirm_required: true },
+        ],
+      },
+      probes: [{ action: "list", ok: true, reason: "s3:ListAllMyBuckets kanıtlandı (mock)" }],
+      checked_at: new Date().toISOString(),
+    });
+    return;
+  }
+  const providerResMatch = /^\/api\/v1\/cloud-providers\/([^/]+)\/resources$/.exec(path);
+  if (method === "GET" && providerResMatch) {
+    const p = cloudProviders.find((x) => x.id === providerResMatch[1]);
+    if (!p) {
+      json(res, 404, errorBody("cloud_provider_not_found", "Sağlayıcı bulunamadı.", 404));
+      return;
+    }
+    const buckets = [...(cloudBuckets.get(p.id) || new Set())];
+    logAudit(actor, "cloud.resource.list", "cloud_provider", p.id, "success");
+    json(res, 200, { resources: buckets.map((b) => ({ name: b, kind: "bucket" })) });
+    return;
+  }
+  const resourceDelMatch = /^\/api\/v1\/cloud-providers\/([^/]+)\/resources\/([^/]+)$/.exec(path);
+  if (method === "DELETE" && resourceDelMatch) {
+    const p = cloudProviders.find((x) => x.id === resourceDelMatch[1]);
+    if (!p) {
+      json(res, 404, errorBody("cloud_provider_not_found", "Sağlayıcı bulunamadı.", 404));
+      return;
+    }
+    if (url.searchParams.get("confirm") !== "true") {
+      json(res, 400, errorBody("confirmation_required", "Bu silme işlemi açık onay gerektirir (confirm=true).", 400));
+      return;
+    }
+    const name = decodeURIComponent(resourceDelMatch[2]);
+    const buckets = cloudBuckets.get(p.id) || new Set();
+    if (!buckets.has(name)) {
+      json(res, 404, errorBody("resource_not_found", "Kaynak sağlayıcıda bulunamadı.", 404));
+      return;
+    }
+    if (name.endsWith("-full")) {
+      json(res, 409, errorBody("resource_not_empty", "Kaynak boş değil; panel zorla silmez.", 409));
+      return;
+    }
+    buckets.delete(name);
+    logAudit(actor, "cloud.resource.delete", "cloud_resource", name, "success");
+    json(res, 200, { deleted: true, resource: name });
+    return;
+  }
+
   if (method === "GET" && path === "/api/v1/security/overview") {
     // Dürüstlük sözleşmesi (kriter 5): bilinmeyen kanıt "unknown" döner,
     // ASLA ok'a çekilmez. Mock, üç durumu da içeren gerçekçi bir rapor verir.

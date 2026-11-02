@@ -52,6 +52,11 @@ type Config struct {
 	// agregat seriler; reverse proxy kısıtı önerilir). Dolu → Bearer ZORUNLU.
 	MetricsToken    string        // CP_METRICS_TOKEN
 	AlertEvalInterv time.Duration // CP_ALERT_EVAL_INTERVAL (10s..1h)
+
+	// Faz 14: kontrol paneli yedeği deposu. Yedek dosyaları bu dizinde
+	// tutulur; CP_SECRETS_KEY bu dizine ASLA yazılmaz (kriter 3 —
+	// internal/backup.ValidateKeySeparation + dump içerik taraması).
+	BackupDir string // CP_BACKUP_DIR (varsayılan /var/backups/server-control/control-plane)
 }
 
 // Load reads configuration from process environment variables.
@@ -169,6 +174,9 @@ func FromEnv(env map[string]string) (Config, error) {
 		}
 		cfg.AlertEvalInterv = d
 	}
+
+	// Faz 14: kontrol paneli yedeği deposu.
+	cfg.BackupDir = valueOr(env, "CP_BACKUP_DIR", "/var/backups/server-control/control-plane")
 	return cfg, nil
 }
 

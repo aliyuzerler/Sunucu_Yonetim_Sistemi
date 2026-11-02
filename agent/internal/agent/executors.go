@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/backupops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/broker"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/composeops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/dbops"
@@ -855,6 +856,60 @@ func (d *DbExecutor) Execute(ctx context.Context, payload []byte) ([]byte, strin
 	}
 	req := &broker.Request{Operation: d.op, Params: payload}
 	res, err := broker.NewClient(d.brokerPath).Call(ctx, req)
+	if err != nil {
+		return nil, "", fmt.Errorf("broker erişilemiyor: %w", err)
+	}
+	switch res.Status {
+	case broker.StatusSucceeded:
+		return res.Result, "broker işlemi tamamlandı", nil
+	case broker.StatusRejected:
+		return nil, res.Output, fmt.Errorf("broker reddetti: %s", res.ErrorCategory)
+	default:
+		return nil, res.Output, fmt.Errorf("broker işlemi başarısız: %s", res.ErrorCategory)
+	}
+}
+
+// BackupExecutor relays one backup.* operation (Faz 14 restic family) to
+// the local privileged broker. The agent adds NO path/repo logic — the
+// control-plane registry validator AND the broker's strict schemas both
+// re-validate; this relay only enforces the transport byte cap and never
+// touches the repository or the password file itself (ADR-0018).
+type BackupExecutor struct {
+	op         string
+	brokerPath string
+}
+
+// NewBackupExecutor builds one broker-backed backup executor.
+func NewBackupExecutor(op, brokerPath string) *BackupExecutor {
+	return &BackupExecutor{op: op, brokerPath: brokerPath}
+}
+
+// Info describes the capability; availability refined by ProbeAvailable.
+func (b *BackupExecutor) Info() *agentv1.Capability {
+	return &agentv1.Capability{
+		CapabilityId:   b.op,
+		Version:        "1.0.0",
+		Available:      false,
+		AdapterId:      "backup-broker",
+		AdapterVersion: Version,
+	}
+}
+
+// ProbeAvailable: broker ayakta mı.
+func (b *BackupExecutor) ProbeAvailable(ctx context.Context) (bool, string) {
+	cli := broker.NewClient(b.brokerPath)
+	probeCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	return cli.Ping(probeCtx)
+}
+
+// Execute relays the payload (byte-capped) to the broker.
+func (b *BackupExecutor) Execute(ctx context.Context, payload []byte) ([]byte, string, error) {
+	if len(payload) > backupops.MaxPayloadBytes {
+		return nil, "", fmt.Errorf("payload %d bayt > %d sınırı", len(payload), backupops.MaxPayloadBytes)
+	}
+	req := &broker.Request{Operation: b.op, Params: payload}
+	res, err := broker.NewClient(b.brokerPath).Call(ctx, req)
 	if err != nil {
 		return nil, "", fmt.Errorf("broker erişilemiyor: %w", err)
 	}

@@ -22,7 +22,7 @@ func faz09Validators() map[string]func(json.RawMessage) error {
 }
 
 func TestFaz09RegistryRegistered(t *testing.T) {
-	reg, err := BuildDefaultRegistry(&fakeTagSetter{}, Faz09Services{})
+	reg, err := BuildDefaultRegistry(&fakeTagSetter{}, Faz09Services{}, Faz14Services{})
 	if err != nil {
 		t.Fatalf("registry: %v", err)
 	}

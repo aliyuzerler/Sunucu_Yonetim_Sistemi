@@ -19,6 +19,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/backupops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/composeops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/dbops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/dockerx"
@@ -149,6 +150,13 @@ const (
 	OpVMSnapshotCreate = vmops.OpVMSnapshotCreate
 	OpVMSnapshotRevert = vmops.OpVMSnapshotRevert
 	OpVMSnapshotDelete = vmops.OpVMSnapshotDelete
+
+	// Faz 14: yedekleme ailesi (restic; --backup-enable ile opt-in — ADR-0018).
+	OpBackupRepoInit     = backupops.OpBackupRepoInit
+	OpBackupRun          = backupops.OpBackupRun
+	OpBackupSnapshotList = backupops.OpBackupSnapshotList
+	OpBackupVerify       = backupops.OpBackupVerify
+	OpBackupRestore      = backupops.OpBackupRestore
 
 	OpWinServiceList    = winops.OpWinServiceList
 	OpWinServiceStatus  = winops.OpWinServiceStatus
@@ -307,6 +315,16 @@ type vmCall struct {
 	limit       int
 }
 
+// backupCall carries the Faz 14 backup-family parameters. NOTE: there is
+// deliberately NO restore TARGET and NO repo path field — both are
+// node-managed constants (ADR-0018 kriter 2/3).
+type backupCall struct {
+	paths    []string
+	limit    int
+	backupID string
+	snapshot string
+}
+
 // validatedCall is the typed outcome of request validation.
 type validatedCall struct {
 	target    string              // unit/service name (service families)
@@ -318,6 +336,7 @@ type validatedCall struct {
 	fs        fsCall              // Faz 10 file-manager payload
 	mail      mailCall            // Faz 11 mail family payload
 	vm        vmCall              // Faz 12 VM family payload
+	backup    backupCall          // Faz 14 backup family payload
 }
 
 // validateRequest enforces the allowlist + payload schema for one request.
@@ -968,6 +987,61 @@ func validateRequest(req *Request) (validatedCall, error) {
 			return empty, reject(CatInvalidParams, "snapshot adları allowlist dışı")
 		}
 		return validatedCall{vm: vmCall{name: p.Name, snapshot: p.Snapshot}, target: p.Name + "/" + p.Snapshot}, nil
+
+	// ---- Faz 14: yedekleme ailesi (ADR-0018) ----
+	case OpBackupRepoInit:
+		if len(req.Params) > 0 {
+			var p map[string]json.RawMessage
+			if err := strictDecode(req.Params, &p); err != nil || len(p) != 0 {
+				return empty, reject(CatInvalidParams, "repo.init şeması uyumsuz (boş obje beklenir)")
+			}
+		}
+		return empty, nil
+	case OpBackupRun:
+		var p struct {
+			Paths []string `json:"paths,omitempty"`
+		}
+		if err := strictDecode(orEmpty(req.Params), &p); err != nil {
+			return empty, reject(CatInvalidParams, "backup run şeması uyumsuz")
+		}
+		if err := backupops.ValidateRun(backupops.RunPayload{Paths: p.Paths}); err != nil {
+			return empty, reject(CatInvalidParams, "yedek kaynak yolları allowlist dışı")
+		}
+		return validatedCall{backup: backupCall{paths: p.Paths}}, nil
+	case OpBackupSnapshotList:
+		var p struct {
+			Limit int `json:"limit,omitempty"`
+		}
+		if err := strictDecode(orEmpty(req.Params), &p); err != nil {
+			return empty, reject(CatInvalidParams, "snapshot list şeması uyumsuz")
+		}
+		if err := backupops.ValidateSnapshotList(backupops.SnapshotListPayload{Limit: p.Limit}); err != nil {
+			return empty, reject(CatInvalidParams, "snapshot list limiti allowlist dışı")
+		}
+		return validatedCall{backup: backupCall{limit: p.Limit}}, nil
+	case OpBackupVerify:
+		var p struct {
+			BackupID string `json:"backup_id"`
+		}
+		if err := strictDecode(orEmpty(req.Params), &p); err != nil {
+			return empty, reject(CatInvalidParams, "verify şeması uyumsuz")
+		}
+		if err := backupops.ValidateVerify(backupops.VerifyPayload{BackupID: p.BackupID}); err != nil {
+			return empty, reject(CatInvalidParams, "backup_id allowlist dışı")
+		}
+		return validatedCall{backup: backupCall{backupID: p.BackupID}}, nil
+	case OpBackupRestore:
+		var p struct {
+			BackupID string `json:"backup_id"`
+			Snapshot string `json:"snapshot"`
+		}
+		if err := strictDecode(orEmpty(req.Params), &p); err != nil {
+			return empty, reject(CatInvalidParams, "restore şeması uyumsuz")
+		}
+		if err := backupops.ValidateRestore(backupops.RestorePayload{BackupID: p.BackupID, Snapshot: p.Snapshot}); err != nil {
+			return empty, reject(CatInvalidParams, "restore kimlikleri allowlist dışı")
+		}
+		return validatedCall{backup: backupCall{backupID: p.BackupID, snapshot: p.Snapshot}}, nil
 
 	case "":
 		return empty, reject(CatInvalidRequest, "operasyon boş")

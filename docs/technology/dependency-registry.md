@@ -82,4 +82,16 @@ Standart kütüphane tercih edilir (slog, net/http, crypto/rand, embed); başka 
   rapor verir); sürüm kilitleri node'un kendisindedir. Kaynaklar:
   libvirt.org, qemu.org (kit `open-source-references.md` ile uyumlu).
   CI agent-vm job'ı gerçek libvirt lifecycle kanıtını üretir (KVM yoksa TCG).
+- Faz 14 (2026-11-03): **yeni harici Go bağımlılığı YOK** — yedekleme
+  adaptörü (`agent/internal/backupops`) tamamen stdlib'tir (fixed argv exec,
+  encoding/json NDJSON parse, crypto/rand). Control Plane COPY tabanlı yedek
+  motoru da stdlib'tir (pgx ile tek işlem snapshot; şema replay'i gömülü
+  migration'lardan). restic (SPDX: BSD-2-Clause) ÇALIŞMA-ZAMANI sistem
+  bağımlılığıdır ve node paket yöneticisiyle kurulur (modül kurulum YAPMAZ;
+  depo yolu node'da sabittir: /var/backups/server-control/restic); sürüm
+  kilitleri node'un kendisindedir (Ubuntu noble havuzundaki restic — CI
+  runner'ında `restic version` adımı sürümü günlüğe yazar). Kaynak:
+  restic.readthedocs.io / github.com/restic/restic (kit
+  `open-source-references.md` ile uyumlu). CI agent-backup job'ı gerçek
+  restic lifecycle + İZOLE restore kanıtını üretir (EXPECTED_BACKUP=1).
 - Otomatik SBOM üretimi Faz 15 paketleme fazında eklenir; bu dosya her fazda elle güncel tutulur.

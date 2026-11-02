@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/backupops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/dbops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/dockerx"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/fsops"
@@ -117,6 +118,14 @@ func (s *Server) execute(req *Request, call validatedCall) *Response {
 		res.Status = StatusRejected
 		res.ErrorCategory = CatUnsupportedOp
 		res.Output = "sanallaştırma ailesi kapalı (--vm-enable)"
+		return res
+	}
+	// Faz 14: backup ailesi kendi opt-in kapısında (VARSAYILAN KAPALI —
+	// ADR-0018). Kapalıyken dürüst unsupported; sessiz kalabalık yok.
+	if isBackupOp(req.Operation) && s.cfg.Backup == nil {
+		res.Status = StatusRejected
+		res.ErrorCategory = CatUnsupportedOp
+		res.Output = "yedekleme ailesi kapalı (--backup-enable)"
 		return res
 	}
 	select {
@@ -315,6 +324,37 @@ func (s *Server) execute(req *Request, call validatedCall) *Response {
 		var rr map[string]any
 		rr, err = s.cfg.DB.Restore(ctx, call.db.kind, call.db.database, call.db.backup)
 		result = rr
+
+	// ---- Faz 14: yedekleme ailesi (restic; --backup-enable — ADR-0018) ----
+	case OpBackupRepoInit:
+		var rr map[string]any
+		rr, err = s.cfg.Backup.RepoInit(ctx)
+		result = rr
+	case OpBackupRun:
+		var br backupops.BackupResult
+		br, err = s.cfg.Backup.Backup(ctx, backupops.RunPayload{Paths: call.backup.paths})
+		result = map[string]any{
+			"snapshot_id": br.SnapshotID, "size_bytes": br.SizeBytes, "files": br.Files,
+			"verify_state": br.VerifyState, "verify_detail": br.VerifyDetail,
+		}
+	case OpBackupSnapshotList:
+		var rows []backupops.SnapshotRow
+		rows, err = s.cfg.Backup.SnapshotList(ctx, backupops.SnapshotListPayload{Limit: call.backup.limit})
+		result = map[string]any{"snapshots": rows}
+	case OpBackupVerify:
+		var vr backupops.VerifyResult
+		vr, err = s.cfg.Backup.Verify(ctx, backupops.VerifyPayload{BackupID: call.backup.backupID})
+		result = map[string]any{
+			"backup_id":    call.backup.backupID,
+			"verify_state": vr.VerifyState, "verify_detail": vr.VerifyDetail,
+		}
+	case OpBackupRestore:
+		var rr backupops.RestoreResult
+		rr, err = s.cfg.Backup.Restore(ctx, backupops.RestorePayload{BackupID: call.backup.backupID, Snapshot: call.backup.snapshot})
+		result = map[string]any{
+			"backup_id": rr.BackupID, "target": rr.Target, "files": rr.Files,
+			"bytes": rr.Bytes, "detail": rr.Detail,
+		}
 
 	// ---- Faz 10: scoped dosya yöneticisi ----
 	case OpFSList:
@@ -569,7 +609,10 @@ func (s *Server) execute(req *Request, call validatedCall) *Response {
 			errors.Is(err, mailops.ErrLimit),
 			errors.Is(err, vmops.ErrInvalidName), errors.Is(err, vmops.ErrInvalidPool),
 			errors.Is(err, vmops.ErrInvalidBridge), errors.Is(err, vmops.ErrInvalidLimits),
-			errors.Is(err, vmops.ErrNotFound), errors.Is(err, vmops.ErrLimit):
+			errors.Is(err, vmops.ErrNotFound), errors.Is(err, vmops.ErrLimit),
+			errors.Is(err, backupops.ErrInvalidPaths), errors.Is(err, backupops.ErrInvalidSnapshot),
+			errors.Is(err, backupops.ErrInvalidBackupID), errors.Is(err, backupops.ErrInvalidLimit),
+			errors.Is(err, backupops.ErrKeySeparation), errors.Is(err, backupops.ErrRestoreOutside):
 			res.Status = StatusRejected
 			res.ErrorCategory = CatInvalidParams
 		case errors.Is(err, dbops.ErrProtected), errors.Is(err, dbops.ErrNoSpace),
@@ -578,7 +621,8 @@ func (s *Server) execute(req *Request, call validatedCall) *Response {
 			errors.Is(err, mailops.ErrConflict), errors.Is(err, mailops.ErrNoVmailUser),
 			errors.Is(err, vmops.ErrConflict), errors.Is(err, vmops.ErrInsufficient),
 			errors.Is(err, vmops.ErrDiskFormat), errors.Is(err, vmops.ErrFormatMismatch),
-			errors.Is(err, vmops.ErrForeignVolume):
+			errors.Is(err, vmops.ErrForeignVolume),
+			errors.Is(err, backupops.ErrSourceNotConfigured), errors.Is(err, backupops.ErrTargetExists):
 			res.Status = StatusFailed
 			res.ErrorCategory = CatExecutorFailed
 		default:
@@ -651,6 +695,15 @@ func isVmOp(op string) bool {
 	case OpVMPreflight, OpVMStatus, OpVMList, OpVMInfo, OpVMCreate, OpVMClone,
 		OpVMStart, OpVMStop, OpVMReboot, OpVMDelete, OpVMDiskList, OpVMDiskAdd,
 		OpVMSnapshotList, OpVMSnapshotCreate, OpVMSnapshotRevert, OpVMSnapshotDelete:
+		return true
+	}
+	return false
+}
+
+// isBackupOp reports whether an operation belongs to the Faz 14 backup family.
+func isBackupOp(op string) bool {
+	switch op {
+	case OpBackupRepoInit, OpBackupRun, OpBackupSnapshotList, OpBackupVerify, OpBackupRestore:
 		return true
 	}
 	return false

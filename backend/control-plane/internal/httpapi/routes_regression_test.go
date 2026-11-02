@@ -15,6 +15,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/config"
@@ -123,5 +124,56 @@ func TestFaz13RoutesRegisteredRegression(t *testing.T) {
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusNotFound {
 		t.Fatalf("/metrics 404 — Faz 13 rota kaydı REGRESYONU")
+	}
+}
+
+// TestFaz14RoutesRegisteredRegression (Faz 14): yedek + bulut rotaları
+// kayıtlı ve auth kapılı (404 ≠ auth reddi ayrımı — Faz 09 dersi).
+func TestFaz14RoutesRegisteredRegression(t *testing.T) {
+	h := testHandlerFull(t)
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+
+	for _, path := range []string{
+		"/api/v1/backups",
+		"/api/v1/restore-drills",
+		"/api/v1/cloud-providers",
+	} {
+		resp, err := srv.Client().Get(srv.URL + path)
+		if err != nil {
+			t.Fatalf("istek başarısız %s: %v", path, err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode == http.StatusNotFound {
+			t.Fatalf("%s 404 — Faz 14 rota kaydı REGRESYONU", path)
+		}
+		if resp.StatusCode != http.StatusUnauthorized {
+			t.Fatalf("%s auth'suz 401 olmalı: %d", path, resp.StatusCode)
+		}
+	}
+	// Mutasyon uçları (CSRF kapılı) da var olmalı: DELETE/POST auth'suz 401.
+	resp, err := srv.Client().Post(srv.URL+"/api/v1/cloud-providers", "application/json", strings.NewReader("{}"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusMethodNotAllowed {
+		t.Fatalf("POST /cloud-providers kayıtsız: %d", resp.StatusCode)
+	}
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("auth'suz POST 401 olmalı: %d", resp.StatusCode)
+	}
+	// Onaysız DELETE kaynak uçları rota varlığı için 401 döner.
+	req, _ := http.NewRequest(http.MethodDelete, srv.URL+"/api/v1/cloud-providers/00000000-0000-4000-8000-000000000001/resources/bucket", nil)
+	resp2, err := srv.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp2.Body.Close()
+	if resp2.StatusCode == http.StatusNotFound {
+		t.Fatal("DELETE resource rotası kayıtsız")
+	}
+	if resp2.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("auth'suz DELETE 401 olmalı: %d", resp2.StatusCode)
 	}
 }

@@ -304,3 +304,79 @@ export interface LogSearchResult {
   entries: LogEntry[];
   source: string;
 }
+
+// ---- Faz 14: yedekleme + bulut sağlayıcı tipleri ----
+
+export type BackupScope = "control_plane" | "node";
+
+export interface BackupRecord {
+  id: string;
+  scope: BackupScope;
+  node_id?: string;
+  kind: string;
+  status: "running" | "success" | "failed";
+  verify_state: "unverified" | "verified" | "failed";
+  verify_at?: string | null;
+  verify_detail?: string;
+  size_bytes: number;
+  sha256?: string;
+  snapshot_id?: string;
+  storage_path?: string;
+  task_id?: string;
+  detail?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RestoreDrill {
+  id: string;
+  backup_id: string;
+  node_id?: string;
+  target: string;
+  status: "running" | "success" | "failed";
+  detail?: string;
+  tables_restored: number;
+  rows_restored: number;
+  task_id?: string;
+  actor?: string;
+  created_at: string;
+}
+
+export interface CloudProvider {
+  id: string;
+  name: string;
+  kind: "s3";
+  endpoint: string;
+  region: string;
+  credential_keys: string[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CloudResource {
+  name: string;
+  kind: string;
+  extra?: Record<string, string>;
+}
+
+export interface CloudMatrixEntry {
+  action: "list" | "read" | "delete";
+  provider_permission: string;
+  risk: string;
+  confirm_required: boolean;
+}
+
+export interface CloudProbe {
+  action: string;
+  ok: boolean;
+  reason?: string;
+}
+
+export interface CloudVerifyReport {
+  provider: string;
+  endpoint: string;
+  region: string;
+  matrix: { provider: string; entries: CloudMatrixEntry[] };
+  probes: CloudProbe[];
+  checked_at: string;
+}

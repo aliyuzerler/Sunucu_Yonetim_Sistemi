@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/backupops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/dbops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/dockerx"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/fsops"
@@ -59,6 +60,11 @@ type Config struct {
 	// Faz 12: VM runner'ı (nil = vm ailesi tipli red; --vm-enable ile
 	// seçilir, VARSAYILAN KAPALI — ADR-0016). Disk yolu payload'da yoktur.
 	VM VMRunner
+
+	// Faz 14: yedekleme runner'ı (nil = backup ailesi tipli red;
+	// --backup-enable ile seçilir, VARSAYILAN KAPALI — ADR-0018). Repo yolu
+	// ve parola dosyası node'da sabittir; parola payload'a ASLA girmez.
+	Backup BackupRunner
 
 	// Audit receives one entry per handled request (incl. rejections).
 	Audit  AuditSink
@@ -224,3 +230,17 @@ type VMRunner interface {
 
 // compile-time: the real runner satisfies the interface.
 var _ VMRunner = (*vmops.Runner)(nil)
+
+// BackupRunner executes the Faz 14 restic operations (fixed argv; repo path
+// node-managed; password via RESTIC_PASSWORD_FILE only — ADR-0018).
+// *backupops.Runner implements it; the interface keeps broker tests hermetic.
+type BackupRunner interface {
+	RepoInit(ctx context.Context) (map[string]any, error)
+	Backup(ctx context.Context, payload backupops.RunPayload) (backupops.BackupResult, error)
+	SnapshotList(ctx context.Context, payload backupops.SnapshotListPayload) ([]backupops.SnapshotRow, error)
+	Verify(ctx context.Context, payload backupops.VerifyPayload) (backupops.VerifyResult, error)
+	Restore(ctx context.Context, payload backupops.RestorePayload) (backupops.RestoreResult, error)
+}
+
+// compile-time: the real runner satisfies the interface.
+var _ BackupRunner = (*backupops.Runner)(nil)

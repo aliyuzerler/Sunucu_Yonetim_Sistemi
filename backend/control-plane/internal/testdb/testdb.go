@@ -22,6 +22,15 @@ import (
 // URL returns the configured test database URL ("" when unset).
 func URL() string { return os.Getenv("TEST_DATABASE_URL") }
 
+// CurrentURL returns the connection URL of this package's unique test
+// database (the same URL Pool(t) uses). Useful for services that need the
+// live URL (backup restore drills). Skips when TEST_DATABASE_URL is unset.
+func CurrentURL(t *testing.T) string {
+	t.Helper()
+	Pool(t) // ensure the unique database exists
+	return dbURL
+}
+
 var (
 	dbOnce  sync.Once
 	dbURL   string
@@ -87,7 +96,7 @@ TRUNCATE audit_events, outbox_events, task_attempts, tasks,
          nodes, node_groups, sessions, admin_bootstrap_tokens,
          user_role_bindings, users,
          certificates, dns_providers, db_credentials,
-         alerts, alert_rules
+         alerts, alert_rules, restore_drills, backups, cloud_providers
 RESTART IDENTITY CASCADE`)
 	if err != nil {
 		t.Fatalf("test veritabanı sıfırlanamadı: %v", err)

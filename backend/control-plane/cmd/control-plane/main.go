@@ -17,14 +17,18 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/db/migrations"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/acmex"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/agentsrv"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/alerts"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/audit"
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/backup"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/certmgmt"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/certs"
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/cloud"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/config"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/db"
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/db/migrate"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/dbcred"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/dns"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/enroll"
@@ -295,7 +299,34 @@ func run() error {
 			Secrets: secretsKey,
 		}
 
-		taskRegistry, err := tasks.BuildDefaultRegistry(inventorySvc, tasks.Faz09Services{DNS: dnsSvc, Cert: certSvc})
+		// Faz 14: kontrol paneli yedeği + bulut sağlayıcı servisleri.
+		// Kriter 3: CP_SECRETS_KEY yedek deposuna ASLA yazılmaz — env
+		// kaynağından gelir; dump doğrulaması anahtar sızma taraması
+		// yapar (ErrKeyMaterialInBackup, fail-closed).
+		migrationSrc, migErr := migrations.All()
+		if migErr != nil {
+			return fmt.Errorf("gömülü migration'lar: %w", migErr)
+		}
+		migrationPairs := make([]migrate.Pair, 0, len(migrationSrc))
+		for _, mp := range migrationSrc {
+			migrationPairs = append(migrationPairs, migrate.Pair{
+				Version: mp.Version, Name: mp.Name, UpSQL: mp.UpSQL, DownSQL: mp.DownSQL,
+			})
+		}
+		backupSvc := &backup.Service{
+			Store:       backup.NewPGStore(p),
+			BackupDir:   cfg.BackupDir,
+			DatabaseURL: cfg.DatabaseURL,
+			KeyMaterial: cfg.SecretsKey,
+			Migrations:  migrationPairs,
+		}
+		var cloudCipher cloud.KeyCipher
+		if cfg.SecretsKey != "" {
+			cloudCipher = secretsKey
+		}
+		cloudSvc := cloud.NewService(cloud.NewPGStore(p), cloudCipher)
+
+		taskRegistry, err := tasks.BuildDefaultRegistry(inventorySvc, tasks.Faz09Services{DNS: dnsSvc, Cert: certSvc}, tasks.Faz14Services{Backup: backupSvc, Pool: p})
 		if err != nil {
 			return fmt.Errorf("görev kayıt defteri: %w", err)
 		}
@@ -336,6 +367,8 @@ func run() error {
 		// redaksiyon daima kazanır, sadece reveal imkânsızlaşır).
 		dbCredSvc := &dbcred.Service{Store: dbcred.NewStore(p), Key: secretsKey, KeyConfigured: cfg.SecretsKey != ""}
 		opts.DBCreds = dbCredSvc
+		opts.Backup = backupSvc
+		opts.Cloud = cloudSvc
 
 		// Faz 13: alarm modülü + değerlendirici döngüsü.
 		alertStore := alerts.NewPGStore(p)
@@ -392,7 +425,8 @@ func run() error {
 				Telemetry:      telemetrySvc,
 				Audit:          auditRec,
 				Logger:         logger,
-				ResultScrubber: dbCredSvc, // Faz 10: persist öncesi şifre seal+ayrıştırma
+				ResultScrubber: dbCredSvc,                                // Faz 10: persist öncesi şifre seal+ayrıştırma
+				BackupSink:     &backup.NodeSink{Store: backupSvc.Store}, // Faz 14: node yedek kayıtları
 			}, logger)
 			grpcSrv := grpc.NewServer(grpc.Creds(credentials.NewTLS(tlsCfg)))
 			agentServer.RegisterGRPC(grpcSrv)

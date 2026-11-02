@@ -41,3 +41,4 @@ ADR'ler, mimari olarak önemli kararları, bağlamlarını ve sonuçlarını kay
 | [ADR-0015](ADR-0015-mail-module.md) | E-posta Servisi Yönetimi — Opt-in Mail Ailesi, Syntax-Check + Rollback, Sealed Mailbox Passwords | Accepted (Phase 11) |
 | [ADR-0016](ADR-0016-kvm-libvirt-vm.md) | KVM/QEMU/libvirt Sanallaştırma — Opt-in VM Ailesi, Disk Yolu Payload'da Yok, Managed sc- Birimler, qcow2 Snapshot Kapısı | Accepted (Phase 12) |
 | [ADR-0017](ADR-0017-monitoring-logs-alerts-security.md) | İzleme, Log Arama, Alarm Yaşam Döngüsü ve Güvenlik Merkezi — Sınırlı Kardinalite, Dürüst unknown Durumu, Node-tarafı Redaksiyon | Accepted (Phase 13) |
+| [ADR-0018](ADR-0018-backup-cloud.md) | Yedekleme/Geri Yükleme ve Bulut Sağlayıcı Bağdaştırıcıları — Ayrık Kapsamlar, Zorunlu Doğrulama, Anahtar Ayrımı, Onay Kapılı Silme | Accepted (Phase 14) |

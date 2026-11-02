@@ -523,6 +523,37 @@ jobs:
           sudo virsh pool-destroy citest-vm-* 2>/dev/null || true
           sudo rm -rf /tmp/citest-* || true
 
+  agent-backup:
+    name: "Agent (gerçek restic — backup lifecycle + izole restore kanıtı)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Faz 14: GERÇEK restic kanıtı — runner'da gerçek restic ile tam backup
+    # yaşam döngüsü (repo init → backup → snapshot list → verify
+    # --read-data-subset → İZOLE dizine restore + içerik kanıtı).
+    # EXPECTED_BACKUP=1 gate'i CI-17 dersi gereği SESSİZ ATLANMAZ: ortam
+    # eksikse test BAŞARISIZ olur. Repo/parola/restore yolları test TempDir
+    # altındadır; üretim konumlarına dokunulmaz (yalnız citest önekli içerik).
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Setup Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: agent/go.mod
+          cache-dependency-path: agent/go.sum
+      - name: restic kur ve sürümü doğrula
+        run: |
+          sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq restic
+          restic version
+      - name: Backupops test ikilisini derle
+        run: |
+          cd agent
+          go test -c -buildvcs=false -o /tmp/backupops.test ./internal/backupops/
+      - name: Backup adapter gerçek lifecycle + izole restore kanıtı
+        run: |
+          /tmp/backupops.test -test.run 'TestRealResticLifecycle' -test.v -test.timeout 10m
+
   agent-windows:
     name: Agent (Go, windows-2025)
     runs-on: windows-2025

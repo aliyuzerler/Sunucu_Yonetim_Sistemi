@@ -70,11 +70,23 @@ type Services struct {
 	// from tasks.result here (nil = no scrubbing; db.user.create then
 	// degrades honestly on the CP side — see internal/dbcred).
 	ResultScrubber ResultScrubber
+
+	// BackupSink (Faz 14, optional) records node backup.* task results into
+	// the backups/restore_drills tables AFTER the task completes (nil = no
+	// record keeping; backup tasks still run and their results persist in
+	// the task history).
+	BackupSink BackupSink
 }
 
 // ResultScrubber rewrites one succeeded node task result before persistence.
 type ResultScrubber interface {
 	ScrubNodeResult(ctx context.Context, t *tasks.Task, result map[string]any) error
+}
+
+// BackupSink persists one succeeded node backup task result (implemented by
+// backup.NodeSink; primitive signature keeps the import graph acyclic).
+type BackupSink interface {
+	RecordNodeTask(ctx context.Context, operation, nodeID, actor, taskID string, result map[string]any) error
 }
 
 // Server implements agentv1.EnrollServiceServer and AgentServiceServer.
@@ -487,6 +499,15 @@ func (s *Server) handleOperationResult(ctx context.Context, ns *nodeStream, res 
 		}
 		s.auditEvent(ctx, "task.complete", "task", res.GetTaskId(), audit.ResultSuccess,
 			map[string]any{"node_id": ns.nodeID})
+		// Faz 14: node backup sonuç kaydı (yalnız başarılı backup.* işleri;
+		// hata kayıtları görev geçmişinde görünür kalır). Kayıt hatası görev
+		// sonucunu BOZMAZ — yalnız dürüst uyarı günlüğü.
+		if s.svc.BackupSink != nil && strings.HasPrefix(t.Operation, "backup.") {
+			if serr := s.svc.BackupSink.RecordNodeTask(ctx, t.Operation, ns.nodeID, t.Actor, t.ID, result); serr != nil {
+				s.logger.Warn("agent_result_backup_sink_failed",
+					slog.String("task_id", res.GetTaskId()), slog.String("error", serr.Error()))
+			}
+		}
 	case agentv1.OperationResult_STATUS_FAILED, agentv1.OperationResult_STATUS_REJECTED:
 		category := res.GetErrorCategory()
 		if category == "" {

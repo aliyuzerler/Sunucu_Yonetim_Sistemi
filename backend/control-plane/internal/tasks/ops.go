@@ -154,7 +154,7 @@ func decodeStrict(payload json.RawMessage, v any) error {
 // BuildDefaultRegistry returns the Faz 02 operation registry (Faz 04-09
 // ile genişletildi). faz09 nil geçilebilir: DNS/cert executor'ları o zaman
 // dürüst yapılandırma hatası döndürür.
-func BuildDefaultRegistry(tagSetter TagSetter, faz09 Faz09Services) (*Registry, error) {
+func BuildDefaultRegistry(tagSetter TagSetter, faz09 Faz09Services, faz14 Faz14Services) (*Registry, error) {
 	specs := []*OperationSpec{
 		&OperationSpec{
 			Name:       "noop.echo",
@@ -343,6 +343,9 @@ func BuildDefaultRegistry(tagSetter TagSetter, faz09 Faz09Services) (*Registry, 
 	specs = append(specs, buildFaz12Registry()...)
 	// Faz 13: log arama (journald; salt-okuma — ADR-0017).
 	specs = append(specs, buildFaz13Registry()...)
+	// Faz 14: yedekleme/geri yükleme (CP yedeği executor'lu; node yedeği
+	// broker ailesi — ADR-0018).
+	specs = append(specs, buildFaz14Registry(faz14)...)
 	return NewRegistry(specs...)
 }
 

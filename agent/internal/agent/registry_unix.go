@@ -115,5 +115,12 @@ func DefaultRegistry(brokerPath, dockerSocket string) (*ExecutorRegistry, error)
 		NewVmExecutor(broker.OpVMSnapshotDelete, brokerPath),
 		// Faz 13: log arama (agent-local, salt-okuma journald — ADR-0017).
 		NewLogsExecutor(),
+		// Faz 14: yedekleme ailesi (5 op — gerçek yürütme yalnız broker'da
+		// --backup-enable ile; ADR-0018).
+		NewBackupExecutor(broker.OpBackupRepoInit, brokerPath),
+		NewBackupExecutor(broker.OpBackupRun, brokerPath),
+		NewBackupExecutor(broker.OpBackupSnapshotList, brokerPath),
+		NewBackupExecutor(broker.OpBackupVerify, brokerPath),
+		NewBackupExecutor(broker.OpBackupRestore, brokerPath),
 	)
 }
