@@ -39,7 +39,10 @@ func realVMRunner(t *testing.T) *Runner {
 func requireRealPool(t *testing.T, r *Runner, name string) string {
 	t.Helper()
 	ctx := context.Background()
-	dir := filepath.Join(os.TempDir(), "citest-vm-pool-"+name)
+	// NOT /tmp: libvirt's AppArmor abstraction (libvirt-qemu) denies world-
+	// writable dirs for the qemu process (CI-43 real finding) — disposable
+	// pools live under /var/lib/libvirt like production pools do.
+	dir := filepath.Join("/var/lib/libvirt", "citest-pool-"+name)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -177,7 +180,7 @@ func TestRealVMLifecycle(t *testing.T) {
 	if len(del2.VolumesRemoved) != 1 {
 		t.Errorf("vm2 bir yönetilen birim silmeli: %+v", del2)
 	}
-	if _, err := os.Stat(filepath.Join(os.TempDir(), "citest-vm-pool-"+pool[len("citest-vm-"):], "sc-citest-vm1-root")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join("/var/lib/libvirt", "citest-pool-"+pool, "sc-citest-vm1-root")); !os.IsNotExist(err) {
 		t.Errorf("yönetilen birim diskten kalkmalıydı: %v", err)
 	}
 }
@@ -193,7 +196,7 @@ func TestRealVMForeignVolumeRefusal(t *testing.T) {
 
 	// Hand-craft a foreign volume + domain XML referencing it.
 	foreignPath := filepath.Join(poolDir, "foreign-disk.qcow2")
-	staged := filepath.Join(os.TempDir(), "citest-fxml-"+fmt.Sprint(os.Getpid()))
+	staged := filepath.Join("/var/lib/libvirt", "citest-fxml-"+fmt.Sprint(os.Getpid()))
 	xml := `<domain type='qemu'>
   <name>citest-vmf</name><uuid>99999999-8888-7777-6666-555555555555</uuid>
   <memory unit='MiB'>256</memory><vcpu>1</vcpu>
