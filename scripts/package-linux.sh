@@ -99,13 +99,17 @@ if command -v rpmbuild >/dev/null 2>&1; then
   # ön-hesaplanır (CI-51 dersi: heredoc içi ${var/-/~} ~'yu $HOME'a açar;
   # CI-53 dersi: 'local' yalnız fonksiyon içindedir).
   RPM_VERSION="$(printf '%s' "$VERSION" | sed 's/-/~/')"
+  # rpm mimari adlandırması: amd64 → x86_64 (CI-54 dersi: BuildArch amd64
+  # 'No compatible architectures found' verir).
+  RPM_ARCH="x86_64"
+  [[ "$ARCH" == "arm64" ]] && RPM_ARCH="aarch64"
   cat > "$RPMTOP/SPECS/server-control-agent.spec" <<EOF
 Name:           server-control-agent
 Version:        ${RPM_VERSION}
 Release:        1%{?dist}
 Summary:        Server Control agent (server-agent + privileged broker)
 License:        Proprietary
-BuildArch:      ${ARCH}
+BuildArch:      ${RPM_ARCH}
 %description
 Typed, allowlisted node agent with an outbound-only mTLS connection and a
 highly constrained privileged broker (ADR-0002/0003/0020).
