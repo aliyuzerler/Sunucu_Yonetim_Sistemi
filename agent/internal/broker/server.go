@@ -147,6 +147,12 @@ func (s *Server) handleCreds(conn net.Conn, ident PeerIdentity) {
 			s.cfg.Audit.Record(entry)
 		}
 		_ = writeResponse(conn, res)
+		// CI-31 (Windows pipe gerçek koşusu): yazım→anında kapanış yarışı —
+		// istemci okumaya geçemeden pipe instance'ı yıkılabiliyor
+		// (ERROR_NO_DATA "No process is on the other end"). Küçük grace,
+		// yanıtın istemci tarafından süzülmesini garantiler; unix'te zararsız
+		// (red yolları nadir, bağlantı-başına-istek).
+		time.Sleep(50 * time.Millisecond)
 		_ = conn.Close()
 	}
 

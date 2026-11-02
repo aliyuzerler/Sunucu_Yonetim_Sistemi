@@ -441,10 +441,65 @@ func (r *Runner) UserDelete(ctx context.Context, kind, name, host string) (map[s
 	if !exists {
 		return nil, fmt.Errorf("%w: kullanıcı %q", ErrNotFound, name)
 	}
+	if kind == KindPostgres {
+		// CI-32 (gerçek-host kanıtı): DROP ROLE, role'un HERHANGİ bir
+		// veritabanında yetkisi varsa bağımlılık hatasıyla düşer (grant
+		// → delete doğal yaşam döngüsü). PostgreSQL standart temizlik
+		// prosedürü: her bağlanılabilir veritabanında DROP OWNED (yalnız
+		// yetkiler + bu DB'deki varsayılan ACL'ler; panel-managed rol
+		// nesne SAHİBİ değilse yıkım yok — sahiplik varsa tipli red),
+		// ardından DROP ROLE.
+		dbs, err := r.pgDatabases(ctx)
+		if err != nil {
+			return nil, err
+		}
+		for _, db := range dbs {
+			sql := `DROP OWNED BY ` + QuotePG(name)
+			if _, err := r.queryDB(ctx, db, sql); err != nil {
+				return nil, fmt.Errorf("%w: %q veritabanındaki bağımlılıklar düşürülemedi (rol nesne sahibi olabilir)", ErrConflict, db)
+			}
+		}
+	}
 	if _, err := r.query(ctx, kind, UserDeleteSQL(kind, name, host)); err != nil {
 		return nil, err
 	}
 	return map[string]any{"kind": kind, "user": map[string]any{"name": name, "host": host}, "deleted": true}, nil
+}
+
+// pgDatabases lists connectable databases (cluster-wide, from the default
+// connection).
+func (r *Runner) pgDatabases(ctx context.Context) ([]string, error) {
+	out, err := r.query(ctx, KindPostgres, `SELECT datname FROM pg_database WHERE datallowconn AND NOT datistemplate ORDER BY 1`)
+	if err != nil {
+		return nil, err
+	}
+	var dbs []string
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			dbs = append(dbs, line)
+		}
+	}
+	return dbs, nil
+}
+
+// queryDB runs one SQL string against a SPECIFIC postgres database (-d).
+func (r *Runner) queryDB(ctx context.Context, db, sql string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(ctx, r.execTimeout())
+	defer cancel()
+	ru, ok := resolve(r.Runuser, "runuser")
+	if !ok {
+		return nil, ErrUnavailable
+	}
+	ps, ok := resolve(r.Psql, "psql")
+	if !ok {
+		return nil, ErrUnavailable
+	}
+	args := []string{"-u", "postgres", "--", ps,
+		"-h", filepath.Dir(r.pgSocket()),
+		"-X", "-A", "-t", "-v", "ON_ERROR_STOP=1",
+		"-d", db,
+		"-c", sql}
+	return runArgv(ctx, ru, args...)
 }
 
 // GrantSet forces the desired privilege level (revokes first — desired-state

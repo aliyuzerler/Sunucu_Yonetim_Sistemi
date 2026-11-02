@@ -25,6 +25,9 @@
 - **CI-30 (flake):** vitest DbFsPanel testinde `db-credentials` kartı async yüklendiği halde `waitFor` olmadan erişiliyordu — 3 koşuda 1 flake. `waitFor` eklendi; 6/6 stabil doğrulandı. Ders (IT-02): async yüklenebilecek HER kart waitFor ile beklenir.
 - gofmt: son düzenlemelerden sonra üç dosya (ops_faz10.go, dbops/runner_linux.go, fsops/realhost_test.go) format dışı kalmıştı — CI gofmt kapısı yakaladı; `gofmt -l` her iki modülde temiz.
 
+- **CI-31 (Windows gerçek koşusu — flake):** `TestPipeBrokerAllowAndDeny` deny yolu "No process is on the other end of the pipe" — server `writeResponse`→anında `Close` yarışı pipe instance'ını istemci okumadan yıkıyordu. `respond()`'a 50ms close-grace (red yolları nadir; unix'te zararsız).
+- **CI-32 (gerçek-host kanıtı — PG DROP ROLE bağımlılığı):** grant→delete doğal yaşam döngüsünde `DROP ROLE`, role'un başka veritabanındaki yetkileri nedeniyle bağımlılık hatasıyla düşüyordu ("role cannot be dropped because some objects depend on it"). PostgreSQL standart temizlik prosedürü uygulandı: her bağlanılabilir veritabanında `DROP OWNED BY` (yetkiler + varsayılan ACL'ler; rol nesne sahibiyse tipli `ErrConflict`), ardından `DROP ROLE`. `pgDatabases` + `queryDB` (-d <db>) yardımcıları eklendi.
+
 ### Security
 - Panelin kendi PostgreSQL'i ile yönetilen müşteri instance'ları **şema düzeyinde** ayrıdır (host/port/DSN alanı yok; yalnız node-local soket).
 - DB şifreleri node'da üretilir, GCM bütünlük kanıtlı seal ile saklanır, **tekrar asla düz metin gösterilmez** (tek-seferlik reveal; audit'li; 2. deneme tipli 409).
