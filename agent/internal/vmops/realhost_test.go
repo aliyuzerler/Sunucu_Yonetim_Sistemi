@@ -197,7 +197,7 @@ func TestRealVMForeignVolumeRefusal(t *testing.T) {
 	xml := `<domain type='qemu'>
   <name>citest-vmf</name><uuid>99999999-8888-7777-6666-555555555555</uuid>
   <memory unit='MiB'>256</memory><vcpu>1</vcpu>
-  <os><type arch='x86_64' machine='pc'/></os>
+  <os><type arch='x86_64' machine='pc'>hvm</type></os>
   <devices>
     <disk type='file' device='disk'><driver name='qemu' type='qcow2'/><source file='` + foreignPath + `'/><target dev='vda' bus='virtio'/></disk>
     <console type='pty'><target type='serial' port='0'/></console>

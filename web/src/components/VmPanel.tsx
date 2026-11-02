@@ -192,51 +192,6 @@ export function VmPanel(props: {
     setTaskOp(op);
   }
 
-  useEffect(() => {
-    if (!taskId) return;
-    let cancelled = false;
-    let attempts = 0;
-    const tick = async () => {
-      attempts += 1;
-      try {
-        const task = await apiFetch<TaskLike>(`/api/v1/tasks/${encodeURIComponent(taskId)}`);
-        if (cancelled) return;
-        if (task.status === "succeeded") {
-          const result = (task.result ?? null) as Record<string, unknown> | null;
-          setReport(result);
-          applyResult(taskOp, result);
-          setTaskId(null);
-          return;
-        }
-        if (task.status === "failed" || task.status === "rejected" || task.status === "cancelled") {
-          setError(
-            `${t("nodedetail.vm.error.task")}: ${task.error_category ?? task.status}`,
-          );
-          setTaskId(null);
-          return;
-        }
-        if (attempts < 60) {
-          setTimeout(tick, 700);
-        } else {
-          if (!cancelled) setError(t("nodedetail.vm.error.timeout"));
-          setTaskId(null);
-        }
-      } catch (e) {
-        if (!cancelled && attempts < 60) {
-          setTimeout(tick, 900);
-        } else if (!cancelled) {
-          setError(isApiError(e) ? e.message : t("nodedetail.vm.error.task"));
-          setTaskId(null);
-        }
-      }
-    };
-    const h = setTimeout(tick, 400);
-    return () => {
-      cancelled = true;
-      clearTimeout(h);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [taskId]);
 
   function applyResult(op: string, result: Record<string, unknown> | null) {
     if (!result) return;
@@ -294,6 +249,53 @@ export function VmPanel(props: {
         break;
     }
   }
+
+  useEffect(() => {
+    if (!taskId) return;
+    let cancelled = false;
+    let attempts = 0;
+    const tick = async () => {
+      attempts += 1;
+      try {
+        const task = await apiFetch<TaskLike>(`/api/v1/tasks/${encodeURIComponent(taskId)}`);
+        if (cancelled) return;
+        if (task.status === "succeeded") {
+          const result = (task.result ?? null) as Record<string, unknown> | null;
+          setReport(result);
+          applyResult(taskOp, result);
+          setTaskId(null);
+          return;
+        }
+        if (task.status === "failed" || task.status === "rejected" || task.status === "cancelled") {
+          setError(
+            `${t("nodedetail.vm.error.task")}: ${task.error_category ?? task.status}`,
+          );
+          setTaskId(null);
+          return;
+        }
+        if (attempts < 60) {
+          setTimeout(tick, 700);
+        } else {
+          if (!cancelled) setError(t("nodedetail.vm.error.timeout"));
+          setTaskId(null);
+        }
+      } catch (e) {
+        if (!cancelled && attempts < 60) {
+          setTimeout(tick, 900);
+        } else if (!cancelled) {
+          setError(isApiError(e) ? e.message : t("nodedetail.vm.error.task"));
+          setTaskId(null);
+        }
+      }
+    };
+    const h = setTimeout(tick, 400);
+    return () => {
+      cancelled = true;
+      clearTimeout(h);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [taskId]);
+
 
   function errText(e: unknown): string {
     if (isApiError(e)) return e.message;

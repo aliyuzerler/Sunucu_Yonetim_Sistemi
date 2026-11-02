@@ -125,6 +125,16 @@ func runArgv(ctx context.Context, bin string, args ...string) ([]byte, error) {
 	c.Stdout = &stdout
 	c.Stderr = &stderr
 	if err := c.Run(); err != nil {
+		// Bounded, single-line stderr tail — the libvirt/qemu-img parse
+		// errors are otherwise invisible in CI (CI-37 diagnostics lesson).
+		// virsh/qemu-img errors carry config context only (no secrets).
+		detail := strings.Join(strings.Fields(stderr.String()), " ")
+		if len(detail) > 200 {
+			detail = detail[len(detail)-200:]
+		}
+		if detail != "" {
+			return nil, fmt.Errorf("%s başarısız: %w: %s", filepath.Base(bin), err, detail)
+		}
 		return nil, fmt.Errorf("%s başarısız: %w", filepath.Base(bin), err)
 	}
 	return stdout.Bytes(), nil
@@ -501,7 +511,7 @@ func (r *Runner) renderDomain(name, uuid string, vcpu int, memMiB int64, pool, v
 	fmt.Fprintf(&b, "  <uuid>%s</uuid>\n", esc(uuid))
 	fmt.Fprintf(&b, "  <memory unit='MiB'>%d</memory>\n", memMiB)
 	fmt.Fprintf(&b, "  <vcpu>%d</vcpu>\n", vcpu)
-	fmt.Fprintf(&b, "  <os><type arch='x86_64' machine='pc'/></os>\n")
+	fmt.Fprintf(&b, "  <os><type arch='x86_64' machine='pc'>hvm</type></os>\n")
 	fmt.Fprintf(&b, "  <features><acpi/><apic/></features>\n")
 	fmt.Fprintf(&b, "  <clock offset='utc'/>\n")
 	fmt.Fprintf(&b, "  <devices>\n")
@@ -1211,7 +1221,7 @@ func (r *Runner) Clone(ctx context.Context, src, name string) (CloneResult, erro
 	fmt.Fprintf(&b, "  <uuid>%s</uuid>\n", esc(uuid))
 	fmt.Fprintf(&b, "  <memory unit='MiB'>%d</memory>\n", memMiB)
 	fmt.Fprintf(&b, "  <vcpu>%d</vcpu>\n", vcpu)
-	fmt.Fprintf(&b, "  <os><type arch='x86_64' machine='pc'/></os>\n")
+	fmt.Fprintf(&b, "  <os><type arch='x86_64' machine='pc'>hvm</type></os>\n")
 	fmt.Fprintf(&b, "  <features><acpi/><apic/></features>\n")
 	fmt.Fprintf(&b, "  <clock offset='utc'/>\n  <devices>\n")
 	for i, j := range jobs {
