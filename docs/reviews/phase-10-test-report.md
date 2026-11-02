@@ -8,6 +8,7 @@
   - **CI-28 (gerçek-host kanıtı, ORTA):** PG restore `runuser -u postgres -- psql -f <path>` postgres OS kullanıcısının root-aait 0700/0600 yedeği okuyamaması nedeniyle exit 1 (TestRealDBLifecycle) — CI'nın varlık sebebi tam olarak bu sınıf hataları yakalamak. Düzeltme: dosya root açar, STDIN üzerinden psql'e akıtılır; izin gevşetilmez.
   - **CI-29 (DÜŞÜK):** `broker/dbfs_test.go` build-tag eksikliği → GOOS=windows vet `dbops.Instance` undefined. `//go:build unix` eklendi.
   - **CI-30 (ORTA, flake):** vitest DbFsPanel testi `db-credentials` kartına `waitFor` olmadan erişiyordu — 3 koşuda 1 flake (yerel ilk turda 29/30, CI'da FAIL). `waitFor` eklendi; 6/6 + 2 tam-süit koşusu stabil.
+  - **Üçüncü koşu (run 41369557474):** Windows yeşile döndü (CI-31 düzeltmesi çalıştı); iki yeni gerçek bulgu: CI-33 (fs.list çift-fd-kapanışı — `-race` altında EBADF) ve CI-34 (MySQL REVOKE 1141 — desired-state ilk-uygulama hatası; ilk iki koşuda postgres aşaması erken düştüğü için yüzeye çıkmamıştı). Her ikisi düzeltildi ve hermetik testlerle güvenceye alındı.
   - **İkinci koşu (run 41369009753):** Backend+Frontend yeşile döndü; iki yeni gerçek bulgu yakalandı ve düzeltildi: CI-31 (Windows pipe deny close-race → close-grace) ve CI-32 (PG DROP ROLE bağımlılığı → standart DROP OWNED prosedürü — agent-dbfs gerçek koşusunun ürettiği ikinci değerli kanıt).
   - gofmt kapısı üç format-dışı dosyayı yakaladı (son düzenlemelerden sonra formatlanmamıştı) — düzeltildi, `gofmt -l` iki modülde de temiz.
   - Düzeltmeler sonrası yerel yeniden doğrulama: backend 16/16, agent 14/14 (GOOS=windows vet+build dahil), vitest 30/30 (×2), Playwright 26/26.
@@ -102,6 +103,8 @@
 | IT-08 | Orta → **düzeltildi** | CI-30: vitest reveal testi flaky (waitFor'sız async kart erişimi) | waitFor + 6/6 stabil + tam-süit ×2 |
 | IT-09 | Düşük → **düzeltildi** | CI-31: Windows pipe deny-path'te writeResponse→Close yarışı (ERROR_NO_DATA; flake) | respond() 50ms close-grace; red yolları nadir |
 | IT-10 | Orta → **düzeltildi** | CI-32: PG DROP ROLE, grant'lı rol için bağımlılık hatasıyla düşüyordu (grant→delete doğal akış bozulurdu) | PostgreSQL standart prosedürü: her DB'de DROP OWNED → DROP ROLE; sahiplik varsa tipli ErrConflict |
+| IT-11 | Orta → **düzeltildi** | CI-33: fs.list çift-fd-kapanışı (fd-reuse → EBADF; CI `-race` altında patladı, yerelde sessizdi) | fd sahipliği tek yerde; `go test -count=3` + CI `-race` |
+| IT-12 | Orta → **düzeltildi** | CI-34: MySQL REVOKE error 1141 — desired-state'in İLK uygulaması (fresh user) bozuluyordu | information_schema probe'u ile koşullu REVOKE + kaçışlı grantee literal'i + hermetik 2-alt-test |
 
 ## Test komutları ve kısa çıktılar (yerel, 39b5012)
 
