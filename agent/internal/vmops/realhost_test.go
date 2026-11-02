@@ -217,8 +217,11 @@ func TestRealVMLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("delete vm2: %v", err)
 	}
-	if len(del2.VolumesRemoved) != 1 {
-		t.Errorf("vm2 bir yönetilen birim silmeli: %+v", del2)
+	// The clone honestly copied BOTH source disks (vda + the added vdb) —
+	// a full clone must remove two managed volumes (CI-48: test expectation
+	// was written before multi-disk clones; product behavior is correct).
+	if len(del2.VolumesRemoved) != 2 {
+		t.Errorf("vm2 iki yönetilen birim silmeli (tam klon): %+v", del2)
 	}
 	if _, err := os.Stat(filepath.Join("/var/lib/libvirt", "citest-pool-"+pool, "sc-citest-vm1-root")); !os.IsNotExist(err) {
 		t.Errorf("yönetilen birim diskten kalkmalıydı: %v", err)
