@@ -28,7 +28,7 @@ func (r *Runner) Status(ctx context.Context) (StatusResult, error) {
 		res.Services[svc] = r.serviceState(ctx, svc)
 	}
 	res.Queue = r.queueSummary(ctx)
-	res.Domains = len(r.readMapLines(r.domainPath()))
+	res.Domains = len(r.readDomainNames())
 	res.Mailboxes = len(r.readMapLines(r.vmailboxPath()))
 	res.Aliases = len(r.readMapLines(r.valiasPath()))
 	mainBytes, err := os.ReadFile(r.mainCF()) //nolint:gosec // operator-managed path constant
@@ -63,17 +63,34 @@ func (r *Runner) vmailboxPath() string { return filepath.Join(r.baseDir(), VMail
 func (r *Runner) valiasPath() string   { return filepath.Join(r.baseDir(), VAliasFile) }
 func (r *Runner) usersPath() string    { return filepath.Join(r.baseDir(), UsersFile) }
 
-// DomainList returns the managed virtual domains.
+// DomainList returns the managed virtual domains (key-only parse — the
+// file stores postmap-compatible "domain OK" lines, CI-38).
 func (r *Runner) DomainList(_ context.Context, limit int) ([]DomainInfo, error) {
-	lines := r.readMapLines(r.domainPath())
-	if limit > 0 && len(lines) > limit {
-		lines = lines[:limit]
+	names := r.readDomainNames()
+	if limit > 0 && len(names) > limit {
+		names = names[:limit]
 	}
-	out := make([]DomainInfo, 0, len(lines))
-	for _, l := range lines {
-		out = append(out, DomainInfo{Name: l})
+	out := make([]DomainInfo, 0, len(names))
+	for _, n := range names {
+		out = append(out, DomainInfo{Name: n})
 	}
 	return out, nil
+}
+
+// readDomainNames parses the domains map as KEY-ONLY names: the stored
+// format is "domain OK" (postmap refuses key-only lines — the compiled
+// hash map SKIPS them, which silently breaks virtual_mailbox_domains;
+// CI-38). Malformed lines are skipped defensively.
+func (r *Runner) readDomainNames() []string {
+	var out []string
+	for _, l := range r.readMapLines(r.domainPath()) {
+		fields := strings.Fields(l)
+		if len(fields) == 0 {
+			continue
+		}
+		out = append(out, fields[0])
+	}
+	return out
 }
 
 // DomainCreate appends the domain to the managed map, compiles it and runs
@@ -85,13 +102,14 @@ func (r *Runner) DomainCreate(ctx context.Context, domain string) (MutateResult,
 	if err := r.ensurePostfixWired(ctx); err != nil {
 		return MutateResult{}, err
 	}
-	lines := r.readMapLines(r.domainPath())
-	for _, l := range lines {
-		if l == domain {
+	names := r.readDomainNames()
+	for _, n := range names {
+		if n == domain {
 			return MutateResult{}, ErrExists
 		}
 	}
-	newLines := append(append([]string{}, lines...), domain)
+	lines := r.readMapLines(r.domainPath())
+	newLines := append(append([]string{}, lines...), domain+" OK")
 	if _, err := r.applyMap(ctx, r.domainPath(), newLines); err != nil {
 		return MutateResult{}, err
 	}
@@ -119,7 +137,7 @@ func (r *Runner) DomainDelete(ctx context.Context, domain string) (MutateResult,
 	found := false
 	newLines := make([]string, 0, len(lines))
 	for _, l := range lines {
-		if l == domain {
+		if fields := strings.Fields(l); len(fields) > 0 && fields[0] == domain {
 			found = true
 			continue
 		}
@@ -178,7 +196,7 @@ func (r *Runner) MailboxCreate(ctx context.Context, domain, local string) (map[s
 	if err := r.ensureDovecotWired(ctx); err != nil {
 		return nil, err
 	}
-	if !containsLine(r.readMapLines(r.domainPath()), domain) {
+	if !containsLine(r.readDomainNames(), domain) {
 		return nil, fmt.Errorf("%w: domain yönetilen listede yok: %s", ErrNotFound, domain)
 	}
 	vbLines := r.readMapLines(r.vmailboxPath())
@@ -366,7 +384,7 @@ func (r *Runner) AliasCreate(ctx context.Context, alias, target string) (MutateR
 	// Yerel hedef disiplin: @yönetilen-domain hedefleri gerçek mailbox olmalı.
 	if at := strings.LastIndexByte(target, '@'); at >= 0 {
 		td := target[at+1:]
-		if containsLine(r.readMapLines(r.domainPath()), td) {
+		if containsLine(r.readDomainNames(), td) {
 			exists := false
 			for _, l := range r.readMapLines(r.vmailboxPath()) {
 				if fields := strings.Fields(l); len(fields) >= 1 && fields[0] == target {

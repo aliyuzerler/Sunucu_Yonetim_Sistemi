@@ -223,8 +223,14 @@ func TestDomainCreateAppliesAndCompiles(t *testing.T) {
 		t.Fatalf("applied/reloaded = %v/%v, want true/true", res.Applied, res.Reloaded)
 	}
 	lines := r.readMapLines(r.domainPath())
-	if len(lines) != 1 || lines[0] != "example.com" {
-		t.Fatalf("domains file = %v, want [example.com]", lines)
+	// CI-38: postmap hash map'ler "key whitespace value" ister — key-only
+	// satırlar derlenmiş map'e GİRMEZ. Yönetilen biçim "domain OK" olmalı.
+	if len(lines) != 1 || lines[0] != "example.com OK" {
+		t.Fatalf("domains file = %v, want [example.com OK]", lines)
+	}
+	names := r.readDomainNames()
+	if len(names) != 1 || names[0] != "example.com" {
+		t.Fatalf("domain names = %v, want [example.com]", names)
 	}
 	// postmap + check + reload all ran (fixed argv, no shell). First run
 	// compiles the THREE wiring maps (empty), then the apply compiles 1 → 4.
