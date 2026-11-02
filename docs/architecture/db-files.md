@@ -90,6 +90,7 @@ REST: GET /nodes/{id}/db-credentials  (db:read — asla blob)
 - 512 KiB üstü dosya aktarımı — chunking gerekiyorsa ayrı ADR.
 - DB şifre rotasyon op'u (db.user.rotate) — şimdilik kullanıcıyı yeniden oluşturmak yeterli ve dürüst.
 - Backup arşivleme/uzak kopyalama — yedekler node-local; taşıma sonraki fazlar.
+- **MySQL/MariaDB istemci auth varsayımı:** `mysql`/`mysqldump` root@localhost'un `unix_socket` eklentisiyle bağlandığını varsayar (Debian/Ubuntu/MariaDB paket varsayılanı). Root@localhost parola-auth'lu hostlarda db ailesi dürüst executor hatası döndürür; istenirse `--defaults-extra-file` (0600 temp) desteği ayrı değişiklik olarak eklenir.
 
 ## Yapılandırma
 
