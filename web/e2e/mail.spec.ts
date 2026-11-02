@@ -46,6 +46,9 @@ async function openMail01(page) {
 }
 
 test("mail node detay: e-posta bölümü görünür, deliverability açıklaması yerinde (kriter 3)", async ({ page }) => {
+  // Gerçek modda agent yok → mail capability'si yok → panel DÜRÜST olarak
+  // görünmez; ayrıca node oluşturmak smoke'ın boş-liste ön koşulunu bozar.
+  test.skip(realBackend, "Gerçek modda agent yok; akış mock modda doğrulanır.");
   await login(page);
   await openMail01(page);
 

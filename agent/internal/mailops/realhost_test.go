@@ -94,6 +94,12 @@ func TestRealMailLifecycle(t *testing.T) {
 	}
 
 	// 4) KONTROLLÜ TESLİM: sendmail → postfix virtual → Maildir dosyası.
+	// Önce config CANLIYA alınır: runner reload'u best-effort'tur ve postfix
+	// test başlamadan ÖNCE başlatıldıysa managed blok sonradan yazılmıştır —
+	// gerçek-host kanıtı reload'u ZORUNLU kılar (dürüst kanıt zinciri).
+	if out, rerr := exec.Command("postfix", "reload").CombinedOutput(); rerr != nil { //nolint:gosec // fixed argv test helper
+		t.Fatalf("postfix reload başarısız — config canlıya alınamadı: %v: %s", rerr, out)
+	}
 	msg := "From: sender@" + domain + "\nTo: " + addr +
 		"\nSubject: faz11 kontrollu teslim\n\nfaz11 delivery proof\n"
 	cmd := exec.Command("sendmail", "-t", "-i") //nolint:gosec // fixed argv test helper
@@ -113,8 +119,21 @@ func TestRealMailLifecycle(t *testing.T) {
 		time.Sleep(500 * time.Millisecond)
 	}
 	if !delivered {
+		// Dürüst tanı: kuyruk durumu + postconf + mail log kuyruğu —
+		// CI'da kök-neden görülebilir olsun.
+		q, _ := exec.Command("postqueue", "-p").CombinedOutput() //nolint:gosec // fixed argv diagnostics
+		cf, _ := exec.Command("postconf", "-n").CombinedOutput() //nolint:gosec // fixed argv diagnostics
+		logTail := ""
+		if b, lerr := os.ReadFile("/var/log/mail.log"); lerr == nil && len(b) > 0 { //nolint:gosec // known CI path
+			lines := strings.Split(strings.TrimRight(string(b), "\n"), "\n")
+			if len(lines) > 40 {
+				lines = lines[len(lines)-40:]
+			}
+			logTail = strings.Join(lines, "\n")
+		}
 		list, _ := os.ReadDir(filepath.Dir(maildir))
-		t.Fatalf("kontrollü teslim kanıtı yok (Maildir/new boş): %v", list)
+		t.Fatalf("kontrollü teslim kanıtı yok (Maildir/new boş): %v\n--- postqueue -p ---\n%s\n--- postconf -n (virtual satırları) ---\n%s\n--- /var/log/mail.log (son 40) ---\n%s",
+			list, q, virtualLines(cf), logTail)
 	}
 
 	// 5) Alias (yerel hedef doğrulaması gerçek veriyle).
@@ -197,4 +216,20 @@ func TestRealMailSyntaxRollback(t *testing.T) {
 	if string(before) != string(after) {
 		t.Fatal("gerçek akışta rollback byte-düzeyi olmalı")
 	}
+}
+
+// virtualLines filters postconf -n output down to the virtual_* lines the
+// delivery path depends on (keeps CI failure output focused).
+func virtualLines(postconf []byte) string {
+	var out []string
+	for _, l := range strings.Split(string(postconf), "\n") {
+		if strings.HasPrefix(l, "virtual_") || strings.HasPrefix(l, "mydestination") ||
+			strings.HasPrefix(l, "myhostname") {
+			out = append(out, l)
+		}
+	}
+	if len(out) == 0 {
+		return "(virtual satırı yok — managed blok canlı config'te yok!)"
+	}
+	return strings.Join(out, "\n")
 }
