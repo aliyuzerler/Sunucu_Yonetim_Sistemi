@@ -1101,6 +1101,17 @@ func (r *Runner) Clone(ctx context.Context, src, name string) (CloneResult, erro
 	if anchor == "" {
 		return CloneResult{}, fmt.Errorf("%w: kaynak diskleri bir storage pool içinde değil", ErrForeignVolume)
 	}
+	// qemu-img convert writes a FILE into the pool target path — only dir
+	// pools have one; anything else is an honest typed refusal (no guessing
+	// where the copy should live).
+	for _, p := range pools {
+		if p.Name == anchor {
+			if p.Type != "dir" {
+				return CloneResult{}, fmt.Errorf("%w: klon yalnız dir tipi havuzda desteklenir (%s: %s)", ErrConflict, anchor, p.Type)
+			}
+			break
+		}
+	}
 	uuid, err := newUUID()
 	if err != nil {
 		return CloneResult{}, err
@@ -1123,7 +1134,7 @@ func (r *Runner) Clone(ctx context.Context, src, name string) (CloneResult, erro
 			cleanup()
 		}
 	}()
-	for i, disk := range d.Devices.Disks {
+	for _, disk := range d.Devices.Disks {
 		if disk.Device != "" && disk.Device != "disk" {
 			continue
 		}
@@ -1131,7 +1142,9 @@ func (r *Runner) Clone(ctx context.Context, src, name string) (CloneResult, erro
 		if rerr != nil || srcPath == "" {
 			continue
 		}
-		dev := "vd" + string(rune('a'+i%26))
+		// Dev letter follows the COPY index (not the raw disk range) so the
+		// volume name suffix always matches the rendered target dev.
+		dev := "vd" + string(rune('a'+len(jobs)%26))
 		volume := VolumePrefix + name + "-" + dev
 		bin, okBin := r.qemuImgBin()
 		if !okBin {

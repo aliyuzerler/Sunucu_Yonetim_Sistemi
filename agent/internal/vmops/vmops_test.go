@@ -181,6 +181,22 @@ func seedBridge(t *testing.T, r *Runner, name string) {
 	}
 }
 
+// seedPoolType writes a pool XML with an explicit type (dir/logical/...).
+func seedPoolType(t *testing.T, state, name, poolType string) {
+	t.Helper()
+	pool := "<pool type='" + poolType + "'><name>" + name + "</name>" +
+		"<capacity unit='bytes'>107374182400</capacity>" +
+		"<allocation unit='bytes'>1073741824</allocation>" +
+		"<available unit='bytes'>106300440576</available>" +
+		"<target><path>" + filepath.Join(state, "pool-"+name) + "</path></target></pool>"
+	if err := os.WriteFile(filepath.Join(state, "pools", name+".xml"), []byte(pool), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(state, "pools_active", name), []byte(""), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // seedDomain writes a domain XML + state file and a matching volume file.
 func seedDomain(t *testing.T, state, name, stateVal, xml string) {
 	t.Helper()
@@ -732,6 +748,18 @@ func TestCloneRequiresStoppedSource(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(state, "vols", "default", "sc-clone2-vda")); !os.IsNotExist(err) {
 		t.Errorf("klon birimleri geri alınmalıydı: %v", err)
+	}
+}
+
+func TestCloneRefusesNonDirAnchorPool(t *testing.T) {
+	r, state, _ := shims(t)
+	seedHost(t, r, false)
+	// Anchor pool is logical — qemu-img convert cannot place a file there;
+	// the runner must refuse honestly instead of guessing a target.
+	seedPoolType(t, state, "default", "logical")
+	seedDomain(t, state, "src", "shut off", fixtureDomainXML)
+	if _, err := r.Clone(context.Background(), "src", "clone1"); !errIs(ErrConflict, err) {
+		t.Fatalf("dir olmayan havuzda klon red bekleniyordu: %v", err)
 	}
 }
 
