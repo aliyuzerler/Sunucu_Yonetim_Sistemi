@@ -14,7 +14,9 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/user"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -64,6 +66,41 @@ func requireRealPool(t *testing.T, r *Runner, name string) string {
 		_ = os.RemoveAll(dir)
 	})
 	return dir
+}
+
+// chownQemuTree mirrors libvirt's DAC relabel (test-only): volumes created
+// by root are chowned to the qemu daemon user so the VM can open them RW.
+// The user differs per distro (Ubuntu: libvirt-qemu, RHEL: qemu) — both are
+// tried; on a host with neither, the chown is skipped honestly.
+func chownQemuTree(t *testing.T, dir string) {
+	t.Helper()
+	var uid, gid int
+	found := false
+	for _, name := range []string{"libvirt-qemu", "qemu"} {
+		if u, err := user.Lookup(name); err == nil {
+			if v, err := strconv.Atoi(u.Uid); err == nil {
+				uid = v
+				gid = v
+				if g, gerr := user.LookupGroup(name); gerr == nil {
+					if gv, aerr := strconv.Atoi(g.Gid); aerr == nil {
+						gid = gv
+					}
+				}
+				found = true
+				break
+			}
+		}
+	}
+	if !found {
+		t.Logf("qemu daemon kullanıcısı bulunamadı — chown atlandı (dürüst)")
+		return
+	}
+	_ = filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err == nil {
+			_ = os.Chown(path, uid, gid)
+		}
+		return nil
+	})
 }
 
 // TestRealVMLifecycle is the criterion-2/3/4 real evidence: create → disk
@@ -146,7 +183,10 @@ func TestRealVMLifecycle(t *testing.T) {
 		t.Errorf("VNC local-only olmalı: %+v", info.Console)
 	}
 
-	// START (criterion 2): SeaBIOS no-boot stays running.
+	// START (criterion 2): SeaBIOS no-boot stays running. Before start the
+	// pool tree is relabeled like libvirt's DAC driver would do (test-only;
+	// runners may ship qemu.conf with dynamic_ownership disabled).
+	chownQemuTree(t, "/var/lib/libvirt/citest-pool-"+pool)
 	if _, err := r.Start(ctx, "citest-vm1"); err != nil {
 		t.Fatalf("start: %v", err)
 	}
