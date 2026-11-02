@@ -463,6 +463,48 @@ jobs:
           sudo rm -rf /etc/server-control/mail /var/vmail/citest.example || true
           sudo systemctl stop postfix || true
 
+  agent-vm:
+    name: "Agent (gerçek libvirt + QEMU — VM lifecycle kanıtı)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Faz 12: GERÇEK libvirt kanıtı — runner'da gerçek libvirt-daemon-system
+    # + qemu ile tam VM lifecycle (pool → create → disk.add → GERÇEK format
+    # doğrulaması → snapshot create/revert → start (running) → force stop →
+    # clone → delete) ve GERÇEK yabancı-birim red kanıtı. KVM varsa KVM,
+    # yoksa TCG (SeaBIOS boot'suz VM "running" kalır — lifecycle için yeterli).
+    # EXPECTED_VM=1 gate'i CI-17 dersi gereği SESSİZ ATLANMAZ: ortam eksikse
+    # test BAŞARISIZ olur. Runner disposable'dır; yalnız citest önekli adlar.
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Setup Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: agent/go.mod
+          cache-dependency-path: agent/go.sum
+      - name: libvirt + QEMU kur ve daemon'ı başlat
+        run: |
+          sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq qemu-kvm qemu-utils libvirt-daemon-system libvirt-clients
+          sudo systemctl start libvirtd || sudo libvirtd -d
+          sleep 3
+          sudo virsh version || (sleep 5 && sudo virsh version)
+          ls -l /dev/kvm || echo "kvm yok — TCG ile devam (dürüst)"
+      - name: Vmops test ikilisini derle
+        run: |
+          cd agent
+          go test -c -buildvcs=false -o /tmp/vmops.test ./internal/vmops/
+      - name: VM adapter gerçek lifecycle + güvenlik red kanıtı
+        run: |
+          sudo -E env EXPECTED_VM=1 CI=true /tmp/vmops.test -test.run 'TestRealVMLifecycle|TestRealVMForeignVolumeRefusal' -test.v -test.timeout 15m
+      - name: Temizlik
+        if: always()
+        run: |
+          sudo virsh destroy citest-vm1 citest-vm2 citest-vmf 2>/dev/null || true
+          sudo virsh undefine --nvram citest-vm1 citest-vm2 citest-vmf 2>/dev/null || true
+          sudo virsh pool-destroy citest-vm-* 2>/dev/null || true
+          sudo rm -rf /tmp/citest-* || true
+
   agent-windows:
     name: Agent (Go, windows-2025)
     runs-on: windows-2025

@@ -27,6 +27,7 @@ import (
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/mailops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/pkgops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/tlsops"
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/vmops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/webops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/winops"
 )
@@ -129,6 +130,25 @@ const (
 	OpMailQueueList    = mailops.OpMailQueueList
 	OpMailLimitsGet    = mailops.OpMailLimitsGet
 	OpMailLimitsSet    = mailops.OpMailLimitsSet
+
+	// Faz 12: KVM/QEMU/libvirt sanallaştırma ailesi (--vm-enable opt-in —
+	// ADR-0016). Disk görüntü yolu payload'da ASLA yoktur (kriter 3).
+	OpVMPreflight      = vmops.OpVMPreflight
+	OpVMStatus         = vmops.OpVMStatus
+	OpVMList           = vmops.OpVMList
+	OpVMInfo           = vmops.OpVMInfo
+	OpVMCreate         = vmops.OpVMCreate
+	OpVMClone          = vmops.OpVMClone
+	OpVMStart          = vmops.OpVMStart
+	OpVMStop           = vmops.OpVMStop
+	OpVMReboot         = vmops.OpVMReboot
+	OpVMDelete         = vmops.OpVMDelete
+	OpVMDiskList       = vmops.OpVMDiskList
+	OpVMDiskAdd        = vmops.OpVMDiskAdd
+	OpVMSnapshotList   = vmops.OpVMSnapshotList
+	OpVMSnapshotCreate = vmops.OpVMSnapshotCreate
+	OpVMSnapshotRevert = vmops.OpVMSnapshotRevert
+	OpVMSnapshotDelete = vmops.OpVMSnapshotDelete
 
 	OpWinServiceList    = winops.OpWinServiceList
 	OpWinServiceStatus  = winops.OpWinServiceStatus
@@ -269,6 +289,24 @@ type mailCall struct {
 	limits  map[string]int64
 }
 
+// vmCall carries the Faz 12 VM-family parameters extracted at validation
+// time. NOTE: there is deliberately NO disk-image PATH field anywhere —
+// callers name pools/volumes/domains only; paths are derived on the node
+// from libvirt's own output (ADR-0016 criterion 3).
+type vmCall struct {
+	name        string // domain name (also used for clone target)
+	source      string // clone source
+	pool        string
+	bridge      string
+	snapshot    string
+	description string
+	vcpu        int64
+	memMiB      int64
+	diskGiB     int64
+	force       bool
+	limit       int
+}
+
 // validatedCall is the typed outcome of request validation.
 type validatedCall struct {
 	target    string              // unit/service name (service families)
@@ -279,6 +317,7 @@ type validatedCall struct {
 	db        dbCall              // Faz 10 database family payload
 	fs        fsCall              // Faz 10 file-manager payload
 	mail      mailCall            // Faz 11 mail family payload
+	vm        vmCall              // Faz 12 VM family payload
 }
 
 // validateRequest enforces the allowlist + payload schema for one request.
@@ -822,6 +861,113 @@ func validateRequest(req *Request) (validatedCall, error) {
 			}
 		}
 		return validatedCall{mail: mailCall{limits: p.Limits}}, nil
+
+	// ---- Faz 12: VM ailesi (ADR-0016) ----
+	case OpVMPreflight, OpVMStatus:
+		if err := emptyObject(req.Params); err != nil {
+			return empty, reject(CatInvalidParams, "vm şeması uyumsuz (boş obje beklenir)")
+		}
+		return empty, nil
+	case OpVMList:
+		var p struct {
+			Limit int `json:"limit,omitempty"`
+		}
+		if err := strictDecode(orEmpty(req.Params), &p); err != nil || p.Limit < 0 || p.Limit > vmops.MaxList {
+			return empty, reject(CatInvalidParams, "vm list şeması uyumsuz")
+		}
+		return validatedCall{vm: vmCall{limit: p.Limit}}, nil
+	case OpVMInfo, OpVMStart, OpVMReboot, OpVMDelete, OpVMDiskList, OpVMSnapshotList:
+		var p struct {
+			Name string `json:"name"`
+		}
+		if err := strictDecode(orEmpty(req.Params), &p); err != nil {
+			return empty, reject(CatInvalidParams, "vm ad şeması uyumsuz")
+		}
+		if !vmops.ValidVMName(p.Name) {
+			return empty, reject(CatInvalidParams, "VM adı allowlist dışı")
+		}
+		return validatedCall{vm: vmCall{name: p.Name}, target: p.Name}, nil
+	case OpVMCreate:
+		var p struct {
+			Name    string `json:"name"`
+			VCPU    int64  `json:"vcpu"`
+			MemMiB  int64  `json:"mem_mib"`
+			DiskGiB int64  `json:"disk_gib"`
+			Pool    string `json:"pool"`
+			Bridge  string `json:"bridge"`
+		}
+		if err := strictDecode(orEmpty(req.Params), &p); err != nil {
+			return empty, reject(CatInvalidParams, "vm create şeması uyumsuz")
+		}
+		if !vmops.ValidVMName(p.Name) || !vmops.ValidPoolName(p.Pool) || !vmops.ValidBridge(p.Bridge) {
+			return empty, reject(CatInvalidParams, "vm create adları allowlist dışı")
+		}
+		if !vmops.ValidVCPU(p.VCPU) || !vmops.ValidMemMiB(p.MemMiB) || !vmops.ValidDiskGiB(p.DiskGiB) {
+			return empty, reject(CatInvalidParams, "vm kaynak limitleri aralık dışı (vCPU 1..64, RAM 128..262144 MiB, disk 1..4096 GiB)")
+		}
+		return validatedCall{vm: vmCall{name: p.Name, vcpu: p.VCPU, memMiB: p.MemMiB, diskGiB: p.DiskGiB, pool: p.Pool, bridge: p.Bridge}, target: p.Name}, nil
+	case OpVMClone:
+		var p struct {
+			Source string `json:"source"`
+			Name   string `json:"name"`
+		}
+		if err := strictDecode(orEmpty(req.Params), &p); err != nil {
+			return empty, reject(CatInvalidParams, "vm clone şeması uyumsuz")
+		}
+		if !vmops.ValidVMName(p.Source) || !vmops.ValidVMName(p.Name) || p.Source == p.Name {
+			return empty, reject(CatInvalidParams, "klon adları allowlist dışı")
+		}
+		return validatedCall{vm: vmCall{source: p.Source, name: p.Name}, target: p.Source + "->" + p.Name}, nil
+	case OpVMStop:
+		var p struct {
+			Name  string `json:"name"`
+			Force bool   `json:"force,omitempty"`
+		}
+		if err := strictDecode(orEmpty(req.Params), &p); err != nil {
+			return empty, reject(CatInvalidParams, "vm stop şeması uyumsuz")
+		}
+		if !vmops.ValidVMName(p.Name) {
+			return empty, reject(CatInvalidParams, "VM adı allowlist dışı")
+		}
+		return validatedCall{vm: vmCall{name: p.Name, force: p.Force}, target: p.Name}, nil
+	case OpVMDiskAdd:
+		var p struct {
+			Name    string `json:"name"`
+			Pool    string `json:"pool"`
+			SizeGiB int64  `json:"size_gib"`
+		}
+		if err := strictDecode(orEmpty(req.Params), &p); err != nil {
+			return empty, reject(CatInvalidParams, "disk add şeması uyumsuz")
+		}
+		if !vmops.ValidVMName(p.Name) || !vmops.ValidPoolName(p.Pool) || !vmops.ValidDiskGiB(p.SizeGiB) {
+			return empty, reject(CatInvalidParams, "disk add adları/boyutu allowlist dışı")
+		}
+		return validatedCall{vm: vmCall{name: p.Name, pool: p.Pool, diskGiB: p.SizeGiB}, target: p.Name}, nil
+	case OpVMSnapshotCreate:
+		var p struct {
+			Name        string `json:"name"`
+			Snapshot    string `json:"snapshot"`
+			Description string `json:"description,omitempty"`
+		}
+		if err := strictDecode(orEmpty(req.Params), &p); err != nil {
+			return empty, reject(CatInvalidParams, "snapshot create şeması uyumsuz")
+		}
+		if !vmops.ValidVMName(p.Name) || !vmops.ValidVMName(p.Snapshot) || !vmops.ValidDescription(p.Description) {
+			return empty, reject(CatInvalidParams, "snapshot adı/açıklaması allowlist dışı")
+		}
+		return validatedCall{vm: vmCall{name: p.Name, snapshot: p.Snapshot, description: p.Description}, target: p.Name + "/" + p.Snapshot}, nil
+	case OpVMSnapshotRevert, OpVMSnapshotDelete:
+		var p struct {
+			Name     string `json:"name"`
+			Snapshot string `json:"snapshot"`
+		}
+		if err := strictDecode(orEmpty(req.Params), &p); err != nil {
+			return empty, reject(CatInvalidParams, "snapshot şeması uyumsuz")
+		}
+		if !vmops.ValidVMName(p.Name) || !vmops.ValidVMName(p.Snapshot) {
+			return empty, reject(CatInvalidParams, "snapshot adları allowlist dışı")
+		}
+		return validatedCall{vm: vmCall{name: p.Name, snapshot: p.Snapshot}, target: p.Name + "/" + p.Snapshot}, nil
 
 	case "":
 		return empty, reject(CatInvalidRequest, "operasyon boş")

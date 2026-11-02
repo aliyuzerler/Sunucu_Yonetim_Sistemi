@@ -38,3 +38,5 @@ ADR'ler, mimari olarak önemli kararları, bağlamlarını ve sonuçlarını kay
 | [ADR-0012](ADR-0012-web-hosting.md) | Web Hosting — Broker-Only Execution, File-Preserving Delete, Marker Config Discipline | Accepted (Phase 08) |
 | [ADR-0013](ADR-0013-dns-acme-tls-keys.md) | DNS Provider Adapter on Control Plane, ACME DNS-01 Orchestration, TLS Keys Never Leave the Node | Accepted (Phase 09) |
 | [ADR-0014](ADR-0014-db-files-scoped.md) | Node-Local Database Management with Sealed One-Time Passwords and Site-Scoped Race-Free File Manager | Accepted (Phase 10) |
+| [ADR-0015](ADR-0015-mail-module.md) | E-posta Servisi Yönetimi — Opt-in Mail Ailesi, Syntax-Check + Rollback, Sealed Mailbox Passwords | Accepted (Phase 11) |
+| [ADR-0016](ADR-0016-kvm-libvirt-vm.md) | KVM/QEMU/libvirt Sanallaştırma — Opt-in VM Ailesi, Disk Yolu Payload'da Yok, Managed sc- Birimler, qcow2 Snapshot Kapısı | Accepted (Phase 12) |

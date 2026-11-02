@@ -73,4 +73,13 @@ Standart kütüphane tercih edilir (slog, net/http, crypto/rand, embed); başka 
   node'un kendisindedir. Kaynaklar: postfix.org, dovecot.org, rspamd.com
   (kit `open-source-references.md` ile uyumlu). CI agent-mail job'ı
   gerçek lifecycle kanıtını Postfix+Dovecot ile üretir.
+- Faz 12 (2026-11-02): **yeni harici Go bağımlılığı YOK** — VM adaptörü
+  (`agent/internal/vmops`) tamamen stdlib'tir (fixed argv exec,
+  encoding/xml parse+render, crypto/rand UUID/MAC). libvirt
+  (SPDX: LGPL-2.1-or-later), QEMU (SPDX: GPL-2.0-or-later) ve virsh/qemu-img
+  CLI'ları ÇALIŞMA-ZAMANI sistem bağımlılıklarıdır ve node paket
+  yöneticisiyle kurulur (modül kurulum YAPMAZ — `vm.preflight` yalnız
+  rapor verir); sürüm kilitleri node'un kendisindedir. Kaynaklar:
+  libvirt.org, qemu.org (kit `open-source-references.md` ile uyumlu).
+  CI agent-vm job'ı gerçek libvirt lifecycle kanıtını üretir (KVM yoksa TCG).
 - Otomatik SBOM üretimi Faz 15 paketleme fazında eklenir; bu dosya her fazda elle güncel tutulur.

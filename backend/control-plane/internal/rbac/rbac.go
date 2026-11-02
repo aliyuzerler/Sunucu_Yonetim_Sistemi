@@ -74,6 +74,15 @@ const (
 	// seed edilir (migration 0015 — yalnız YENİ izinler).
 	PermMailRead = "mail:read"
 	PermMailCtrl = "mail:control"
+
+	// Faz 12: KVM/QEMU/libvirt sanallaştırma yönetimi. vm:read →
+	// preflight/status/list/info/disk-snapshot listeleri; vm:control →
+	// create/clone/start/stop/reboot/delete/disk.add/snapshot
+	// mutasyonları (ADR-0016). Aile --vm-enable ile node'da opt-in'dir;
+	// izinler burada rollere seed edilir (migration 0016 — yalnız YENİ
+	// izinler, CI-04 dersi).
+	PermVMRead = "vm:read"
+	PermVMCtrl = "vm:control"
 )
 
 // AllPermissions lists the seeded catalog in one place.
@@ -92,6 +101,7 @@ var AllPermissions = []string{
 	PermDBRead, PermDBCtrl,
 	PermFilesRead, PermFilesCtrl,
 	PermMailRead, PermMailCtrl,
+	PermVMRead, PermVMCtrl,
 }
 
 // Scope types.

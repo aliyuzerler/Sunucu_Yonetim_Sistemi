@@ -337,6 +337,10 @@ func BuildDefaultRegistry(tagSetter TagSetter, faz09 Faz09Services) (*Registry, 
 	// (opt-in --mail-enable; şifre node'da üretilir ve seal edilir;
 	// syntax check + rollback kapısı node'da — ADR-0015).
 	specs = append(specs, buildFaz11Registry()...)
+	// Faz 12: KVM/QEMU/libvirt sanallaştırma ayrı dosyada: ops_faz12.go
+	// (opt-in --vm-enable; disk yolu payload'da ASLA yoktur; snapshot
+	// qcow2 kapısı node'da — ADR-0016).
+	specs = append(specs, buildFaz12Registry()...)
 	return NewRegistry(specs...)
 }
 

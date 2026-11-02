@@ -15,6 +15,7 @@ import (
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/pkgops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/svcops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/tlsops"
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/vmops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/webops"
 )
 
@@ -54,6 +55,10 @@ type Config struct {
 	// Faz 11: e-posta servisi runner'ı (nil = mail ailesi tipli red;
 	// --mail-enable ile seçilir, VARSAYILAN KAPALI — ADR-0015).
 	Mail MailRunner
+
+	// Faz 12: VM runner'ı (nil = vm ailesi tipli red; --vm-enable ile
+	// seçilir, VARSAYILAN KAPALI — ADR-0016). Disk yolu payload'da yoktur.
+	VM VMRunner
 
 	// Audit receives one entry per handled request (incl. rejections).
 	Audit  AuditSink
@@ -193,3 +198,29 @@ type MailRunner interface {
 
 // compile-time: the real runner satisfies the interface.
 var _ MailRunner = (*mailops.Runner)(nil)
+
+// VMRunner executes the Faz 12 KVM/QEMU/libvirt virtualization operations
+// (fixed argv virsh/qemu-img; disk image paths NEVER cross the payload —
+// ADR-0016). *vmops.Runner implements it; the interface keeps broker
+// tests hermetic.
+type VMRunner interface {
+	Preflight(ctx context.Context) (vmops.PreflightResult, error)
+	Status(ctx context.Context) (vmops.StatusResult, error)
+	List(ctx context.Context, limit int) ([]vmops.VMRow, error)
+	Info(ctx context.Context, name string) (vmops.VMInfo, error)
+	Create(ctx context.Context, name string, vcpu int, memMiB, diskGiB int64, pool, bridge string) (vmops.CreateResult, error)
+	Clone(ctx context.Context, src, name string) (vmops.CloneResult, error)
+	Start(ctx context.Context, name string) (vmops.MutateResult, error)
+	Stop(ctx context.Context, name string, force bool) (vmops.StopResult, error)
+	Reboot(ctx context.Context, name string) (vmops.MutateResult, error)
+	Delete(ctx context.Context, name string) (vmops.DeleteResult, error)
+	DiskList(ctx context.Context, name string) ([]vmops.DiskInfo, error)
+	DiskAdd(ctx context.Context, name, pool string, sizeGiB int64) (vmops.DiskAddResult, error)
+	SnapshotList(ctx context.Context, name string) ([]vmops.SnapshotRow, error)
+	SnapshotCreate(ctx context.Context, domain, snap, description string) (vmops.SnapshotCreateResult, error)
+	SnapshotRevert(ctx context.Context, domain, snap string) (vmops.MutateResult, error)
+	SnapshotDelete(ctx context.Context, domain, snap string) (vmops.MutateResult, error)
+}
+
+// compile-time: the real runner satisfies the interface.
+var _ VMRunner = (*vmops.Runner)(nil)

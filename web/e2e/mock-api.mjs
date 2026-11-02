@@ -156,6 +156,23 @@ const OPERATIONS = [
   { name: "mail.queue.list", version: "1.0.0", class: "read_only", retry_safe: true, timeout_seconds: 60 },
   { name: "mail.limits.get", version: "1.0.0", class: "read_only", retry_safe: true, timeout_seconds: 60 },
   { name: "mail.limits.set", version: "1.0.0", class: "idempotent_desired_state", retry_safe: true, timeout_seconds: 120 },
+  // Faz 12: KVM/QEMU/libvirt (disk yolu payload'da yoktur — ADR-0016).
+  { name: "vm.preflight", version: "1.0.0", class: "read_only", retry_safe: true, timeout_seconds: 60 },
+  { name: "vm.status", version: "1.0.0", class: "read_only", retry_safe: true, timeout_seconds: 60 },
+  { name: "vm.list", version: "1.0.0", class: "read_only", retry_safe: true, timeout_seconds: 60 },
+  { name: "vm.info", version: "1.0.0", class: "read_only", retry_safe: true, timeout_seconds: 60 },
+  { name: "vm.create", version: "1.0.0", class: "idempotent_desired_state", retry_safe: true, timeout_seconds: 300 },
+  { name: "vm.clone", version: "1.0.0", class: "non_idempotent", retry_safe: false, timeout_seconds: 300 },
+  { name: "vm.start", version: "1.0.0", class: "idempotent_desired_state", retry_safe: true, timeout_seconds: 300 },
+  { name: "vm.stop", version: "1.0.0", class: "idempotent_desired_state", retry_safe: true, timeout_seconds: 300 },
+  { name: "vm.reboot", version: "1.0.0", class: "non_idempotent", retry_safe: false, timeout_seconds: 300 },
+  { name: "vm.delete", version: "1.0.0", class: "destructive", retry_safe: false, timeout_seconds: 300 },
+  { name: "vm.disk.list", version: "1.0.0", class: "read_only", retry_safe: true, timeout_seconds: 60 },
+  { name: "vm.disk.add", version: "1.0.0", class: "idempotent_desired_state", retry_safe: true, timeout_seconds: 300 },
+  { name: "vm.snapshot.list", version: "1.0.0", class: "read_only", retry_safe: true, timeout_seconds: 60 },
+  { name: "vm.snapshot.create", version: "1.0.0", class: "idempotent_desired_state", retry_safe: true, timeout_seconds: 300 },
+  { name: "vm.snapshot.revert", version: "1.0.0", class: "non_idempotent", retry_safe: false, timeout_seconds: 300 },
+  { name: "vm.snapshot.delete", version: "1.0.0", class: "destructive", retry_safe: false, timeout_seconds: 300 },
   // Faz 09: DNS + SSL (sağlayıcı kimlik bilgileri şifreli; anahtar node'da — ADR-0013).
   { name: "dns.zone.list", version: "1.0.0", class: "read_only", retry_safe: true, timeout_seconds: 60 },
   { name: "dns.record.list", version: "1.0.0", class: "read_only", retry_safe: true, timeout_seconds: 60 },
@@ -500,6 +517,53 @@ function attachMailTelemetry(node) {
       fingerprint: "maildemo0000mail",
       revealed_at: null,
     });
+  }
+}
+
+// Faz 12: sanallaştırma şablonu — "vm-" önekli node'lar (E2E).
+// 16 vm.* capability'si raporlanır (gerçek yürütme broker'da --vm-enable;
+// ADR-0016). Demo VM durumu tek listede tutulur (mock, node-bağımsız).
+const mockVMs = []; // { name, state, running, vcpu, mem, disk, pool, bridge, volume }
+const mockVMSnapshots = {}; // name -> [{name, current}]
+
+function attachVmTelemetry(node) {
+  const now = new Date().toISOString();
+  nodeFacts.set(node.id, {
+    node_id: node.id,
+    os_id: "ubuntu",
+    os_version_id: "24.04",
+    os_pretty_name: "Ubuntu 24.04.3 LTS (KVM host)",
+    os_home_url: "https://www.ubuntu.com/",
+    kernel_release: "6.8.0-49-generic",
+    arch: "x86_64",
+    systemd_version: "255",
+    package_manager: "apt",
+    systemd_available: true,
+    source: "os-release+procfs+systemctl",
+    collected_at: now,
+  });
+  nodeMetrics.set(node.id, {
+    collected_at: now,
+    source: "procfs+statfs",
+    cpu: { percent: 22.5, logical_cores: 16, load_1m: 1.4, load_5m: 1.1, load_15m: 0.9 },
+    memory: { total_bytes: 32 * 1024 ** 3, available_bytes: 24 * 1024 ** 3, used_bytes: 8 * 1024 ** 3, used_percent: 25 },
+    disks: [{ device: "/dev/sda1", mount_point: "/", fs_type: "ext4", total_bytes: 500 * 1024 ** 3, used_bytes: 120 * 1024 ** 3, available_bytes: 380 * 1024 ** 3 }],
+    networks: [{ interface: "br0", rx_bytes: 123456789, tx_bytes: 987654321 }],
+    uptime_seconds: 864000,
+  });
+  const caps = [];
+  for (const c of [
+    "vm.preflight", "vm.status", "vm.list", "vm.info",
+    "vm.create", "vm.clone", "vm.start", "vm.stop", "vm.reboot", "vm.delete",
+    "vm.disk.list", "vm.disk.add",
+    "vm.snapshot.list", "vm.snapshot.create", "vm.snapshot.revert", "vm.snapshot.delete",
+  ]) {
+    caps.push({ node_id: node.id, capability_id: c, version: "1.0.0", available: true, adapter_id: "vm-broker" });
+  }
+  nodeCapabilities.set(node.id, caps);
+  if (mockVMs.length === 0) {
+    mockVMs.push({ name: "demo-vm", state: "shut off", running: false, vcpu: 2, mem: 512, disk: 20, pool: "default", bridge: "br0", volume: "sc-demo-vm-root" });
+    mockVMSnapshots["demo-vm"] = [{ name: "temiz-kurulum", current: true }];
   }
 }
 
@@ -982,6 +1046,233 @@ setInterval(() => {
       if (t.operation === "mail.limits.set") {
         t.result = { result: { applied: true, reloaded: true }, keys: Object.keys((t.payload && t.payload.limits) || {}) };
       }
+      // Faz 12: vm.* simülasyonları. preflight kurulum yapmaz (kriter 1);
+      // create/disk.add payload'da yol TAŞIMAZ (kriter 3); disk.list gerçek
+      // format doğrulaması ve yabancı disk bilgisini taşır (kriter 4).
+      if (t.operation === "vm.preflight") {
+        t.result = {
+          preflight: {
+            kvm_available: true,
+            cpu_model: "Demo Xeon 8375C",
+            cpu_flags: ["fpu", "vmx", "sse4_2", "avx2"],
+            virt_flag: "vmx",
+            mem_total_mib: 32768,
+            mem_available_mib: 24576,
+            libvirt_version: "10.0.0",
+            hypervisor: "QEMU 8.2.0",
+            uri: "qemu:///system",
+            qemu_img: true,
+            pools: [
+              { name: "default", type: "dir", active: true, capacity_bytes: 536870912000, free_bytes: 407686309888, target_path: "/var/lib/libvirt/images" },
+            ],
+            bridges: ["br0"],
+            networks: ["default"],
+            notes: [],
+          },
+        };
+      }
+      if (t.operation === "vm.status") {
+        t.result = {
+          status: {
+            uri: "qemu:///system",
+            libvirt_version: "10.0.0",
+            hypervisor: "QEMU 8.2.0",
+            domains_total: mockVMs.length,
+            running: mockVMs.filter((v) => v.running).length,
+            kvm_available: true,
+          },
+        };
+      }
+      if (t.operation === "vm.list") {
+        t.result = { vms: mockVMs.map((v) => ({ name: v.name, state: v.state, running: v.running })) };
+      }
+      if (t.operation === "vm.info") {
+        const name = (t.payload && t.payload.name) || "";
+        const vm = mockVMs.find((v) => v.name === name);
+        if (!vm) {
+          t.status = "failed";
+          t.error_category = "executor_error";
+          t.result = null;
+        } else {
+          t.result = {
+            vm: {
+              name: vm.name,
+              uuid: "aaaa1111-2222-4333-8444-555555555555",
+              state: vm.state,
+              running: vm.running,
+              vcpu: vm.vcpu,
+              memory_mib: vm.mem,
+              arch: "x86_64",
+              guest_agent: false,
+              disks: [
+                {
+                  target_dev: "vda",
+                  pool: vm.pool,
+                  volume: vm.volume,
+                  managed: true,
+                  xml_format: "qcow2",
+                  actual_format: "qcow2",
+                  format_verified: true,
+                  virtual_bytes: vm.disk * 1024 ** 3,
+                  actual_bytes: 2097152,
+                  check_ok: true,
+                },
+              ],
+              interfaces: [{ mac: "52:54:00:ab:cd:01", bridge: vm.bridge, model: "virtio" }],
+              console: { graphics_type: "vnc", listen: "127.0.0.1", port: 5900, local_only: true, serial: true },
+            },
+          };
+        }
+      }
+      if (t.operation === "vm.create") {
+        const p = t.payload || {};
+        const name = p.name || "";
+        if (mockVMs.some((v) => v.name === name)) {
+          t.status = "failed";
+          t.error_category = "executor_error";
+          t.result = null;
+        } else {
+          const vm = {
+            name,
+            state: "shut off",
+            running: false,
+            vcpu: p.vcpu || 1,
+            mem: p.mem_mib || 512,
+            disk: p.disk_gib || 20,
+            pool: p.pool || "default",
+            bridge: p.bridge || "default",
+            volume: "sc-" + name + "-root",
+          };
+          mockVMs.push(vm);
+          t.result = {
+            result: {
+              name: vm.name,
+              uuid: "bbbb2222-3333-4444-8555-666666666666",
+              vcpu: vm.vcpu,
+              memory_mib: vm.mem,
+              disk_gib: vm.disk,
+              pool: vm.pool,
+              volume: vm.volume,
+              bridge: vm.bridge,
+              bridge_kind: "bridge",
+              accelerator: "kvm",
+              state: vm.state,
+            },
+          };
+        }
+      }
+      if (t.operation === "vm.clone") {
+        const p = t.payload || {};
+        const src0 = mockVMs.find((v) => v.name === p.source);
+        if (!src0) {
+          t.status = "failed";
+          t.error_category = "executor_error";
+          t.result = null;
+        } else {
+          const vm = { ...src0, name: p.name, volume: "sc-" + p.name + "-vda", state: "shut off", running: false };
+          mockVMs.push(vm);
+          t.result = { result: { source: p.source, name: p.name, uuid: "cccc3333-4444-4555-8666-777777777777", volume: vm.volume } };
+        }
+      }
+      if (t.operation === "vm.start" || t.operation === "vm.stop" || t.operation === "vm.reboot") {
+        const name = (t.payload && t.payload.name) || "";
+        const vm = mockVMs.find((v) => v.name === name);
+        if (!vm) {
+          t.status = "failed";
+          t.error_category = "executor_error";
+          t.result = null;
+        } else {
+          if (t.operation === "vm.start") {
+            vm.running = true;
+            vm.state = "running";
+          } else if (t.operation === "vm.stop") {
+            vm.running = false;
+            vm.state = "shut off";
+          }
+          t.result = {
+            result: {
+              name: vm.name,
+              action: t.operation === "vm.start" ? "start" : t.operation === "vm.stop" ? "stop" : "reboot",
+              already: false,
+              forced: t.operation === "vm.stop" && !!(t.payload && t.payload.force),
+              state: vm.state,
+            },
+          };
+        }
+      }
+      if (t.operation === "vm.delete") {
+        const name = (t.payload && t.payload.name) || "";
+        const idx = mockVMs.findIndex((v) => v.name === name);
+        if (idx < 0) {
+          t.status = "failed";
+          t.error_category = "executor_error";
+          t.result = null;
+        } else {
+          const vm = mockVMs[idx];
+          mockVMs.splice(idx, 1);
+          t.result = { result: { name: vm.name, undefined: true, volumes_removed: [vm.pool + "/" + vm.volume] } };
+        }
+      }
+      if (t.operation === "vm.disk.list") {
+        const name = (t.payload && t.payload.name) || "";
+        const vm = mockVMs.find((v) => v.name === name);
+        if (!vm) {
+          t.status = "failed";
+          t.error_category = "executor_error";
+          t.result = null;
+        } else {
+          t.result = {
+            disks: [
+              {
+                target_dev: "vda",
+                pool: vm.pool,
+                volume: vm.volume,
+                managed: true,
+                xml_format: "qcow2",
+                actual_format: "qcow2",
+                format_verified: true,
+                virtual_bytes: vm.disk * 1024 ** 3,
+                actual_bytes: 2097152,
+                check_ok: true,
+              },
+            ],
+          };
+        }
+      }
+      if (t.operation === "vm.disk.add") {
+        const p = t.payload || {};
+        const vm = mockVMs.find((v) => v.name === p.name);
+        if (!vm) {
+          t.status = "failed";
+          t.error_category = "executor_error";
+          t.result = null;
+        } else {
+          t.result = { result: { name: vm.name, pool: p.pool || "default", volume: "sc-" + vm.name + "-vdb", target_dev: "vdb", size_gib: p.size_gib || 10 } };
+        }
+      }
+      if (t.operation === "vm.snapshot.list") {
+        const name = (t.payload && t.payload.name) || "";
+        t.result = { snapshots: mockVMSnapshots[name] || [] };
+      }
+      if (t.operation === "vm.snapshot.create") {
+        const p = t.payload || {};
+        if (!mockVMSnapshots[p.name]) mockVMSnapshots[p.name] = [];
+        mockVMSnapshots[p.name].push({ name: p.snapshot, current: true });
+        t.result = { result: { name: p.snapshot, domain: p.name, verified_formats: ["vda=qcow2"] } };
+      }
+      if (t.operation === "vm.snapshot.revert" || t.operation === "vm.snapshot.delete") {
+        const p = t.payload || {};
+        const list = mockVMSnapshots[p.name] || [];
+        const idx = list.findIndex((s) => s.name === p.snapshot);
+        if (idx < 0) {
+          t.status = "failed";
+          t.error_category = "executor_error";
+          t.result = null;
+        } else {
+          if (t.operation === "vm.snapshot.delete") list.splice(idx, 1);
+          t.result = { result: { name: p.name, action: t.operation === "vm.snapshot.revert" ? "snapshot-revert" : "snapshot-delete", state: p.snapshot } };
+        }
+      }
       // Faz 10: fs.* simülasyonları (kök = site docroot; symlink'ler listede
       // görünür ama işlem kabul etmez — broker O_NOFOLLOW disiplini).
       if (t.operation === "fs.list") {
@@ -1280,6 +1571,8 @@ const server = createServer(async (req, res) => {
       attachDbFsTelemetry(node);
     } else if (String(body.display_name || "").startsWith("mail-") || body.os_family === "mail") {
       attachMailTelemetry(node);
+    } else if (String(body.display_name || "").startsWith("vm-") || body.os_family === "vm") {
+      attachVmTelemetry(node);
     } else {
       attachMockTelemetry(node);
     }

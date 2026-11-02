@@ -25,6 +25,7 @@ import (
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/pkgops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/svcops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/tlsops"
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/vmops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/webops"
 )
 
@@ -46,6 +47,7 @@ func registerPlatformFlags() {
 	flag.BoolVar(&platformFlags.dbEnable, "db-enable", false, "Faz 10 veritabanı ailesini etkinleştir (node-local PostgreSQL/MariaDB-MySQL yönetimi; VARSAYILAN KAPALI)")
 	flag.BoolVar(&platformFlags.fsEnable, "fs-enable", false, "Faz 10 scoped dosya yöneticisini etkinleştir (yalnız site docroot'ları; VARSAYILAN KAPALI)")
 	flag.BoolVar(&platformFlags.mailEnable, "mail-enable", false, "Faz 11 e-posta ailesini etkinleştir (Postfix/Dovecot/Rspamd yönetimi; VARSAYILAN KAPALI)")
+	flag.BoolVar(&platformFlags.vmEnable, "vm-enable", false, "Faz 12 sanallaştırma ailesini etkinleştir (KVM/QEMU/libvirt VM yönetimi; VARSAYILAN KAPALI)")
 }
 
 func run(logger *slog.Logger, cfg daemonConfig) error {
@@ -92,6 +94,7 @@ func run(logger *slog.Logger, cfg daemonConfig) error {
 		DB:            dbRunnerOrZero(platformFlags.dbEnable),         // Faz 10: DB yönetimi (opt-in; ADR-0014)
 		Fs:            fsRunnerOrZero(platformFlags.fsEnable),         // Faz 10: dosya yöneticisi (opt-in; ADR-0014)
 		Mail:          mailRunnerOrZero(platformFlags.mailEnable),     // Faz 11: e-posta yönetimi (opt-in; ADR-0015)
+		VM:            vmRunnerOrZero(platformFlags.vmEnable),         // Faz 12: sanallaştırma yönetimi (opt-in; ADR-0016)
 		Audit:         sink,
 		Logger:        logger,
 	})
@@ -166,6 +169,16 @@ func mailRunnerOrZero(enabled bool) broker.MailRunner {
 		return nil
 	}
 	return &mailops.Runner{}
+}
+
+// vmRunnerOrZero wires the Faz 12 VM runner; OPT-IN (default OFF) — real
+// libvirt domain/disk/snapshot mutations (ADR-0016). Disk image paths are
+// derived on the node; the module never installs libvirt.
+func vmRunnerOrZero(enabled bool) broker.VMRunner {
+	if !enabled {
+		return nil
+	}
+	return &vmops.Runner{}
 }
 
 func parseUIDs(s string) ([]uint32, error) {

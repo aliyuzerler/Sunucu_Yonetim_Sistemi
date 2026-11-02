@@ -21,6 +21,7 @@ import (
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/fwops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/mailops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/tlsops"
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/vmops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/webops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/winops"
 	agentv1 "github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/gen/proto/servercontrol/agent/v1"
@@ -962,6 +963,60 @@ func (m *MailExecutor) Execute(ctx context.Context, payload []byte) ([]byte, str
 	}
 	req := &broker.Request{Operation: m.op, Params: payload}
 	res, err := broker.NewClient(m.brokerPath).Call(ctx, req)
+	if err != nil {
+		return nil, "", fmt.Errorf("broker erişilemiyor: %w", err)
+	}
+	switch res.Status {
+	case broker.StatusSucceeded:
+		return res.Result, "broker işlemi tamamlandı", nil
+	case broker.StatusRejected:
+		return nil, res.Output, fmt.Errorf("broker reddetti: %s", res.ErrorCategory)
+	default:
+		return nil, res.Output, fmt.Errorf("broker işlemi başarısız: %s", res.ErrorCategory)
+	}
+}
+
+// VmExecutor relays one vm.* operation (Faz 12 KVM/QEMU/libvirt family)
+// to the privileged broker. The relay adds NO vm logic — validation is
+// enforced by the control-plane validator AND the broker; the byte cap
+// keeps the transport honest (ADR-0016).
+type VmExecutor struct {
+	op         string
+	brokerPath string
+}
+
+// NewVmExecutor builds one broker-backed VM executor.
+func NewVmExecutor(op, brokerPath string) *VmExecutor {
+	return &VmExecutor{op: op, brokerPath: brokerPath}
+}
+
+// Info describes the capability; availability refined by ProbeAvailable.
+func (v *VmExecutor) Info() *agentv1.Capability {
+	return &agentv1.Capability{
+		CapabilityId:   v.op,
+		Version:        "1.0.0",
+		Available:      false,
+		AdapterId:      "vm-broker",
+		AdapterVersion: Version,
+	}
+}
+
+// ProbeAvailable: broker ayakta mı (varlık kanıtı; libvirt kurulu olup
+// olmadığını anlamak vm.preflight'ın KENDİ işidir — tahmin yok).
+func (v *VmExecutor) ProbeAvailable(ctx context.Context) (bool, string) {
+	cli := broker.NewClient(v.brokerPath)
+	probeCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	return cli.Ping(probeCtx)
+}
+
+// Execute relays the payload (byte-capped) to the broker.
+func (v *VmExecutor) Execute(ctx context.Context, payload []byte) ([]byte, string, error) {
+	if len(payload) > vmops.MaxPayloadBytes {
+		return nil, "", fmt.Errorf("payload %d bayt > %d sınırı", len(payload), vmops.MaxPayloadBytes)
+	}
+	req := &broker.Request{Operation: v.op, Params: payload}
+	res, err := broker.NewClient(v.brokerPath).Call(ctx, req)
 	if err != nil {
 		return nil, "", fmt.Errorf("broker erişilemiyor: %w", err)
 	}

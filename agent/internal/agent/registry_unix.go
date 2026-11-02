@@ -95,5 +95,23 @@ func DefaultRegistry(brokerPath, dockerSocket string) (*ExecutorRegistry, error)
 		NewMailExecutor(broker.OpMailQueueList, brokerPath),
 		NewMailExecutor(broker.OpMailLimitsGet, brokerPath),
 		NewMailExecutor(broker.OpMailLimitsSet, brokerPath),
+		// Faz 12: KVM/QEMU/libvirt sanallaştırma ailesi (16 op — gerçek
+		// yürütme yalnız broker'da --vm-enable ile; ADR-0016).
+		NewVmExecutor(broker.OpVMPreflight, brokerPath),
+		NewVmExecutor(broker.OpVMStatus, brokerPath),
+		NewVmExecutor(broker.OpVMList, brokerPath),
+		NewVmExecutor(broker.OpVMInfo, brokerPath),
+		NewVmExecutor(broker.OpVMCreate, brokerPath),
+		NewVmExecutor(broker.OpVMClone, brokerPath),
+		NewVmExecutor(broker.OpVMStart, brokerPath),
+		NewVmExecutor(broker.OpVMStop, brokerPath),
+		NewVmExecutor(broker.OpVMReboot, brokerPath),
+		NewVmExecutor(broker.OpVMDelete, brokerPath),
+		NewVmExecutor(broker.OpVMDiskList, brokerPath),
+		NewVmExecutor(broker.OpVMDiskAdd, brokerPath),
+		NewVmExecutor(broker.OpVMSnapshotList, brokerPath),
+		NewVmExecutor(broker.OpVMSnapshotCreate, brokerPath),
+		NewVmExecutor(broker.OpVMSnapshotRevert, brokerPath),
+		NewVmExecutor(broker.OpVMSnapshotDelete, brokerPath),
 	)
 }

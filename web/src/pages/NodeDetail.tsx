@@ -3,6 +3,7 @@ import type { FormEvent } from "react";
 import { apiFetch, isApiError } from "../api/client";
 import { DbFsPanel } from "../components/DbFsPanel";
 import { MailPanel } from "../components/MailPanel";
+import { VmPanel } from "../components/VmPanel";
 import type {
   CapabilityRecord,
   MetricsSnapshot,
@@ -474,6 +475,7 @@ export function NodeDetail({ node, onBack }: { node: NodeRecord; onBack: () => v
   const isFs = capabilities.some((c) => c.capability_id.startsWith("fs."));
   // Faz 11: e-posta ailesi (--mail-enable ile opt-in; ADR-0015).
   const isMail = capabilities.some((c) => c.capability_id.startsWith("mail."));
+const isVm = capabilities.some((c) => c.capability_id.startsWith("vm."));
 
   async function submitTask(op: string, payload: Record<string, unknown>): Promise<TaskRecord | null> {
     try {
@@ -1787,6 +1789,22 @@ export function NodeDetail({ node, onBack }: { node: NodeRecord; onBack: () => v
           (kriter 5). */}
       {isMail && (
         <MailPanel
+          nodeId={node.id}
+          submitTask={async (op, payload) => {
+            const created = await submitTask(op, payload);
+            return created as unknown as { id: string; status: string; result?: unknown; error_category?: string } | null;
+          }}
+          t={(k) => t(k as Parameters<typeof t>[0])}
+        />
+      )}
+
+      {/* Faz 12: KVM/QEMU/libvirt sanallaştırma yönetimi (yalnız vm.*
+          capability'li node'lar). Preflight kurulum yapmaz (kriter 1);
+          disk yolu payload'da yoktur (kriter 3); snapshot qcow2 kapısı
+          node'dadır (kriter 4); VM guest OS yönetimi sağlamaz — in-guest
+          modüller agent kurulana dek unsupported'tur (kriter 5). */}
+      {isVm && (
+        <VmPanel
           nodeId={node.id}
           submitTask={async (op, payload) => {
             const created = await submitTask(op, payload);

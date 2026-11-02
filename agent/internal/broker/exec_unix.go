@@ -18,6 +18,7 @@ import (
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/pkgops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/svcops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/tlsops"
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/vmops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/webops"
 )
 
@@ -108,6 +109,14 @@ func (s *Server) execute(req *Request, call validatedCall) *Response {
 		res.Status = StatusRejected
 		res.ErrorCategory = CatUnsupportedOp
 		res.Output = "e-posta ailesi kapalı (--mail-enable)"
+		return res
+	}
+	// Faz 12: vm ailesi kendi opt-in kapısında (VARSAYILAN KAPALI —
+	// ADR-0016). Kapalıyken dürüst unsupported; sessiz kalabalık yok.
+	if isVmOp(req.Operation) && s.cfg.VM == nil {
+		res.Status = StatusRejected
+		res.ErrorCategory = CatUnsupportedOp
+		res.Output = "sanallaştırma ailesi kapalı (--vm-enable)"
 		return res
 	}
 	select {
@@ -409,6 +418,72 @@ func (s *Server) execute(req *Request, call validatedCall) *Response {
 		ls, err = s.cfg.Mail.LimitsSet(ctx, call.mail.limits)
 		result = map[string]any{"result": ls}
 
+	// ---- Faz 12: VM ailesi ----
+	case OpVMPreflight:
+		var pf vmops.PreflightResult
+		pf, err = s.cfg.VM.Preflight(ctx)
+		result = map[string]any{"preflight": pf}
+	case OpVMStatus:
+		var st vmops.StatusResult
+		st, err = s.cfg.VM.Status(ctx)
+		result = map[string]any{"status": st}
+	case OpVMList:
+		var rows []vmops.VMRow
+		rows, err = s.cfg.VM.List(ctx, call.vm.limit)
+		result = map[string]any{"vms": rows}
+	case OpVMInfo:
+		var vi vmops.VMInfo
+		vi, err = s.cfg.VM.Info(ctx, call.vm.name)
+		result = map[string]any{"vm": vi}
+	case OpVMCreate:
+		var cr vmops.CreateResult
+		cr, err = s.cfg.VM.Create(ctx, call.vm.name, int(call.vm.vcpu), call.vm.memMiB, call.vm.diskGiB, call.vm.pool, call.vm.bridge)
+		result = map[string]any{"result": cr}
+	case OpVMClone:
+		var cl vmops.CloneResult
+		cl, err = s.cfg.VM.Clone(ctx, call.vm.source, call.vm.name)
+		result = map[string]any{"result": cl}
+	case OpVMStart:
+		var mr vmops.MutateResult
+		mr, err = s.cfg.VM.Start(ctx, call.vm.name)
+		result = map[string]any{"result": mr}
+	case OpVMStop:
+		var sr vmops.StopResult
+		sr, err = s.cfg.VM.Stop(ctx, call.vm.name, call.vm.force)
+		result = map[string]any{"result": sr}
+	case OpVMReboot:
+		var mr vmops.MutateResult
+		mr, err = s.cfg.VM.Reboot(ctx, call.vm.name)
+		result = map[string]any{"result": mr}
+	case OpVMDelete:
+		var dr vmops.DeleteResult
+		dr, err = s.cfg.VM.Delete(ctx, call.vm.name)
+		result = map[string]any{"result": dr}
+	case OpVMDiskList:
+		var disks []vmops.DiskInfo
+		disks, err = s.cfg.VM.DiskList(ctx, call.vm.name)
+		result = map[string]any{"disks": disks}
+	case OpVMDiskAdd:
+		var da vmops.DiskAddResult
+		da, err = s.cfg.VM.DiskAdd(ctx, call.vm.name, call.vm.pool, call.vm.diskGiB)
+		result = map[string]any{"result": da}
+	case OpVMSnapshotList:
+		var rows []vmops.SnapshotRow
+		rows, err = s.cfg.VM.SnapshotList(ctx, call.vm.name)
+		result = map[string]any{"snapshots": rows}
+	case OpVMSnapshotCreate:
+		var sc vmops.SnapshotCreateResult
+		sc, err = s.cfg.VM.SnapshotCreate(ctx, call.vm.name, call.vm.snapshot, call.vm.description)
+		result = map[string]any{"result": sc}
+	case OpVMSnapshotRevert:
+		var mr vmops.MutateResult
+		mr, err = s.cfg.VM.SnapshotRevert(ctx, call.vm.name, call.vm.snapshot)
+		result = map[string]any{"result": mr}
+	case OpVMSnapshotDelete:
+		var mr vmops.MutateResult
+		mr, err = s.cfg.VM.SnapshotDelete(ctx, call.vm.name, call.vm.snapshot)
+		result = map[string]any{"result": mr}
+
 	case OpServiceList:
 		var units []svcops.UnitInfo
 		units, err = sysd.List(ctx)
@@ -473,7 +548,8 @@ func (s *Server) execute(req *Request, call validatedCall) *Response {
 		case errors.Is(err, webops.ErrUnavailable),
 			errors.Is(err, dbops.ErrUnavailable),
 			errors.Is(err, fsops.ErrUnavailable),
-			errors.Is(err, mailops.ErrUnavailable):
+			errors.Is(err, mailops.ErrUnavailable),
+			errors.Is(err, vmops.ErrUnavailable):
 			res.Status = StatusRejected
 			res.ErrorCategory = CatUnsupportedOp
 		case errors.Is(err, dbops.ErrInvalidKind), errors.Is(err, dbops.ErrInvalidName),
@@ -490,13 +566,19 @@ func (s *Server) execute(req *Request, call validatedCall) *Response {
 			errors.Is(err, mailops.ErrInvalidDomain), errors.Is(err, mailops.ErrInvalidLocal),
 			errors.Is(err, mailops.ErrInvalidAddress), errors.Is(err, mailops.ErrInvalidQuota),
 			errors.Is(err, mailops.ErrInvalidLimit), errors.Is(err, mailops.ErrNotFound),
-			errors.Is(err, mailops.ErrLimit):
+			errors.Is(err, mailops.ErrLimit),
+			errors.Is(err, vmops.ErrInvalidName), errors.Is(err, vmops.ErrInvalidPool),
+			errors.Is(err, vmops.ErrInvalidBridge), errors.Is(err, vmops.ErrInvalidLimits),
+			errors.Is(err, vmops.ErrNotFound), errors.Is(err, vmops.ErrLimit):
 			res.Status = StatusRejected
 			res.ErrorCategory = CatInvalidParams
 		case errors.Is(err, dbops.ErrProtected), errors.Is(err, dbops.ErrNoSpace),
 			errors.Is(err, dbops.ErrConflict), errors.Is(err, dbops.ErrForeignBackup),
 			errors.Is(err, fsops.ErrNotSiteRoot),
-			errors.Is(err, mailops.ErrConflict), errors.Is(err, mailops.ErrNoVmailUser):
+			errors.Is(err, mailops.ErrConflict), errors.Is(err, mailops.ErrNoVmailUser),
+			errors.Is(err, vmops.ErrConflict), errors.Is(err, vmops.ErrInsufficient),
+			errors.Is(err, vmops.ErrDiskFormat), errors.Is(err, vmops.ErrFormatMismatch),
+			errors.Is(err, vmops.ErrForeignVolume):
 			res.Status = StatusFailed
 			res.ErrorCategory = CatExecutorFailed
 		default:
@@ -558,6 +640,17 @@ func isMailOp(op string) bool {
 		OpMailDomainDelete, OpMailBoxList, OpMailBoxCreate, OpMailBoxDelete,
 		OpMailAliasList, OpMailAliasCreate, OpMailAliasDelete, OpMailQuotaSet,
 		OpMailConfigCheck, OpMailQueueList, OpMailLimitsGet, OpMailLimitsSet:
+		return true
+	}
+	return false
+}
+
+// isVmOp reports whether an operation belongs to the Faz 12 VM family.
+func isVmOp(op string) bool {
+	switch op {
+	case OpVMPreflight, OpVMStatus, OpVMList, OpVMInfo, OpVMCreate, OpVMClone,
+		OpVMStart, OpVMStop, OpVMReboot, OpVMDelete, OpVMDiskList, OpVMDiskAdd,
+		OpVMSnapshotList, OpVMSnapshotCreate, OpVMSnapshotRevert, OpVMSnapshotDelete:
 		return true
 	}
 	return false

@@ -53,6 +53,7 @@ server-privd --web-enable ...   # VARSAYILAN KAPALI — her iki aile için tek k
 server-privd --db-enable   # VARSAYILAN KAPALI — node-local PostgreSQL/MariaDB-MySQL yönetimi
 server-privd --fs-enable   # VARSAYILAN KAPALI — scoped dosya yöneticisi (yalnız site docroot'ları)
 server-privd --mail-enable # VARSAYILAN KAPALI — e-posta servisi yönetimi (Postfix/Dovecot/Rspamd; Faz 11)
+server-privd --vm-enable   # VARSAYILAN KAPALI — sanallaştırma yönetimi (KVM/QEMU/libvirt; Faz 12)
 ```
 
 - db ailesi yalnız node-local unix soketlerine dokunur; panelin kendi PostgreSQL'i yapısal olarak erişilemez (ADR-0014). Korumalı adlar (sistem + panel DB'leri) tipli red ile korunur.
@@ -67,6 +68,7 @@ kalabalık yok). TLS özel anahtarı yalnız bu broker'da doğar ve node'dan asl
 
 ## Güvenlik notları
 
+- Sanallaştırma ailesi (Faz 12, ADR-0016): `--vm-enable` verilmeden tüm vm.* işlemleri tipli red döner. Modül paket KURMAZ; `vm.preflight` yalnız rapor verir (KVM/CPU flags/bellek/pool/köprü). Gereksinimler: qemu-kvm, qemu-utils, libvirt-daemon-system + libvirt-clients, çalışan libvirtd, en az bir AKTİF storage pool ve bir köprü/libvirt ağı. Disk görüntü yolu payload'da ASLA taşınmaz; silme yalnız `sc-` önekli yönetilen birimlere dokunur (yabancı diskte tipli red). Snapshot'lar iç snapshot'tır ve yalnız qcow2'de çalışır (gerçek format qemu-img ile doğrulanır). VNC yalnız 127.0.0.1'e bağlanır; konsol akışı bu fazda yoktur. VM oluşturmak guest OS yönetimi sağlamaz — in-guest modüller için guest içine agent gerekir.
 - PostgreSQL portu yalnızca `127.0.0.1`'e bağlanır.
 - İmaj, tag + sha256 digest ile sabitlenmiştir (sürüm politikası); güncellerken digest'i yenileyin ve değişikliği kaydedin.
 - `.env` dosyası repoya girmez; `.env.example` yalnızca placeholder içerir.
