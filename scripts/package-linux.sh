@@ -96,8 +96,8 @@ if command -v rpmbuild >/dev/null 2>&1; then
   install -m 0755 "$STAGE/server-agent" "$RPMTOP/BUILD/server-agent"
   install -m 0755 "$STAGE/server-privd" "$RPMTOP/BUILD/server-privd"
   # NOT: sürümdeki '-' rpm'de '~' olur; tilde-expansion'a karşı sed ile
-  # ön-hesaplanır (CI-51 dersi: heredoc içi ${var/-/~} ~'yu $HOME'a açar).
-  local RPM_VERSION
+  # ön-hesaplanır (CI-51 dersi: heredoc içi ${var/-/~} ~'yu $HOME'a açar;
+  # CI-53 dersi: 'local' yalnız fonksiyon içindedir).
   RPM_VERSION="$(printf '%s' "$VERSION" | sed 's/-/~/')"
   cat > "$RPMTOP/SPECS/server-control-agent.spec" <<EOF
 Name:           server-control-agent
