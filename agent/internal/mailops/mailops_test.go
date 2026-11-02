@@ -244,6 +244,16 @@ func TestDomainCreateAppliesAndCompiles(t *testing.T) {
 	if !strings.Contains(string(mainCF), MainCFBegin) || !strings.Contains(string(mainCF), "virtual_mailbox_domains = hash:"+r.BaseDir) {
 		t.Fatal("managed main.cf block missing")
 	}
+	// CI-39: postfix virtual agent map'leri POSTFIX kullanıcısı olarak
+	// okur — yönetilen dizin 0755, derlenen .db 0644 olmalı.
+	st, serr := os.Stat(r.BaseDir)
+	if serr != nil || st.Mode().Perm() != 0o755 {
+		t.Fatalf("BaseDir perm = %v err=%v, want 0755", st.Mode().Perm(), serr)
+	}
+	dbSt, derr := os.Stat(r.domainPath() + ".db")
+	if derr != nil || dbSt.Mode().Perm() != 0o644 {
+		t.Fatalf("domains.db perm = %v err=%v, want 0644", dbSt.Mode().Perm(), derr)
+	}
 	if strings.Contains(string(mainCF), "static:0") {
 		t.Fatal("vmail uid/gid must be the injected non-zero values")
 	}

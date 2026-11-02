@@ -18,7 +18,8 @@ Control Plane (tasks: mail.* → RBAC mail:read/mail:control)
 
 | Yol | Amaç | İzin |
 | --- | --- | --- |
-| `/etc/server-control/mail/domains` | virtual_mailbox_domains map | 0644 |
+| `/etc/server-control/mail/` | yönetilen dizin | 0755 (postfix kullanıcısı map okur — CI-39) |
+| `/etc/server-control/mail/domains` | virtual_mailbox_domains map (satır: `domain OK`) | 0644 |
 | `/etc/server-control/mail/vmailbox` | virtual_mailbox_maps (adres → Maildir) | 0644 |
 | `/etc/server-control/mail/valias` | virtual_alias_maps | 0644 |
 | `/etc/server-control/mail/dovecot-users` | Dovecot passwd-file userdb ({SSHA} hash + kota) | 0600 |
@@ -78,4 +79,11 @@ Extra alanlar boşlukla ayrılır (Dovecot dokümantasyonu); kota değerindeki
 - DKIM imzalama anahtarı üretimi/kaydı bu fazda yok (UI açıklar).
 - Quota Dovecot userdb üzerinden uygulanır; Postfix `mailbox_size_limit`
   global bir değerdir ve `mail.limits.set` kapalı enum'undadır.
+- Dovecot userdb 0600 root-owned'dır: passwd-file doğrulaması auth-worker
+  tarafından root olarak okunur; IMAP oturumu bu fazda test edilmez.
+  Postfix tarafı için map dosyaları 0644 + dizin 0755 zorunludur
+  (CI-39: postfix virtual agent'ı 'postfix' kullanıcısı olarak okur).
+- domains map satırları `domain OK` biçimindedir: postmap key-only satırı
+  derlenmiş hash'e ALMAZ — bu, virtual_mailbox_domains'in sessizce bozulması
+  demektir (CI-38; regresyon birim testi biçimi güvenceye alır).
 - PTR/SPF doğrulaması panel dışıdır; preflight PTR sorgusu best-effort.

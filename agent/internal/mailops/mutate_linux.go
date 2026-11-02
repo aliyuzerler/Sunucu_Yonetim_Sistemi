@@ -728,8 +728,14 @@ func (r *Runner) ensurePostfixWired(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(r.baseDir(), 0o750); err != nil {
+	// 0755: postfix virtual/trivial-rewrite map lookup'ları POSTFIX
+	// kullanıcısı olarak yapılır — dizin gezilebilir olmalı (CI-39).
+	// Chmod açık: MkdirAll önceden-varolan dizine dokunmaz.
+	if err := os.MkdirAll(r.baseDir(), 0o755); err != nil {
 		return fmt.Errorf("yönetilen dizin oluşturulamadı: %w", err)
+	}
+	if cerr := os.Chmod(r.baseDir(), 0o755); cerr != nil {
+		return fmt.Errorf("yönetilen dizin izni: %w", cerr)
 	}
 	changed := false
 	for _, f := range []string{DomainsFile, VMailboxFile, VAliasFile} {
@@ -760,8 +766,12 @@ func (r *Runner) ensurePostfixWired(ctx context.Context) error {
 	}
 	if changed {
 		for _, f := range []string{DomainsFile, VMailboxFile, VAliasFile} {
-			if _, merr := runArgv(ctx, pm, filepath.Join(r.baseDir(), f)); merr != nil {
+			p := filepath.Join(r.baseDir(), f)
+			if _, merr := runArgv(ctx, pm, p); merr != nil {
 				return merr
+			}
+			if cerr := os.Chmod(p+".db", 0o644); cerr != nil {
+				return fmt.Errorf("map db izni: %w", cerr)
 			}
 		}
 		if _, cerr := runArgv(ctx, fx, "check"); cerr != nil {
@@ -827,6 +837,12 @@ func (r *Runner) applyMap(ctx context.Context, path string, newLines []string) (
 	if _, merr := runArgv(ctx, pm, path); merr != nil {
 		_ = r.restoreMap(ctx, path, backup)
 		return mapApply{}, merr
+	}
+	// postmap çıktısının izni sürümden sürüme değişebilir; postfix
+	// kullanıcısının okuyabilmesi için 0644 sabitlenir (CI-39).
+	if cerr := os.Chmod(path+".db", 0o644); cerr != nil {
+		_ = r.restoreMap(ctx, path, backup)
+		return mapApply{}, fmt.Errorf("map db izni: %w", cerr)
 	}
 	if _, cerr := runArgv(ctx, fx, "check"); cerr != nil {
 		_ = r.restoreMap(ctx, path, backup)
