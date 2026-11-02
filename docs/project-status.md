@@ -9,7 +9,7 @@
   - Alarm: migration 0017 (alert_rules + alerts; fingerprint kısmi tekil indeks) + `internal/alerts` (Store/PG + durum makinesi + Evaluator ticker + silence-expiry) + REST alert-rules CRUD/alerts liste/acknowledge/silence/resolve (auditli, alerts:read/alerts:control).
   - Güvenlik merkezi: `internal/securitycenter` (8 kontrol; unknown birinci sınıf; kanıt+checked_at her kontrolde) + `GET /security/overview` (security:read).
   - UI: MonitoringPage (freshness kartı, alarm listesi+aksiyonlar, kural formu/listesi), LogsPage (filtreler, task polling, redakte sonuç tablosu), SecurityPage (dürüst rozetler) — TR/EN +95 anahtar; nav operations grubu.
-  - Testler: agent 18/18 paket -race (logops dahil) + GOOS=windows temiz; backend 19/19 paket -race (PG entegrasyonları CI'da); vitest 46/46; Playwright 39/39 (5 yeni Faz 13 testi); tsc/eslint/build temiz; secret-scan temiz; mock API'ye Faz 13 uçları + logs.search simülasyonu (redakte örnek).
+  - Testler: agent 17/17 paket -race (logops dahil) + GOOS=windows temiz; backend 19/19 paket -race (PG entegrasyonları CI'da); vitest 46/46; Playwright 39/39 (5 yeni Faz 13 testi); tsc/eslint/build temiz; secret-scan temiz; mock API'ye Faz 13 uçları + logs.search simülasyonu (redakte örnek).
   - Docs: ADR-0017 + `docs/architecture/monitoring.md` + deploy README (CP_METRICS_TOKEN/systemd-journal/evaluator) + ADR index.
   - Ürün bulguları (bu fazda yakalanıp düzeltildi): kural formu currentTarget-null (async sonrası reset çöküyor, liste tazelemiyordu) → form referansı await öncesi alınır; LogsPage unit/contains aria-label eksikliği → eklendi.
 

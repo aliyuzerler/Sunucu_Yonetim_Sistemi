@@ -103,6 +103,8 @@ süitler taze koşuldu.
 | IT-03 | ORTA | KAPSAM (dürüst NOT RUN) | Gerçek journald üzerinde logs.search kanıtı: sandbox'ta systemd journal yok → **NOT RUN**. Hermetik süit (sahte çıktı dosyalarıyla tam akış + tipli `ErrPermission`/`ErrTooLarge`/`ErrJournalctlUnavailable` eşleme) kapsamı sağlar; operatör doğrulaması disposable VM'de `deploy/README.md` notuyla (systemd-journal üyeliği) | BELGELENDİ |
 | IT-04 | DÜŞÜK | Doküman | Alarm evaluator'u CP process içinde tekil çalışır; çoklu CP/HA senaryosunda leader seçimi gelecek çalışma | ADR-0017 + monitoring.md "Açık riskler" bölümüne işlendi |
 | IT-05 | DÜŞÜK | Doküman | `/metrics` token'sız modda yalnız secretsiz toplam seriler servis eder; yine de ters-proxy kısıtı önerilir | `handlers_metrics.go` yorumu + deploy README + monitoring.md |
+| CI-49 | ORTA | CI gerçek-koşu (secret-scan) | `logops_test.go` redaksiyon testleri kaynakta gerçekçi SAHTE token literalleri taşıyordu (`ghp_`+36, `AKIA`+16) — secret-scan doğru yakaladı. Yerel koşuda temiz görünmesinin kök nedeni: `git grep` yalnız TRACKED içerik tarar, dosyalar o anda commit edilmemişti (yanılgı kaydı: secret-scan, `git add` SONRASI koşulmalı) | **DÜZELTİLDİ** — sahte değerler runtime'da kurulur (`strings.Repeat`; kaynakta literal yok), RedactLine çalışma zamanında yine yakalar; logops -race ×2 yeşil, secret-scan (tracked) temiz |
+| CI-50 | ORTA | CI gerçek-koşu (windows-2025) | logops arama testleri `#!/bin/sh` fake journalctl ikilisi çalıştırır — windows runner'da çalıştırılamaz; journald ailesi zaten yalnız Linux (Windows yüzeyi Faz 05 `windows.eventlog.read`) | **DÜZELTİLDİ** — `fakeJournalctl` yardımcısına `runtime.GOOS == "windows"` dürüst skip; GOOS=windows vet/build temiz |
 | IT-06 | BİLGİ | Test altyapısı | 5 test-tarafı düzeltmesi: (a) LogsPage vitest — düğüm listesi yerleşmeden `selectOptions` (Faz 06 IT-01 ile aynı async yarış sınıfı); (b) MonitoringPage vitest — "Tekrar: 3" exact-match inline tarihle bölünüyor → regex; (c) acknowledge sonrası reload GET'leri yanıtlanmalı (notice `!error` koşulu); (d) pollTask 1 sn aralığı → `timeout: 4000` (NodeDetailWeb kuralı); (e) e2e tam-süit paylaşımlı mock durumunda strict-mode sayımları (4×Tamam, 6 node satırı → mon-01 satırına daraltma) | DÜZELTİLDİ (ürün etkilenmedi) |
 
 ## Çalıştırılan komutlar ve kısa çıktılar
@@ -110,7 +112,7 @@ süitler taze koşuldu.
 | Komut | Sonuç |
 | --- | --- |
 | `cd agent && go build ./... && go vet ./...` | temiz |
-| `cd agent && go test ./... -race -count=1` | **18/18 paket ok** (logops dahil) |
+| `cd agent && go test ./... -race -count=1` | **17/17 paket ok** (logops dahil) |
 | `GOOS=windows go build ./... && GOOS=windows go vet ./...` | temiz |
 | `cd backend/control-plane && go build ./... && go vet ./...` | temiz |
 | `cd backend/control-plane && go test ./... -race -count=1` | **19/19 paket ok** (PG entegrasyonları CI'da koşar — sandbox'ta PostgreSQL yok; testdb kurgusu bunları skip'ler) |
@@ -130,7 +132,7 @@ job'ının PostgreSQL 18 service container'ında koşar; gerçek Prometheus scra
 
 ## Regresyon
 
-Önceki fazların süitleri taze koşuldu: agent 18/18 -race (vmops/mailops/dbops/fsops
+Önceki fazların süitleri taze koşuldu: agent 17/17 -race (vmops/mailops/dbops/fsops
 dahil), GOOS=windows vet+build, backend 19/19 -race (registry 100-op testi
 `service_test.go:217`, route regression `routes_regression_test.go`), vitest
 46/46 (önceki 40 + Faz 13), Playwright 39/39 (önceki 34 + Faz 13). Kırılan
