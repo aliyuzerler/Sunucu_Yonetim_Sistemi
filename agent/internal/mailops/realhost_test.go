@@ -179,6 +179,12 @@ func TestRealMailLifecycle(t *testing.T) {
 		t.Fatal("Maildir ağacı silinmeli")
 	}
 
+	// 9.5) Alias delete — DomainDelete'in koruyucu çelişki reddi (çocuk
+	// varken silinmez) doğrudur; lifecycle kapanışı çocuklardan önce.
+	if _, err := r.AliasDelete(ctx, "citest-alias@"+domain); err != nil {
+		t.Fatalf("alias delete: %v", err)
+	}
+
 	// 10) Domain delete (temizlik + lifecycle kapanışı).
 	if _, err := r.DomainDelete(ctx, domain); err != nil {
 		t.Fatalf("domain delete: %v", err)
