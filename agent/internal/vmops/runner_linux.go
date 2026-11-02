@@ -1174,6 +1174,14 @@ func (r *Runner) Clone(ctx context.Context, src, name string) (CloneResult, erro
 		created = append(created, volume)
 		jobs = append(jobs, copyJob{volume: volume})
 	}
+	// The converted files were written by qemu-img DIRECTLY into the pool
+	// target — libvirt does not know them until a pool refresh (real CI
+	// finding CI-47: deleting the clone later resolved vol-path against a
+	// pool that had never indexed the volume). Refresh is REQUIRED, not
+	// best-effort: an unindexed volume would be undeletable.
+	if _, err := r.virsh(ctx, "pool-refresh", "--pool", anchor); err != nil {
+		return CloneResult{}, fmt.Errorf("%w: havuz tazelenemedi — kopya birimleri libvirt'e kaydedilemedi", ErrConflict)
+	}
 	if len(jobs) == 0 {
 		return CloneResult{}, fmt.Errorf("%w: kopyalanabilir disk yok", ErrConflict)
 	}

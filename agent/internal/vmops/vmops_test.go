@@ -63,6 +63,7 @@ case "$CMD" in
       ls "$PA" 2>/dev/null
     fi ;;
   pool-dumpxml) cat "$P/$1.xml" 2>/dev/null || exit 1 ;;
+  pool-refresh) exit 0 ;;
   net-list) cat "$VMSHIM/networks" 2>/dev/null ;;
   version) echo "Using library: libvirt 10.10.0"; echo "Using API: QEMU 10.10.0"; echo "Running hypervisor: QEMU 8.2.0"; echo "Hypervisor: QEMU 8.2.0" ;;
   dumpxml) [ -f "$D/$1.xml" ] && cat "$D/$1.xml" || exit 1 ;;
