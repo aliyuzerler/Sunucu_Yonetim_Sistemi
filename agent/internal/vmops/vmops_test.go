@@ -751,6 +751,32 @@ func TestCloneRequiresStoppedSource(t *testing.T) {
 	}
 }
 
+func TestDeleteRemovesSnapshotsBeforeUndefine(t *testing.T) {
+	// Gerçek CI bulgusu (CI-46): libvirt, snapshot'ı olan inaktif domain'in
+	// undefine'ını reddeder — delete önce snapshot'ları kaldırmalı.
+	r, state, _ := shims(t)
+	seedHost(t, r, false)
+	seedPool(t, state, "default")
+	seedDomain(t, state, "vm1", "shut off", fixtureDomainXML)
+	snaps := filepath.Join(state, "snapshots", "vm1")
+	if err := os.MkdirAll(snaps, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(snaps, "snap1"), []byte(""), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	res, err := r.Delete(context.Background(), "vm1")
+	if err != nil {
+		t.Fatalf("snapshot'lı delete: %v", err)
+	}
+	if len(res.VolumesRemoved) != 1 {
+		t.Errorf("birim silinmeliydi: %+v", res)
+	}
+	if _, err := os.Stat(filepath.Join(snaps, "snap1")); !os.IsNotExist(err) {
+		t.Errorf("snapshot silinmeliydi: %v", err)
+	}
+}
+
 func TestCloneRefusesNonDirAnchorPool(t *testing.T) {
 	r, state, _ := shims(t)
 	seedHost(t, r, false)

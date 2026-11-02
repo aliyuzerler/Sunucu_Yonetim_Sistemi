@@ -86,7 +86,7 @@ VNC cihazı **yalnız 127.0.0.1**'e bağlanır; akış/proxy bu fazda yoktur.
 | `vm.clone` | kaynak `shut off` zorunlu → dumpxml → her disk `qemu-img convert -O qcow2` (yeni sc- birim) → yeni UUID/MAC → define | define başarısız → kopya birimler silinir |
 | `vm.start` | domstate; `running` ise dürüst no-op (`already`) | `virsh start` hatası → typed error |
 | `vm.stop` | graceful `virsh shutdown` + sınırlı bekleme (60s) | zaman aşımı → tipli `ErrConflict` (destroy YAPILMAZ); `force=true` → `virsh destroy` (audit: forced) |
-| `vm.delete` | `shut off` zorunlu → dumpxml disk envanteri → sc- kapısı → `virsh undefine [--nvram]` → `vol-delete` | kısmi silme sonrası ikinci koşu kurtarır (undefine not-found = tamam sayılır) |
+| `vm.delete` | `shut off` zorunlu → dumpxml disk envanteri → sc- kapısı → iç snapshot'lar silinir (libvirt snapshot'lı undefine'ı reddeder — CI-46 gerçek bulgusu) → `virsh undefine [--nvram]` → `vol-delete` | snapshot red → tipli çelişki (durum kurtarılabilir); kısmi silme sonrası ikinci koşu kurtarır (undefine not-found = tamam sayılır) |
 | `vm.disk.add` | sonraki boş `vd*` → `vol-create-as` → `attach-device --persistent` | attach başarısız → birim geri silinir |
 | `vm.snapshot.*` | qcow2 kapısı → `snapshot-create-as/revert/delete` → listede doğrulama | yoksa/kural dışıysa tipli red |
 

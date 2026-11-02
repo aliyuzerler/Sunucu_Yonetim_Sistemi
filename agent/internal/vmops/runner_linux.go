@@ -1378,6 +1378,16 @@ func (r *Runner) Delete(ctx context.Context, name string) (DeleteResult, error) 
 			return DeleteResult{}, fmt.Errorf("%w: %s", ErrForeignVolume, vols[len(vols)-1].name)
 		}
 	}
+	// Internal snapshots BLOCK undefine (libvirt: "cannot delete inactive
+	// domain with N snapshots"). The operator already chose delete — remove
+	// them first, honestly typed if one refuses (state stays recoverable).
+	if names, lerr := r.snapshotNames(ctx, name); lerr == nil && len(names) > 0 {
+		for _, sn := range names {
+			if _, serr := r.virsh(ctx, "snapshot-delete", "--domain", name, "--snapshotname", sn); serr != nil {
+				return DeleteResult{}, fmt.Errorf("%w: snapshot silinemedi (%s)", ErrConflict, sn)
+			}
+		}
+	}
 	// Undefine first (config), then volumes (data) — a repeated run
 	// recovers from a partial previous delete.
 	if d.OS.NVRAM != nil {
