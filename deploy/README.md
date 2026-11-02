@@ -76,7 +76,7 @@ kalabalık yok). TLS özel anahtarı yalnız bu broker'da doğar ve node'dan asl
 - PostgreSQL portu yalnızca `127.0.0.1`'e bağlanır.
 - İmaj, tag + sha256 digest ile sabitlenmiştir (sürüm politikası); güncellerken digest'i yenileyin ve değişikliği kaydedin.
 - `.env` dosyası repoya girmez; `.env.example` yalnızca placeholder içerir.
-- Bu compose dosyası üretim dağıtımı değildir; üretim topolojisi Faz 15'te paketlenir.
+- Bu compose dosyası yalnızca geliştirme ortamı içindir; üretim kurulumu Faz 15 ile paketlendi — imzalı deb/rpm/zip ve yükseltme/geri alma prosedürü için `INSTALL-UPDATE.md`'ye bakın.
 
 ## Faz 15: imzalı güncelleme hattı (ADR-0020)
 

@@ -5,5 +5,10 @@
   "phases": 16,
   "phase_prompts": 16,
   "phase_test_prompts": 16,
-  "note": "Documentation and prompts only; no runnable control panel implementation included."
+  "note": "Bu dosya 2026-11-01 teslim kitinin envanteridir ve kök SHA256SUMS o günkü checksum anlık görüntüsüdür; ikisi de güncellenmez. Kit bu tarihten sonra tamamen uygulandı: 16/16 faz tamamlandı (güncel sürüm v0.16.0-rc1). Güncel durum için README.md, docs/project-status.md ve CHANGELOG.md'e bakın.",
+  "status": {
+    "implemented_phases": 16,
+    "current_version": "v0.16.0-rc1",
+    "as_of": "2026-11-03"
+  }
 }
