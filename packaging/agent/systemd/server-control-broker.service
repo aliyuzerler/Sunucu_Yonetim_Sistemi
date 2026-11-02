@@ -1,0 +1,17 @@
+[Unit]
+Description=Server Control privileged broker (server-privd)
+Documentation=https://github.com/aliyuzerler/Sunucu_Yonetim_Sistemi
+# Broker YALNIZ ajanın istemci UID'sine cevap verir; aile bayrakları
+# (--backup-enable, --update-enable, --update-trust-key) VARSAYILAN KAPALIDIR
+# (ADR-0012/14/15/16/18/20 genelleştirmesi).
+After=network.target
+
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/local/bin/server-privd --allowed-uid server-control
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

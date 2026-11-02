@@ -12,6 +12,7 @@ import (
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/dbcred"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/dns"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/enroll"
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/extensions"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/identity"
 
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/alerts"
@@ -25,6 +26,7 @@ import (
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/securitycenter"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/tasks"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/telemetry"
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/updates"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -78,6 +80,10 @@ type Options struct {
 	// Faz 14: yedekleme kayıtları + bulut sağlayıcı bağdaştırıcıları.
 	Backup *backup.Service
 	Cloud  *cloud.Service
+
+	// Faz 15: eklenti sözleşmesi + imzalı güncelleme kayıt defteri.
+	Extensions *extensions.Service
+	Updates    *updates.Service
 }
 
 // api holds handler dependencies.
@@ -103,6 +109,9 @@ type api struct {
 
 	backup *backup.Service
 	cloud  *cloud.Service
+
+	extensions *extensions.Service
+	updates    *updates.Service
 }
 
 // New assembles the HTTP handler with the full middleware chain.
@@ -139,6 +148,9 @@ func New(opts Options) http.Handler {
 		metrics:   opts.Metrics,
 		backup:    opts.Backup,
 		cloud:     opts.Cloud,
+
+		extensions: opts.Extensions,
+		updates:    opts.Updates,
 	}
 
 	r := chi.NewRouter()
@@ -257,6 +269,15 @@ func New(opts Options) http.Handler {
 			r.With(a.requirePermission(rbac.PermCloudCtrl)).With(a.requireCSRF).Delete("/cloud-providers/{providerID}", a.handleDeleteCloudProvider)
 			r.With(a.requirePermission(rbac.PermCloudCtrl)).With(a.requireCSRF).Post("/cloud-providers/{providerID}/verify", a.handleVerifyCloudProvider)
 			r.With(a.requirePermission(rbac.PermCloudRead)).Get("/cloud-providers/{providerID}/resources", a.handleListCloudResources)
+			r.With(a.requirePermission(rbac.PermExtRead)).Get("/extensions", a.handleListExtensions)
+			r.With(a.requirePermission(rbac.PermExtRead)).Get("/extensions/{extensionID}", a.handleGetExtension)
+			r.With(a.requirePermission(rbac.PermExtCtrl)).With(a.requireCSRF).Post("/extensions", a.handleRegisterExtension)
+			r.With(a.requirePermission(rbac.PermExtCtrl)).With(a.requireCSRF).Post("/extensions/{extensionID}/permissions/approve", a.handleApproveExtensionPermission)
+			r.With(a.requirePermission(rbac.PermExtCtrl)).With(a.requireCSRF).Post("/extensions/{extensionID}/permissions/revoke", a.handleRevokeExtensionPermission)
+			r.With(a.requirePermission(rbac.PermExtCtrl)).With(a.requireCSRF).Post("/extensions/{extensionID}/revoke", a.handleRevokeExtension)
+			r.With(a.requirePermission(rbac.PermUpdateRead)).Get("/update-artifacts", a.handleListUpdateArtifacts)
+			r.With(a.requirePermission(rbac.PermUpdateCtrl)).With(a.requireCSRF).Post("/update-artifacts", a.handlePublishUpdateArtifact)
+			r.With(a.requirePermission(rbac.PermUpdateCtrl)).With(a.requireCSRF).Post("/update-artifacts/{artifactID}/revoke", a.handleRevokeUpdateArtifact)
 			r.With(a.requirePermission(rbac.PermCloudCtrl)).With(a.requireCSRF).Delete("/cloud-providers/{providerID}/resources/{resourceID}", a.handleDeleteCloudResource)
 		})
 	})

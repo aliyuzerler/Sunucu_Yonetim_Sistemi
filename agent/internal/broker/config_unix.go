@@ -16,6 +16,7 @@ import (
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/pkgops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/svcops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/tlsops"
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/updateops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/vmops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/webops"
 )
@@ -65,6 +66,11 @@ type Config struct {
 	// --backup-enable ile seçilir, VARSAYILAN KAPALI — ADR-0018). Repo yolu
 	// ve parola dosyası node'da sabittir; parola payload'a ASLA girmez.
 	Backup BackupRunner
+
+	// Faz 15: güncelleme runner'ı (nil = update ailesi tipli red;
+	// --update-enable + --update-trust-key ile seçilir, VARSAYILAN KAPALI —
+	// ADR-0020). Hedef/staging/rollback yolları node'da sabittir.
+	Update UpdateRunner
 
 	// Audit receives one entry per handled request (incl. rejections).
 	Audit  AuditSink
@@ -244,3 +250,15 @@ type BackupRunner interface {
 
 // compile-time: the real runner satisfies the interface.
 var _ BackupRunner = (*backupops.Runner)(nil)
+
+// UpdateRunner executes the Faz 15 update operations (verify + staging +
+// health-check + rollback; paths node-managed — ADR-0020). *updateops.Runner
+// implements it; the interface keeps broker tests hermetic.
+type UpdateRunner interface {
+	Stage(ctx context.Context, payload updateops.StagePayload) (updateops.StageResult, error)
+	Status(ctx context.Context) (updateops.StatusResult, error)
+	Rollback(ctx context.Context) (updateops.RollbackResult, error)
+}
+
+// compile-time: the real runner satisfies the interface.
+var _ UpdateRunner = (*updateops.Runner)(nil)

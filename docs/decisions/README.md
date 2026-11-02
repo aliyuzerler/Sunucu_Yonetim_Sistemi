@@ -42,3 +42,5 @@ ADR'ler, mimari olarak önemli kararları, bağlamlarını ve sonuçlarını kay
 | [ADR-0016](ADR-0016-kvm-libvirt-vm.md) | KVM/QEMU/libvirt Sanallaştırma — Opt-in VM Ailesi, Disk Yolu Payload'da Yok, Managed sc- Birimler, qcow2 Snapshot Kapısı | Accepted (Phase 12) |
 | [ADR-0017](ADR-0017-monitoring-logs-alerts-security.md) | İzleme, Log Arama, Alarm Yaşam Döngüsü ve Güvenlik Merkezi — Sınırlı Kardinalite, Dürüst unknown Durumu, Node-tarafı Redaksiyon | Accepted (Phase 13) |
 | [ADR-0018](ADR-0018-backup-cloud.md) | Yedekleme/Geri Yükleme ve Bulut Sağlayıcı Bağdaştırıcıları — Ayrık Kapsamlar, Zorunlu Doğrulama, Anahtar Ayrımı, Onay Kapılı Silme | Accepted (Phase 14) |
+| [ADR-0019](ADR-0019-extension-contract.md) | Eklenti Sözleşmesi — İmzalı Manifest, Varsayılan İzinsiz Onay Modeli, Tip İş Delegasyonu | Accepted (Phase 15) |
+| [ADR-0020](ADR-0020-signed-updates.md) | İmzalı Güncelleme Hattı — Staging, Zorunlu İmza+Hash Doğrulaması, Health-Check ve Rollback | Accepted (Phase 15) |

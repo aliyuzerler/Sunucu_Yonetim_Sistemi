@@ -16,6 +16,7 @@ import (
 	"strings"
 	"syscall"
 
+	"crypto/ed25519"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/backupops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/broker"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/dbops"
@@ -26,6 +27,7 @@ import (
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/pkgops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/svcops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/tlsops"
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/updateops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/vmops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/webops"
 )
@@ -51,6 +53,8 @@ func registerPlatformFlags() {
 	flag.BoolVar(&platformFlags.vmEnable, "vm-enable", false, "Faz 12 sanallaştırma ailesini etkinleştir (KVM/QEMU/libvirt VM yönetimi; VARSAYILAN KAPALI)")
 	flag.BoolVar(&platformFlags.backupEnable, "backup-enable", false, "Faz 14 yedekleme ailesini etkinleştir (restic node yedeği; VARSAYILAN KAPALI)")
 	flag.StringVar(&platformFlags.backupSources, "backup-source", backupops.DefaultSource, "virgüllü yedek kaynak kökleri (yollar bu köklerin ALTINDA olmalı)")
+	flag.BoolVar(&platformFlags.updateEnable, "update-enable", false, "Faz 15 imzalı güncelleme ailesini etkinleştir (staging + health-check + rollback; VARSAYILAN KAPALI — ADR-0020)")
+	flag.StringVar(&platformFlags.updateTrust, "update-trust-key", "", "virgüllü base64 ed25519 genel anahtar(lar) — update artifact imza güven kökü (zorunlu)")
 }
 
 func run(logger *slog.Logger, cfg daemonConfig) error {
@@ -99,6 +103,7 @@ func run(logger *slog.Logger, cfg daemonConfig) error {
 		Mail:          mailRunnerOrZero(platformFlags.mailEnable),                                  // Faz 11: e-posta yönetimi (opt-in; ADR-0015)
 		VM:            vmRunnerOrZero(platformFlags.vmEnable),                                      // Faz 12: sanallaştırma yönetimi (opt-in; ADR-0016)
 		Backup:        backupRunnerOrZero(platformFlags.backupEnable, platformFlags.backupSources), // Faz 14: restic yedeği (opt-in; ADR-0018)
+		Update:        updateRunnerOrZero(platformFlags.updateEnable, platformFlags.updateTrust),   // Faz 15: imzalı güncelleme (opt-in; ADR-0020)
 		Audit:         sink,
 		Logger:        logger,
 	})
@@ -183,6 +188,32 @@ func vmRunnerOrZero(enabled bool) broker.VMRunner {
 		return nil
 	}
 	return &vmops.Runner{}
+}
+
+// updateRunnerOrZero wires the Faz 15 signed-update runner; OPT-IN (default
+// OFF). The trust key is REQUIRED: without it every op fails closed
+// (ErrTrustKeyMissing) — unsigned updates are structurally impossible
+// (ADR-0020 criterion 2).
+func updateRunnerOrZero(enabled bool, trustKeys string) broker.UpdateRunner {
+	if !enabled {
+		return nil
+	}
+	var keys []ed25519.PublicKey
+	for _, part := range strings.Split(trustKeys, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		key, err := updateops.ParseTrustKey(part)
+		if err != nil {
+			return nil
+		}
+		keys = append(keys, key)
+	}
+	if len(keys) == 0 {
+		return nil // no trust root → family structurally disabled
+	}
+	return updateops.NewRunner(keys)
 }
 
 // backupRunnerOrZero wires the Faz 14 restic runner; OPT-IN (default OFF) —

@@ -25,6 +25,7 @@ import (
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/logops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/mailops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/tlsops"
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/updateops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/vmops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/webops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/winops"
@@ -910,6 +911,60 @@ func (b *BackupExecutor) Execute(ctx context.Context, payload []byte) ([]byte, s
 	}
 	req := &broker.Request{Operation: b.op, Params: payload}
 	res, err := broker.NewClient(b.brokerPath).Call(ctx, req)
+	if err != nil {
+		return nil, "", fmt.Errorf("broker erişilemiyor: %w", err)
+	}
+	switch res.Status {
+	case broker.StatusSucceeded:
+		return res.Result, "broker işlemi tamamlandı", nil
+	case broker.StatusRejected:
+		return nil, res.Output, fmt.Errorf("broker reddetti: %s", res.ErrorCategory)
+	default:
+		return nil, res.Output, fmt.Errorf("broker işlemi başarısız: %s", res.ErrorCategory)
+	}
+}
+
+// UpdateExecutor relays one update.* operation (Faz 15 signed-update family)
+// to the local privileged broker. The agent adds NO path/staging logic — the
+// control-plane validator AND the broker re-validate; verification, staging,
+// health-check and rollback happen inside the privileged broker only
+// (ADR-0020). The transport byte cap mirrors updateops.MaxPayloadBytes.
+type UpdateExecutor struct {
+	op         string
+	brokerPath string
+}
+
+// NewUpdateExecutor builds one broker-backed update executor.
+func NewUpdateExecutor(op, brokerPath string) *UpdateExecutor {
+	return &UpdateExecutor{op: op, brokerPath: brokerPath}
+}
+
+// Info describes the capability; availability refined by ProbeAvailable.
+func (u *UpdateExecutor) Info() *agentv1.Capability {
+	return &agentv1.Capability{
+		CapabilityId:   u.op,
+		Version:        "1.0.0",
+		Available:      false,
+		AdapterId:      "update-broker",
+		AdapterVersion: Version,
+	}
+}
+
+// ProbeAvailable: broker ayakta mı.
+func (u *UpdateExecutor) ProbeAvailable(ctx context.Context) (bool, string) {
+	cli := broker.NewClient(u.brokerPath)
+	probeCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	return cli.Ping(probeCtx)
+}
+
+// Execute relays the payload (byte-capped) to the broker.
+func (u *UpdateExecutor) Execute(ctx context.Context, payload []byte) ([]byte, string, error) {
+	if len(payload) > updateops.MaxPayloadBytes {
+		return nil, "", fmt.Errorf("payload %d bayt > %d sınırı", len(payload), updateops.MaxPayloadBytes)
+	}
+	req := &broker.Request{Operation: u.op, Params: payload}
+	res, err := broker.NewClient(u.brokerPath).Call(ctx, req)
 	if err != nil {
 		return nil, "", fmt.Errorf("broker erişilemiyor: %w", err)
 	}

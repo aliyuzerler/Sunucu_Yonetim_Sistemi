@@ -112,8 +112,8 @@ func TestCapabilityProbing(t *testing.T) {
 	// 1 logs = 12 available; 12 docker op'unun probe'u /var/run/docker.sock
 	// varlığına, 7 web + 3 web.cert + 11 db + 5 fs + 16 mail + 5 backup
 	// op'unun probe'u broker ping'ine bakar (toplam 89).
-	if len(caps) != 89 {
-		t.Fatalf("89 capability: %d", len(caps))
+	if len(caps) != 92 {
+		t.Fatalf("92 capability: %d", len(caps))
 	}
 	avail := map[string]bool{}
 	for _, c := range caps {

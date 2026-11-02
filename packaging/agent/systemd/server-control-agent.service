@@ -1,0 +1,22 @@
+[Unit]
+Description=Server Control agent (unprivileged)
+Documentation=https://github.com/aliyuzerler/Sunucu_Yonetim_Sistemi
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=server-control
+Group=server-control
+ExecStart=/usr/local/bin/server-agent run --server 127.0.0.1:9090 --ca-file /etc/server-control/ca.crt
+Restart=on-failure
+RestartSec=5
+# Sertleştirme: ajan ayrıcalıksızdır; ayrıcalıklı işlemler yalnız broker'dadır.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/var/lib/server-control
+
+[Install]
+WantedBy=multi-user.target

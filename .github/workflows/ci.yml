@@ -585,3 +585,130 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Yüksek sinyalli secret desenleri
         run: bash scripts/secret-scan.sh
+
+  # Faz 15: imzalı güncelleme ailesinin GERÇEK yaşam döngüsü kanıtı —
+  # verify (sha256 + ed25519) → staging → health-check → swap → rollback.
+  # EXPECTED_UPDATE=1 gate'i CI-17 dersi gereği SESSİZ ATLANMAZ (kriter 2).
+  agent-update:
+    name: "Agent (gerçek update lifecycle — imza + staging + rollback kanıtı)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Setup Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: agent/go.mod
+          cache-dependency-path: agent/go.sum
+      - name: Updateops gerçek lifecycle (verify→stage→health→rollback + bozuk imza redi)
+        run: |
+          cd agent
+          EXPECTED_UPDATE=1 go test -race -count=1 -run TestRealUpdateLifecycle -v ./internal/updateops/
+
+  # Faz 15: paketleme hattı — deb/rpm/zip + SHA256SUMS + SCP-SIG-V1 imza ve
+  # GERÇEK kurulum testleri (kriter 3/4): debian:13'te deb clean install →
+  # upgrade (reinstall) → uninstall; rockylinux:9'da rpm install → erase.
+  # Paket postinst/postrm sözleşmeleri (veri korunur) bağlantılı kanıtlanır.
+  release-package:
+    name: "Sürüm paketleri (deb/rpm/zip + checksum + imza + kurulum testleri)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Setup Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: backend/control-plane/go.mod
+          cache-dependency-path: backend/control-plane/go.sum
+      - name: Paketleme araçları (dpkg-deb + rpm + zip)
+        run: |
+          sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq rpm zip
+      - name: sigtool derle
+        run: cd backend/control-plane && go build -buildvcs=false -o /usr/local/bin/sigtool ./cmd/sigtool
+      - name: Geçici sürüm anahtarı üret (yalnız bu koşu için)
+        run: |
+          sigtool keygen --priv /tmp/release-priv.b64 > /tmp/keygen.txt
+          grep -A1 "GENEL" /tmp/keygen.txt | tail -1 > /tmp/release-pub.b64
+          echo "RELEASE_PRIV_B64=$(cat /tmp/release-priv.b64)" >> "$GITHUB_ENV"
+      - name: Paketle + checksum + imzala (0.16.0-rc1)
+        run: bash scripts/release-package.sh 0.16.0-rc1 dist
+      - name: İmzaları doğrula
+        run: |
+          PUB=$(cat /tmp/release-pub.b64)
+          cd dist
+          while read -r sha sig name; do
+            [ -f "$name" ] || continue
+            sigtool verify --pub "$PUB" --file "$name" --sig "$sig"
+          done < SHA256SUMS.sig
+      - name: deb — debian:13 clean install → upgrade → uninstall (kriter 4)
+        run: |
+          docker run --rm -v "$PWD/dist:/dist" debian:13 bash -exc '
+            dpkg -i /dist/server-control-agent_0.16.0-rc1_amd64.deb
+            test -x /usr/local/bin/server-agent && test -x /usr/local/bin/server-privd
+            test -f /lib/systemd/system/server-control-agent.service
+            dpkg -i /dist/server-control-agent_0.16.0-rc1_amd64.deb
+            dpkg -r server-control-agent
+            test ! -e /usr/local/bin/server-agent
+            test -d /var/lib/server-control/updates/incoming
+          '
+      - name: rpm — rockylinux:9 install → erase (kriter 4)
+        run: |
+          docker run --rm -v "$PWD/dist:/dist" rockylinux:9 bash -exc '
+            RPM=$(ls /dist/*.rpm | head -1)
+            rpm -ivh "$RPM"
+            test -x /usr/local/bin/server-agent
+            rpm -e server-control-agent
+            test ! -e /usr/local/bin/server-agent
+          '
+      - name: Windows artifact — zip yapısı + checksum doğrulaması
+        run: |
+          cd dist
+          unzip -l server-control-agent_0.16.0-rc1_windows_amd64.zip | grep -q "server-agent.exe"
+          unzip -l server-control-agent_0.16.0-rc1_windows_amd64.zip | grep -q "server-privd.exe"
+          sha256sum -c <(grep windows_amd64.zip SHA256SUMS)
+      - name: Artifact yükle
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-packages
+          path: dist/
+
+  # Faz 15: sürüm denetimi — SBOM + zafiyet taraması (RAPORLAYICI: bulgular
+  # release dosyasında yorumlanır; bilinen orta düzey npm bulguları taban
+  # kayıttadır — project-status). Rapor artifact olarak yüklenir.
+  release-audit:
+    name: "Release denetimi (SBOM + govulncheck + npm audit — rapor)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Setup Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: backend/control-plane/go.mod
+          cache-dependency-path: backend/control-plane/go.sum
+      - name: SBOM üret (CycloneDX uyumlu JSON — stdlib/gomod/npm kilitleri)
+        run: |
+          mkdir -p audit
+          python3 scripts/sbom.py > audit/sbom.json
+          head -30 audit/sbom.json
+      - name: govulncheck (backend + agent)
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@v1.1.4 || go install golang.org/x/vuln/cmd/govulncheck@latest
+          cd backend/control-plane && govulncheck ./... > /tmp/govuln-backend.txt 2>&1 || true
+          cd ../../agent && govulncheck ./... > /tmp/govuln-agent.txt 2>&1 || true
+          cp /tmp/govuln-backend.txt /tmp/govuln-agent.txt "$OLDPWD/audit/" 2>/dev/null || true
+      - name: npm audit (web — rapor)
+        run: |
+          cd web
+          npm audit --json > ../audit/npm-audit.json || true
+          npm audit > ../audit/npm-audit.txt || true
+          tail -20 ../audit/npm-audit.txt || true
+      - name: Rapor yükle
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-audit
+          path: audit/

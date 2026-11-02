@@ -342,6 +342,60 @@ export interface RestoreDrill {
   created_at: string;
 }
 
+// Faz 15: eklenti sözleşmesi (ADR-0019) ve imzalı güncelleme kayıt defteri
+// (ADR-0020) UI tipleri.
+export interface ExtensionPermRequest {
+  action: string;
+  risk: "low" | "medium" | "high";
+  reason: string;
+}
+
+export interface ExtensionGrant {
+  action: string;
+  risk: "low" | "medium" | "high";
+  granted_by: string;
+  granted_at: string;
+  revoked_at?: string | null;
+}
+
+export interface ExtensionRow {
+  id: string;
+  name: string;
+  display_name: string;
+  vendor: string;
+  version: string;
+  api_version: string;
+  min_cp_version: string;
+  artifact_sha256: string;
+  state: "pending" | "approved" | "revoked";
+  manifest?: unknown;
+  requested_permissions: ExtensionPermRequest[];
+  granted_permissions: ExtensionGrant[];
+  delegated_ops: string[];
+  capabilities: string[];
+  api_compatible: boolean;
+  registered_by: string;
+  registered_at: string;
+  updated_at: string;
+}
+
+export interface UpdateArtifact {
+  id: string;
+  target: "agent_linux_amd64" | "agent_windows_amd64" | "control_plane";
+  version: string;
+  file_name: string;
+  size_bytes: number;
+  sha256: string;
+  signature: string;
+  min_prev?: string;
+  api_version: string;
+  notes?: string;
+  state: "published" | "revoked";
+  manifest?: unknown;
+  published_by: string;
+  published_at: string;
+}
+
 export interface CloudProvider {
   id: string;
   name: string;

@@ -36,13 +36,13 @@ func (f *fakeFaz14Backup) DrillCP(ctx context.Context, pool *pgxpool.Pool, id, a
 
 func TestFaz14RegistryOps(t *testing.T) {
 	fake := &fakeFaz14Backup{}
-	reg, err := BuildDefaultRegistry(&fakeTagSetter{}, Faz09Services{}, Faz14Services{Backup: fake})
+	reg, err := BuildDefaultRegistry(&fakeTagSetter{}, Faz09Services{}, Faz14Services{Backup: fake}, Faz15Services{})
 	if err != nil {
 		t.Fatalf("kayıt defteri: %v", err)
 	}
-	// CP yedeği executor'lu kurulumda 108 operasyon: 105 + 3 backup.cp.*.
-	if len(reg.Names()) != 108 {
-		t.Fatalf("108 operasyon bekleniyordu: %d", len(reg.Names()))
+	// CP yedeği executor'lu kurulumda 111 operasyon: 105 + 3 backup.cp.* + 3 update.* (Faz 15).
+	if len(reg.Names()) != 111 {
+		t.Fatalf("111 operasyon bekleniyordu: %d", len(reg.Names()))
 	}
 	perm := map[string]string{
 		"backup.repo.init":        "backup:control",

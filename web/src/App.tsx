@@ -6,6 +6,7 @@ import { BackupsPage } from "./pages/BackupsPage";
 import { CloudPage } from "./pages/CloudPage";
 import { ComingSoonPage } from "./pages/ComingSoonPage";
 import { EnrollmentPage } from "./pages/EnrollmentPage";
+import { ExtensionsPage } from "./pages/ExtensionsPage";
 import { LoginPage } from "./pages/LoginPage";
 import { DnsPage } from "./pages/DnsPage";
 import { LogsPage } from "./pages/LogsPage";
@@ -15,6 +16,7 @@ import { SecurityPage } from "./pages/SecurityPage";
 import { SslPage } from "./pages/SslPage";
 import { OverviewPage } from "./pages/OverviewPage";
 import { TasksPage } from "./pages/TasksPage";
+import { UpdatesPage } from "./pages/UpdatesPage";
 import { UsersPage } from "./pages/UsersPage";
 import { useState } from "react";
 
@@ -55,6 +57,9 @@ export function App() {
           {/* Faz 14: yedekleme ve bulut sağlayıcı entegrasyonları. */}
           {active === "backups" && <BackupsPage />}
           {active === "integrations" && <CloudPage />}
+          {/* Faz 15: eklenti sözleşmesi ve imzalı güncellemeler. */}
+          {active === "modules" && <ExtensionsPage />}
+          {active === "updates" && <UpdatesPage />}
           {![
             "overview",
             "nodes",
@@ -69,6 +74,8 @@ export function App() {
             "security",
             "backups",
             "integrations",
+            "modules",
+            "updates",
           ].includes(active) && (
             <ComingSoonPage moduleId={active} />
           )}

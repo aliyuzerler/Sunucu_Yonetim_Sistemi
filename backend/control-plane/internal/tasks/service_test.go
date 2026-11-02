@@ -207,7 +207,7 @@ func TestRegistryValidation(t *testing.T) {
 	if err == nil {
 		t.Fatal("geçersiz operasyon adı reddedilmeli")
 	}
-	reg, err := BuildDefaultRegistry(&fakeTagSetter{}, Faz09Services{}, Faz14Services{})
+	reg, err := BuildDefaultRegistry(&fakeTagSetter{}, Faz09Services{}, Faz14Services{}, Faz15Services{})
 	if err != nil {
 		t.Fatalf("varsayılan kayıt defteri: %v", err)
 	}
@@ -215,8 +215,8 @@ func TestRegistryValidation(t *testing.T) {
 	// kayda girmez): echo/noop/tag + 5 systemd + 5 SCM + eventlog + pkg.list
 	// + 3 firewall + 15 docker/compose + 7 web + 5 dns + 3 cert + 3 web.cert
 	// + 11 db + 5 fs + 16 mail + 16 vm + 1 logs + 5 backup.node = 105.
-	if len(reg.Names()) != 105 {
-		t.Fatalf("105 operasyon bekleniyordu: %v", reg.Names())
+	if len(reg.Names()) != 108 {
+		t.Fatalf("108 operasyon bekleniyordu: %v", reg.Names())
 	}
 	// Faz 05: Windows ailesi RBAC katmanı — SCM okuma service:read,
 	// SCM kontrol service:control, eventlog eventlog:read.
@@ -299,7 +299,7 @@ func TestPayloadValidators(t *testing.T) {
 func newTestService(t *testing.T) (*Service, *fakeStore, *spyAudit) {
 	t.Helper()
 	store := newFakeStore()
-	reg, err := BuildDefaultRegistry(&fakeTagSetter{}, Faz09Services{}, Faz14Services{})
+	reg, err := BuildDefaultRegistry(&fakeTagSetter{}, Faz09Services{}, Faz14Services{}, Faz15Services{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -461,7 +461,7 @@ func (c *collectPublisher) Publish(_ context.Context, ev *OutboxEvent) error {
 
 func TestWorkerExecutesQueuedTask(t *testing.T) {
 	svc, store, _ := newTestService(t)
-	reg, _ := BuildDefaultRegistry(&fakeTagSetter{}, Faz09Services{}, Faz14Services{})
+	reg, _ := BuildDefaultRegistry(&fakeTagSetter{}, Faz09Services{}, Faz14Services{}, Faz15Services{})
 	w, spy, pub := runWorker(t, store, reg)
 	ctx := context.Background()
 
@@ -557,7 +557,7 @@ func TestWorkerFailsOnExecutorPanic(t *testing.T) {
 
 func TestWorkerUnsupportedOperation(t *testing.T) {
 	store := newFakeStore()
-	reg, _ := BuildDefaultRegistry(&fakeTagSetter{}, Faz09Services{}, Faz14Services{})
+	reg, _ := BuildDefaultRegistry(&fakeTagSetter{}, Faz09Services{}, Faz14Services{}, Faz15Services{})
 	w, _, _ := runWorker(t, store, reg)
 	ctx := context.Background()
 

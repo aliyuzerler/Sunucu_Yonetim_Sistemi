@@ -89,7 +89,7 @@ export const modulePhase: Record<string, number> = {
   users: 0,
   enrollment: 0,
   integrations: 0,
-  modules: 15,
-  updates: 15,
+  modules: 0,
+  updates: 0,
   system: 1,
 };

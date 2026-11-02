@@ -144,7 +144,7 @@ func TestValidateWebPHPList(t *testing.T) {
 
 // TestFaz08RegistrySpecs: RBAC eşleme + sınıf disiplini (kriter 1 + RBAC).
 func TestFaz08RegistrySpecs(t *testing.T) {
-	reg, err := BuildDefaultRegistry(&fakeTagSetter{}, Faz09Services{}, Faz14Services{})
+	reg, err := BuildDefaultRegistry(&fakeTagSetter{}, Faz09Services{}, Faz14Services{}, Faz15Services{})
 	if err != nil {
 		t.Fatal(err)
 	}

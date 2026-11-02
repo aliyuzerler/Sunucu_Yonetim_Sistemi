@@ -50,6 +50,49 @@ const cpBackups = [];
 const nodeBackups = [];
 const restoreDrills = [];
 const cloudProviders = [];
+// Faz 15: eklenti + imzalı güncelleme mock kayıtları (ADR-0019/0020).
+const extensions = [];
+const updateArtifacts = [];
+extensions.push({
+  id: "88888888-8888-4888-8888-888888888888",
+  name: "site-audit-helper",
+  display_name: "Site Audit Helper",
+  vendor: "Example GmbH",
+  version: "1.0.0",
+  api_version: ">=1.0.0 <2.0.0",
+  min_cp_version: "0.15.0",
+  artifact_sha256: "77aa77aa77aa77aa77aa77aa77aa77aa77aa77aa77aa77aa77aa77aa77aa77aa",
+  state: "pending",
+  manifest: {},
+  signature: "c2FtcGxlLXNpZ25hdHVyZS1iYXNlNjQtc3RyaW5nLS0tLS0tLS0tLS0tLS0tLS0tLS0t",
+  requested_permissions: [
+    { action: "backup:read", risk: "low", reason: "Yedek listesini okuyup rapor üretir." },
+    { action: "tasks:write", risk: "medium", reason: "backup.cp.run görevi başlatır (delege op)." },
+  ],
+  granted_permissions: [],
+  delegated_ops: ["backup.cp.run"],
+  capabilities: [],
+  api_compatible: true,
+  registered_by: "admin",
+  registered_at: new Date().toISOString(),
+  updated_at: new Date().toISOString(),
+});
+updateArtifacts.push({
+  id: "99999999-9999-4999-8999-999999999999",
+  target: "agent_linux_amd64",
+  version: "0.16.0-rc1",
+  file_name: "server-control-agent_0.16.0-rc1_amd64.deb",
+  size_bytes: 12345678,
+  sha256: "55bb55bb55bb55bb55bb55bb55bb55bb55bb55bb55bb55bb55bb55bb55bb55bb",
+  signature: "dXBkYXRlLXNpZ25hdHVyZS1iYXNlNjQtc3RyaW5nLS0tLS0tLS0tLS0tLS0tLS0tLS0",
+  min_prev: "0.15.0",
+  api_version: "1.0.0",
+  notes: "RC1 sürümü",
+  state: "published",
+  manifest: {},
+  published_by: "admin",
+  published_at: new Date().toISOString(),
+});
 const cloudBuckets = new Map(); // provider id -> Set<bucket adı>
 let drillSeq = 0;
 
@@ -297,6 +340,10 @@ const OPERATIONS = [
   { name: "backup.cp.run", version: "1.0.0", class: "non_idempotent", retry_safe: false, timeout_seconds: 300 },
   { name: "backup.cp.verify", version: "1.0.0", class: "idempotent_desired_state", retry_safe: true, timeout_seconds: 120 },
   { name: "backup.cp.restore_drill", version: "1.0.0", class: "non_idempotent", retry_safe: false, timeout_seconds: 300 },
+  // Faz 15: imzalı güncelleme ailesi (--update-enable — ADR-0020).
+  { name: "update.stage", version: "1.0.0", class: "idempotent_desired_state", retry_safe: true, timeout_seconds: 120 },
+  { name: "update.status", version: "1.0.0", class: "read_only", retry_safe: true, timeout_seconds: 30 },
+  { name: "update.rollback", version: "1.0.0", class: "destructive", retry_safe: false, timeout_seconds: 120 },
 ];
 
 // Faz 04 telemetri mock verisi: her node'a agent telemetrisi eklenir.
@@ -1499,6 +1546,21 @@ setInterval(() => {
           updated_at: now,
         });
       }
+      if (t.operation === "update.status") {
+        t.result = { active_version: "server-agent version 0.15.0", staged: true, staged_version: "0.16.0-rc1", rollback_ready: false, incoming_files: 1, update_enabled: true };
+      }
+      if (t.operation === "update.rollback") {
+        t.result = { state: "rolled_back", health_check: "ok", health_output: "server-agent version 0.15.0" };
+      }
+      if (t.operation === "update.stage") {
+        const up = updateArtifacts.find((a) => a.id === (t.payload && t.payload.update_id));
+        if (!up || up.state !== "published") {
+          t.status = "failed";
+          t.result = { error: "update artifact yayımlı değil" };
+        } else {
+          t.result = { state: "staged", version: up.version, artifact: "staged-" + up.sha256.slice(0, 16), sha256: up.sha256, health_check: "ok", health_output: "server-agent version " + up.version + " | post-swap: ok" };
+        }
+      }
       if (t.operation === "backup.cp.verify") {
         t.result = { backup_id: t.payload && t.payload.backup_id, verify_state: "verified", verify_detail: "tablo=27 satır=142" };
       }
@@ -2153,6 +2215,165 @@ const server = createServer(async (req, res) => {
     json(res, 200, { drills: rows.slice(0, Number(url.searchParams.get("limit") || 50)) });
     return;
   }
+  // ---- Faz 15: eklenti sözleşmesi (ADR-0019) ----
+  if (method === "GET" && path === "/api/v1/extensions") {
+    json(res, 200, { extensions, trust_enabled: true });
+    return;
+  }
+  if (method === "POST" && path === "/api/v1/extensions") {
+    const body = await readBody();
+    const m = body.manifest || {};
+    if (!m.name || m.name.length < 2) {
+      json(res, 400, errorBody("invalid_request", "manifest geçersiz.", 400));
+      return;
+    }
+    if (extensions.some((e) => e.name === m.name)) {
+      json(res, 409, errorBody("duplicate_extension", "Eklenti adı zaten kayıtlı.", 409));
+      return;
+    }
+    const row = {
+      id: uuid(),
+      name: m.name,
+      display_name: m.display_name || m.name,
+      vendor: m.vendor || "",
+      version: m.version || "1.0.0",
+      api_version: m.api_version || ">=1.0.0",
+      min_cp_version: m.min_cp_version || "0.15.0",
+      artifact_sha256: m.artifact_sha256 || "0".repeat(64),
+      state: "pending",
+      manifest: m,
+      signature: m.signature || "",
+      requested_permissions: m.permissions || [],
+      granted_permissions: [],
+      delegated_ops: m.delegated_ops || [],
+      capabilities: m.capabilities || [],
+      api_compatible: true,
+      registered_by: actor,
+      registered_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    extensions.push(row);
+    logAudit(actor, "extension.register", "extension", row.id, "success");
+    json(res, 201, row);
+    return;
+  }
+  const extApproveMatch = /^\/api\/v1\/extensions\/([^/]+)\/permissions\/approve$/.exec(path);
+  if (method === "POST" && extApproveMatch) {
+    const e = extensions.find((x) => x.id === extApproveMatch[1]);
+    if (!e) {
+      json(res, 404, errorBody("extension_not_found", "Eklenti bulunamadı.", 404));
+      return;
+    }
+    const body = await readBody();
+    if (!body.confirm) {
+      json(res, 400, errorBody("confirmation_required", "İzin onayı açık confirm gerektirir.", 400));
+      return;
+    }
+    if (!(e.requested_permissions || []).some((p) => p.action === body.action)) {
+      json(res, 400, errorBody("invalid_request", "İzin manifestte istenmemiş.", 400));
+      return;
+    }
+    const risk = (e.requested_permissions.find((p) => p.action === body.action) || {}).risk || "medium";
+    const existing = (e.granted_permissions || []).find((g) => g.action === body.action);
+    if (existing) {
+      existing.revoked_at = null;
+      existing.granted_at = new Date().toISOString();
+    } else {
+      (e.granted_permissions = e.granted_permissions || []).push({
+        action: body.action,
+        risk,
+        granted_by: actor,
+        granted_at: new Date().toISOString(),
+        revoked_at: null,
+      });
+    }
+    e.updated_at = new Date().toISOString();
+    logAudit(actor, "extension.permission.approve", "extension", e.id, "success");
+    json(res, 200, e);
+    return;
+  }
+  const extRevokePermMatch = /^\/api\/v1\/extensions\/([^/]+)\/permissions\/revoke$/.exec(path);
+  if (method === "POST" && extRevokePermMatch) {
+    const e = extensions.find((x) => x.id === extRevokePermMatch[1]);
+    if (!e) {
+      json(res, 404, errorBody("extension_not_found", "Eklenti bulunamadı.", 404));
+      return;
+    }
+    const body = await readBody();
+    const g = (e.granted_permissions || []).find((x) => x.action === body.action);
+    if (g && !g.revoked_at) g.revoked_at = new Date().toISOString();
+    e.updated_at = new Date().toISOString();
+    logAudit(actor, "extension.permission.revoke", "extension", e.id, "success");
+    json(res, 200, e);
+    return;
+  }
+  const extRevokeMatch = /^\/api\/v1\/extensions\/([^/]+)\/revoke$/.exec(path);
+  if (method === "POST" && extRevokeMatch) {
+    const e = extensions.find((x) => x.id === extRevokeMatch[1]);
+    if (!e) {
+      json(res, 404, errorBody("extension_not_found", "Eklenti bulunamadı.", 404));
+      return;
+    }
+    e.state = "revoked";
+    for (const g of e.granted_permissions || []) {
+      if (!g.revoked_at) g.revoked_at = new Date().toISOString();
+    }
+    e.updated_at = new Date().toISOString();
+    logAudit(actor, "extension.revoke", "extension", e.id, "success");
+    json(res, 200, e);
+    return;
+  }
+
+  // ---- Faz 15: imzalı güncelleme kayıt defteri (ADR-0020) ----
+  if (method === "GET" && path === "/api/v1/update-artifacts") {
+    json(res, 200, { artifacts: updateArtifacts, trust_enabled: true });
+    return;
+  }
+  if (method === "POST" && path === "/api/v1/update-artifacts") {
+    const body = await readBody();
+    const m = body.manifest || {};
+    if (!m.target || !m.version || !m.sha256) {
+      json(res, 400, errorBody("invalid_request", "update manifest geçersiz.", 400));
+      return;
+    }
+    if (updateArtifacts.some((a) => a.target === m.target && a.version === m.version)) {
+      json(res, 409, errorBody("duplicate_artifact", "Bu hedef+sürüm zaten yayımlanmış.", 409));
+      return;
+    }
+    const row = {
+      id: uuid(),
+      target: m.target,
+      version: m.version,
+      file_name: m.file_name || "artifact.bin",
+      size_bytes: m.size_bytes || 1,
+      sha256: m.sha256,
+      signature: m.signature || "",
+      min_prev: m.min_prev || "",
+      api_version: m.api_version || "1.0.0",
+      notes: m.notes || "",
+      state: "published",
+      manifest: m,
+      published_by: actor,
+      published_at: new Date().toISOString(),
+    };
+    updateArtifacts.push(row);
+    logAudit(actor, "update.artifact.publish", "update_artifact", row.id, "success");
+    json(res, 201, row);
+    return;
+  }
+  const artRevokeMatch = /^\/api\/v1\/update-artifacts\/([^/]+)\/revoke$/.exec(path);
+  if (method === "POST" && artRevokeMatch) {
+    const a = updateArtifacts.find((x) => x.id === artRevokeMatch[1]);
+    if (!a) {
+      json(res, 404, errorBody("update_artifact_not_found", "Update artifact bulunamadı.", 404));
+      return;
+    }
+    a.state = "revoked";
+    logAudit(actor, "update.artifact.revoke", "update_artifact", a.id, "success");
+    json(res, 200, { revoked: true });
+    return;
+  }
+
   if (method === "GET" && path === "/api/v1/cloud-providers") {
     json(res, 200, { providers: [...cloudProviders] });
     return;

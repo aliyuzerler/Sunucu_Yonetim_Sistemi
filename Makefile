@@ -102,3 +102,15 @@ migrate-status:
 
 migrate-down:
 	$(CD_CP) && $(GO) run ./cmd/migrate down
+
+# ---- Faz 15: paketleme + imza (ADR-0020) ----
+# make package VERSION=0.16.0-rc1 DIST=dist        → deb/rpm/zip + SHA256SUMS
+# make package-sign VERSION=... DIST=...           → + imzalar (RELEASE_PRIV_B64 gerekir)
+package:
+	bash scripts/package-linux.sh $(VERSION) $(DIST)
+
+package-sign:
+	bash scripts/release-package.sh $(VERSION) $(DIST)
+
+sbom:
+	python3 scripts/sbom.py > $(DIST)/sbom.json 2>/dev/null || (mkdir -p $(DIST) && python3 scripts/sbom.py > $(DIST)/sbom.json)

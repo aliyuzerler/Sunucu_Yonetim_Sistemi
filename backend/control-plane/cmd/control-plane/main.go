@@ -32,6 +32,7 @@ import (
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/dbcred"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/dns"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/enroll"
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/extensions"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/httpapi"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/identity"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/inventory"
@@ -42,6 +43,7 @@ import (
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/securitycenter"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/tasks"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/telemetry"
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/updates"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 )
@@ -66,6 +68,12 @@ func main() {
 		case "enroll-token":
 			if err := runEnrollToken(os.Args[2:]); err != nil {
 				fmt.Fprintf(os.Stderr, "control-plane enroll-token: %v\n", err)
+				os.Exit(1)
+			}
+			return
+		case "verify-update":
+			if err := runVerifyUpdate(os.Args[2:]); err != nil {
+				fmt.Fprintf(os.Stderr, "control-plane verify-update: %v\n", err)
 				os.Exit(1)
 			}
 			return
@@ -326,10 +334,39 @@ func run() error {
 		}
 		cloudSvc := cloud.NewService(cloud.NewPGStore(p), cloudCipher)
 
-		taskRegistry, err := tasks.BuildDefaultRegistry(inventorySvc, tasks.Faz09Services{DNS: dnsSvc, Cert: certSvc}, tasks.Faz14Services{Backup: backupSvc, Pool: p})
+		// Faz 15: imzalı güncelleme kayıt defteri (ADR-0020). Güven kökü boşsa
+		// yayın yüzeyi kapalıdır ama kayıt defteri çalışır.
+		updatesSvc, updErr := updates.NewService(updates.NewPGStore(p), cfg.UpdateTrustKeys)
+		if updErr != nil {
+			return fmt.Errorf("güncelleme kayıt defteri: %w", updErr)
+		}
+
+		taskRegistry, err := tasks.BuildDefaultRegistry(inventorySvc, tasks.Faz09Services{DNS: dnsSvc, Cert: certSvc}, tasks.Faz14Services{Backup: backupSvc, Pool: p}, tasks.Faz15Services{Updates: updatesSvc})
 		if err != nil {
 			return fmt.Errorf("görev kayıt defteri: %w", err)
 		}
+		// Faz 15: eklenti sözleşmesi (ADR-0019) — kayıt defterinden SONRA
+		// kurulur; delegated_ops mevcut op adlarına, istenen izinler RBAC
+		// kataloğuna karşı doğrulanır (kriter 1).
+		knownOps := map[string]bool{}
+		for _, n := range taskRegistry.Names() {
+			knownOps[n] = true
+		}
+		extSvc, extErr := extensions.NewService(extensions.NewPGStore(p), cfg.ExtensionTrustKeys, platform.APIVersion, platform.Version,
+			func() map[string]bool { return knownOps },
+			func() map[string]bool {
+				cat := map[string]bool{}
+				for _, perm := range rbac.AllPermissions {
+					cat[perm] = true
+				}
+				return cat
+			})
+		if extErr != nil {
+			return fmt.Errorf("eklenti servisi: %w", extErr)
+		}
+		opts.Extensions = extSvc
+		opts.Updates = updatesSvc
+
 		tasksSvc := tasks.NewService(taskStore, taskRegistry, auditRec)
 		taskWorker := tasks.NewWorker(taskStore, taskRegistry, nil, auditRec, logger, tasks.WorkerConfig{
 			OwnerID: fmt.Sprintf("control-plane-%d", os.Getpid()),

@@ -8,6 +8,9 @@ var (
 	Version   = "dev"
 	Commit    = "unknown"
 	BuildDate = "unknown"
+	// APIVersion is the control-plane API/extension compatibility contract
+	// version (Faz 15 extension manifests declare ranges against this).
+	APIVersion = "1.0.0"
 )
 
 // Info returns the current build information.

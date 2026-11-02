@@ -57,6 +57,12 @@ type Config struct {
 	// tutulur; CP_SECRETS_KEY bu dizine ASLA yazılmaz (kriter 3 —
 	// internal/backup.ValidateKeySeparation + dump içerik taraması).
 	BackupDir string // CP_BACKUP_DIR (varsayılan /var/backups/server-control/control-plane)
+
+	// Faz 15: eklenti manifest + güncelleme artifact imza güven kökleri
+	// (base64 ed25519 genel anahtarları; virgülle ayrık). Boş → ilgili
+	// kayıt/yayın yüzeyi KAPALIDIR (fail-closed, ADR-0019/0020).
+	ExtensionTrustKeys []string // CP_EXTENSION_TRUST_KEYS
+	UpdateTrustKeys    []string // CP_UPDATE_TRUST_KEYS
 }
 
 // Load reads configuration from process environment variables.
@@ -177,6 +183,11 @@ func FromEnv(env map[string]string) (Config, error) {
 
 	// Faz 14: kontrol paneli yedeği deposu.
 	cfg.BackupDir = valueOr(env, "CP_BACKUP_DIR", "/var/backups/server-control/control-plane")
+
+	// Faz 15: imza güven kökleri. Biçim: virgülle ayrık base64 ed25519
+	// genel anahtarları (32 bayt). Boş liste GEÇERLİDİR ama yüzeyi kapatır.
+	cfg.ExtensionTrustKeys = splitTrustKeys(env["CP_EXTENSION_TRUST_KEYS"])
+	cfg.UpdateTrustKeys = splitTrustKeys(env["CP_UPDATE_TRUST_KEYS"])
 	return cfg, nil
 }
 
@@ -205,4 +216,20 @@ func valueOr(env map[string]string, key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// splitTrustKeys splits a comma-separated trust key list, trimming spaces
+// and dropping empty entries ("a, b" → ["a","b"]).
+func splitTrustKeys(raw string) []string {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if t := strings.TrimSpace(p); t != "" {
+			out = append(out, t)
+		}
+	}
+	return out
 }

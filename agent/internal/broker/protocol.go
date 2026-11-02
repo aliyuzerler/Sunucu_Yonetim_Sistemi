@@ -28,6 +28,7 @@ import (
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/mailops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/pkgops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/tlsops"
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/updateops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/vmops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/webops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/winops"
@@ -157,6 +158,11 @@ const (
 	OpBackupSnapshotList = backupops.OpBackupSnapshotList
 	OpBackupVerify       = backupops.OpBackupVerify
 	OpBackupRestore      = backupops.OpBackupRestore
+
+	// Faz 15: imzalı güncelleme ailesi (--update-enable — ADR-0020).
+	OpUpdateStage    = updateops.OpUpdateStage
+	OpUpdateStatus   = updateops.OpUpdateStatus
+	OpUpdateRollback = updateops.OpUpdateRollback
 
 	OpWinServiceList    = winops.OpWinServiceList
 	OpWinServiceStatus  = winops.OpWinServiceStatus
@@ -325,6 +331,16 @@ type backupCall struct {
 	snapshot string
 }
 
+// updateCall carries the Faz 15 update-family parameters. NOTE: there is
+// deliberately NO path/target field — artifact source, staging, rollback and
+// the swap target are node-managed constants (ADR-0020 kriter 2).
+type updateCall struct {
+	updateID  string
+	version   string
+	sha256    string
+	signature string
+}
+
 // validatedCall is the typed outcome of request validation.
 type validatedCall struct {
 	target    string              // unit/service name (service families)
@@ -337,6 +353,7 @@ type validatedCall struct {
 	mail      mailCall            // Faz 11 mail family payload
 	vm        vmCall              // Faz 12 VM family payload
 	backup    backupCall          // Faz 14 backup family payload
+	update    updateCall          // Faz 15 update family payload
 }
 
 // validateRequest enforces the allowlist + payload schema for one request.
@@ -1042,6 +1059,31 @@ func validateRequest(req *Request) (validatedCall, error) {
 			return empty, reject(CatInvalidParams, "restore kimlikleri allowlist dışı")
 		}
 		return validatedCall{backup: backupCall{backupID: p.BackupID, snapshot: p.Snapshot}}, nil
+
+	case OpUpdateStage:
+		var p struct {
+			UpdateID  string `json:"update_id"`
+			Version   string `json:"version"`
+			SHA256    string `json:"sha256"`
+			Signature string `json:"signature"`
+		}
+		if err := strictDecode(req.Params, &p); err != nil {
+			return empty, reject(CatInvalidParams, "update stage şeması uyumsuz")
+		}
+		if err := updateops.ValidateStage(updateops.StagePayload{
+			UpdateID: p.UpdateID, Version: p.Version, SHA256: p.SHA256, Signature: p.Signature,
+		}); err != nil {
+			return empty, reject(CatInvalidParams, "update stage kimlikleri allowlist dışı")
+		}
+		return validatedCall{update: updateCall{updateID: p.UpdateID, version: p.Version, sha256: p.SHA256, signature: p.Signature}}, nil
+	case OpUpdateStatus, OpUpdateRollback:
+		if len(req.Params) > 0 {
+			var p map[string]json.RawMessage
+			if err := strictDecode(req.Params, &p); err != nil || len(p) != 0 {
+				return empty, reject(CatInvalidParams, "update şeması boş obje beklenir")
+			}
+		}
+		return empty, nil
 
 	case "":
 		return empty, reject(CatInvalidRequest, "operasyon boş")

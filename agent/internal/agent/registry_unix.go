@@ -122,5 +122,11 @@ func DefaultRegistry(brokerPath, dockerSocket string) (*ExecutorRegistry, error)
 		NewBackupExecutor(broker.OpBackupSnapshotList, brokerPath),
 		NewBackupExecutor(broker.OpBackupVerify, brokerPath),
 		NewBackupExecutor(broker.OpBackupRestore, brokerPath),
+
+		// Faz 15: imzalı güncelleme ailesi (yalnız broker'da yürütür;
+		// --update-enable + --update-trust-key — ADR-0020).
+		NewUpdateExecutor(broker.OpUpdateStage, brokerPath),
+		NewUpdateExecutor(broker.OpUpdateStatus, brokerPath),
+		NewUpdateExecutor(broker.OpUpdateRollback, brokerPath),
 	)
 }

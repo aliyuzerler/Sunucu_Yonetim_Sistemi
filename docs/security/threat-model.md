@@ -35,9 +35,15 @@
 - Docker-specific privilege warnings and policy checks for host mounts, privileged containers, host PID/network, devices and capabilities.
 - Network egress policy and SSRF protections for integrations.
 - Filesystem canonicalization, no-follow/openat-style safe access and isolated test cases.
-- Secret envelope encryption and redaction; signed update manifests and binaries.
+- Secret envelope encryption and redaction; signed update manifests and binaries (Faz 15: SCP-SIG-V1 ed25519 — CP publish + node staging + health-check/rollback, all fail-closed; ADR-0020).
+- Extension manifests are signed, start with NO permissions and require explicit per-permission admin grants; delegation is limited to registered typed operations (ADR-0019).
 - Backups are verified and restore is rehearsed in isolated destination before production overwrite.
 
 ## Release blockers
 
 Any unresolved Critical or High security finding in authentication, authorization, Agent identity, privilege boundary, Docker access, file access, secret management or update signature verification blocks production release.
+
+## Release blocker status (Faz 15 closure)
+
+- **Update signature verification:** CLOSED in v0.16.0-rc1 — three fail-closed layers proven by tests and CI (`TestRealUpdateLifecycle`, `TestStageRejectsUnsignedAndTampered`, `TestUpdateFamilyValidation`, `release-package` signature verification). Evidence: `docs/release/RELEASE-v0.16.0-rc1.md` §5-6.
+- Remaining adversities (extension permission abuse, malicious node) are covered by the grant model, revocation paths and audit; no open Critical/High finding is carried.

@@ -104,6 +104,17 @@ const (
 	PermBackupCtrl = "backup:control"
 	PermCloudRead  = "cloud:read"
 	PermCloudCtrl  = "cloud:control"
+
+	// Faz 15: eklenti sözleşmesi + imzalı güncelleme kayıt defteri.
+	// extensions:read → manifest/grant listesi; extensions:control → kayıt,
+	// izin onayı/geri alma, devre dışı bırakma (varsayılan izin YOK — her
+	// izin tek tek onaylanır, ADR-0019); updates:read → artifact üst verisi
+	// listesi; updates:control → yayınlama/iptal + update.stage görevi
+	// (imza doğrulaması CP'de VE agent'ta fail-closed, ADR-0020).
+	PermExtRead    = "extensions:read"
+	PermExtCtrl    = "extensions:control"
+	PermUpdateRead = "updates:read"
+	PermUpdateCtrl = "updates:control"
 )
 
 // AllPermissions lists the seeded catalog in one place.
@@ -125,6 +136,7 @@ var AllPermissions = []string{
 	PermVMRead, PermVMCtrl,
 	PermLogsRead, PermAlertsRead, PermAlertsCtrl, PermSecurityRead,
 	PermBackupRead, PermBackupCtrl, PermCloudRead, PermCloudCtrl,
+	PermExtRead, PermExtCtrl, PermUpdateRead, PermUpdateCtrl,
 }
 
 // Scope types.

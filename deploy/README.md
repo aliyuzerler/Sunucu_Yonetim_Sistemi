@@ -55,6 +55,7 @@ server-privd --fs-enable   # VARSAYILAN KAPALI — scoped dosya yöneticisi (yal
 server-privd --mail-enable # VARSAYILAN KAPALI — e-posta servisi yönetimi (Postfix/Dovecot/Rspamd; Faz 11)
 server-privd --vm-enable   # VARSAYILAN KAPALI — sanallaştırma yönetimi (KVM/QEMU/libvirt; Faz 12)
 server-privd --backup-enable --backup-source /etc/server-control   # VARSAYILAN KAPALI — restic node yedeği (Faz 14)
+server-privd --update-enable --update-trust-key <GENEL-ANAHTAR>    # VARSAYILAN KAPALI — imzalı güncelleme ailesi (Faz 15; ADR-0020)
 ```
 
 - db ailesi yalnız node-local unix soketlerine dokunur; panelin kendi PostgreSQL'i yapısal olarak erişilemez (ADR-0014). Korumalı adlar (sistem + panel DB'leri) tipli red ile korunur.
@@ -76,3 +77,17 @@ kalabalık yok). TLS özel anahtarı yalnız bu broker'da doğar ve node'dan asl
 - İmaj, tag + sha256 digest ile sabitlenmiştir (sürüm politikası); güncellerken digest'i yenileyin ve değişikliği kaydedin.
 - `.env` dosyası repoya girmez; `.env.example` yalnızca placeholder içerir.
 - Bu compose dosyası üretim dağıtımı değildir; üretim topolojisi Faz 15'te paketlenir.
+
+## Faz 15: imzalı güncelleme hattı (ADR-0020)
+
+- **Güven kökü:** `CP_EXTENSION_TRUST_KEYS` / `CP_UPDATE_TRUST_KEYS` (Control Plane) ve
+  `--update-trust-key` (broker) — virgüllü base64 ed25519 genel anahtar(lar) (`sigtool keygen`).
+  Anahtar yapılandırılmazsa ilgili yüzey KAPALIDIR (fail-closed).
+- **Paketler:** `make package VERSION=... DIST=dist` → deb/rpm/zip + `SHA256SUMS`;
+  imza için `RELEASE_PRIV_B64` ile `make package-sign` (SCP-SIG-V1). CI `release-package`
+  job'ı kurulum testlerini debian:13 + rockylinux:9'da uçtan uca kanıtlar.
+- **Node update akışı:** artifact `/var/lib/server-control/updates/incoming/` altına tek dosya
+  olarak yerleştirilir → `update.stage` (sha256 + imza + health-check + rollback kopyası +
+  atomik swap + post-swap health) → aktivasyon `linux.systemd.service.restart` →
+  `update.status` doğrulama; sorun halinde `update.rollback`.
+- **Tam rehber:** `deploy/INSTALL-UPDATE.md` (kurulum → yükseltme → düşürme sınırları → kaldırma).

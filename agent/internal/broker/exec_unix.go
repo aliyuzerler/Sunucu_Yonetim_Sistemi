@@ -19,6 +19,7 @@ import (
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/pkgops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/svcops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/tlsops"
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/updateops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/vmops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/webops"
 )
@@ -126,6 +127,14 @@ func (s *Server) execute(req *Request, call validatedCall) *Response {
 		res.Status = StatusRejected
 		res.ErrorCategory = CatUnsupportedOp
 		res.Output = "yedekleme ailesi kapalı (--backup-enable)"
+		return res
+	}
+	// Faz 15: update ailesi kendi opt-in kapısında (VARSAYILAN KAPALI —
+	// ADR-0020). Kapalıyken dürüst unsupported; sessiz kalabalık yok.
+	if isUpdateOp(req.Operation) && s.cfg.Update == nil {
+		res.Status = StatusRejected
+		res.ErrorCategory = CatUnsupportedOp
+		res.Output = "güncelleme ailesi kapalı (--update-enable)"
 		return res
 	}
 	select {
@@ -324,6 +333,30 @@ func (s *Server) execute(req *Request, call validatedCall) *Response {
 		var rr map[string]any
 		rr, err = s.cfg.DB.Restore(ctx, call.db.kind, call.db.database, call.db.backup)
 		result = rr
+
+	// ---- Faz 15: imzalı güncelleme ailesi (--update-enable — ADR-0020) ----
+	case OpUpdateStage:
+		var sr updateops.StageResult
+		sr, err = s.cfg.Update.Stage(ctx, updateops.StagePayload{
+			UpdateID: call.update.updateID, Version: call.update.version,
+			SHA256: call.update.sha256, Signature: call.update.signature,
+		})
+		result = map[string]any{
+			"state": sr.State, "version": sr.Version, "artifact": sr.Artifact,
+			"sha256": sr.SHA256, "health_check": sr.HealthCheck, "health_output": sr.HealthOut,
+		}
+	case OpUpdateStatus:
+		var st updateops.StatusResult
+		st, err = s.cfg.Update.Status(ctx)
+		result = map[string]any{
+			"active_version": st.ActiveVersion, "staged": st.Staged,
+			"staged_version": st.StagedVersion, "rollback_ready": st.RollbackReady,
+			"incoming_files": st.IncomingFiles, "update_enabled": st.UpdateEnabled,
+		}
+	case OpUpdateRollback:
+		var rr updateops.RollbackResult
+		rr, err = s.cfg.Update.Rollback(ctx)
+		result = map[string]any{"state": rr.State, "health_check": rr.HealthCheck, "health_output": rr.HealthOut}
 
 	// ---- Faz 14: yedekleme ailesi (restic; --backup-enable — ADR-0018) ----
 	case OpBackupRepoInit:
@@ -612,7 +645,12 @@ func (s *Server) execute(req *Request, call validatedCall) *Response {
 			errors.Is(err, vmops.ErrNotFound), errors.Is(err, vmops.ErrLimit),
 			errors.Is(err, backupops.ErrInvalidPaths), errors.Is(err, backupops.ErrInvalidSnapshot),
 			errors.Is(err, backupops.ErrInvalidBackupID), errors.Is(err, backupops.ErrInvalidLimit),
-			errors.Is(err, backupops.ErrKeySeparation), errors.Is(err, backupops.ErrRestoreOutside):
+			errors.Is(err, backupops.ErrKeySeparation), errors.Is(err, backupops.ErrRestoreOutside),
+			// Faz 15: imza/hash güven reddi tipli invalid_params'tır
+			// (fail-closed güven kategorisi — ADR-0020 kriter 2).
+			errors.Is(err, updateops.ErrBadSignature), errors.Is(err, updateops.ErrTrustKeyMissing),
+			errors.Is(err, updateops.ErrBadPayload), errors.Is(err, updateops.ErrNothingStaged),
+			errors.Is(err, updateops.ErrNoRollback), errors.Is(err, updateops.ErrUnsupportedOS):
 			res.Status = StatusRejected
 			res.ErrorCategory = CatInvalidParams
 		case errors.Is(err, dbops.ErrProtected), errors.Is(err, dbops.ErrNoSpace),
@@ -704,6 +742,15 @@ func isVmOp(op string) bool {
 func isBackupOp(op string) bool {
 	switch op {
 	case OpBackupRepoInit, OpBackupRun, OpBackupSnapshotList, OpBackupVerify, OpBackupRestore:
+		return true
+	}
+	return false
+}
+
+// isUpdateOp reports whether an operation belongs to the Faz 15 update family.
+func isUpdateOp(op string) bool {
+	switch op {
+	case OpUpdateStage, OpUpdateStatus, OpUpdateRollback:
 		return true
 	}
 	return false

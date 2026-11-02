@@ -65,6 +65,8 @@ var platformFlags struct {
 	vmEnable      bool   // unix only (Faz 12): sanallaştırma ailesi opt-in
 	backupEnable  bool   // unix only (Faz 14): yedekleme ailesi opt-in
 	backupSources string // unix only (Faz 14): virgüllü yedek kaynak kökleri
+	updateEnable  bool   // unix only (Faz 15): imzalı güncelleme ailesi opt-in
+	updateTrust   string // unix only (Faz 15): virgüllü base64 ed25519 güven kökleri
 }
 
 func auditSinkOrDie(logger *slog.Logger, path string) (*broker.JSONLSink, error) {
