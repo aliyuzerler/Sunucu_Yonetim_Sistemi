@@ -46,9 +46,22 @@ func (r *Runner) siteRootDir(site string) string {
 // swapped/renamed directories mid-walk, the opened object must remain in
 // scope or the operation fails).
 func scopeProof(fd int, canonicalRoot string) error {
-	real, err := os.Readlink(fmt.Sprintf("/proc/self/fd/%d", fd))
+	// /proc/self/fd readlink'i yoğun koşucularda tek seferlik transient
+	// ENOENT/ESTALE verebiliyor (CI gözlemi, run 41532486447 — fsops
+	// TestSecurityNegatives flake'i). Tek deneme; KANIT hâlâ kurulamıyorsa
+	// fail-closed ErrScope — asla pas geçilmez. Altta yatan errno korunur
+	// (teşhis edilebilirlik).
+	var real string
+	var err error
+	for attempt := 0; attempt < 2; attempt++ {
+		real, err = os.Readlink(fmt.Sprintf("/proc/self/fd/%d", fd))
+		if err == nil {
+			break
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
 	if err != nil {
-		return ErrScope
+		return fmt.Errorf("%w: /proc/self/fd kanıtı okunamadı: %v", ErrScope, err)
 	}
 	if real == canonicalRoot || strings.HasPrefix(real, canonicalRoot+"/") {
 		return nil

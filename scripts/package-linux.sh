@@ -44,13 +44,13 @@ mkdir -p "$DIST"
 
 # ---- .deb (dpkg-deb) ----
 DEBROOT="$STAGE/deb/server-control-agent_${VERSION}_${ARCH}"
+# NOT (CI-56 dersi): /var/lib altı dizinler paket payload'ına KONMAZ —
+# dpkg, kaldırmada sahibi olduğu boş dizinleri siler; veri-sözleşmesi
+# ("uninstall veri korur", INSTALL-UPDATE.md B.6) postinst ile kurulur.
 mkdir -p "$DEBROOT/DEBIAN" \
   "$DEBROOT/usr/local/bin" \
   "$DEBROOT/lib/systemd/system" \
-  "$DEBROOT/etc/server-control" \
-  "$DEBROOT/var/lib/server-control/updates/incoming" \
-  "$DEBROOT/var/lib/server-control/updates/staged" \
-  "$DEBROOT/var/lib/server-control/updates/rollback"
+  "$DEBROOT/etc/server-control"
 install -m 0755 "$STAGE/server-agent" "$DEBROOT/usr/local/bin/server-agent"
 install -m 0755 "$STAGE/server-privd" "$DEBROOT/usr/local/bin/server-privd"
 install -m 0644 "$REPO/packaging/agent/systemd/server-control-agent.service" "$DEBROOT/lib/systemd/system/"
