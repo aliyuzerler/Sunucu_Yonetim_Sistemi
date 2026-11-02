@@ -337,3 +337,55 @@ func TestUsersListNoPasswordColumns(t *testing.T) {
 		t.Fatal("kullanıcı listesi şifre kolonu seçmemeli")
 	}
 }
+
+// CI-34 (gerçek-host kanıtından): MySQL/MariaDB'de hiç grant verilmemiş
+// kullanıcı için REVOKE ERROR 1141 üretir — desired-state'in İLK
+// uygulaması bozulur. Runner, db-düzeyi yetki YOKSA REVOKE'u atlar.
+// Sahte mysql istemcisi argv'larını kaydeder; probe cevabına göre
+// yürütülen SQL doğrulanır.
+func TestGrantSetMySQLConditionalRevoke(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		probeOut   string
+		wantRevoke bool
+	}{
+		{"grants-exist", "1", true},
+		{"no-grants", "0", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			base := t.TempDir()
+			logFile := filepath.Join(base, "argv.log")
+			// Sahte istemci: yalnız SCHEMA_PRIVILEGES probe'una tc.probeOut
+			// döndürür; diğer varlık sorguları ("1") — kullanıcı/DB var.
+			script := ("#!/bin/sh\n" +
+				"printf '%s\\n' \"$*\" >> " + logFile + "\n" +
+				"case \"$*\" in *SCHEMA_PRIVILEGES*) echo " + tc.probeOut + " ;; *) echo 1 ;; esac\n")
+			r := &Runner{
+				Mysql:     fakeBin(t, base, "mysql", script),
+				BackupDir: filepath.Join(base, "backups"),
+				Timeout:   5 * time.Second,
+			}
+			// Veritabanı ve kullanıcı gerçek istemcide "var" sayılır
+			// (sahte istemci her varlık sorgusuna 1 döndürür).
+			if _, err := r.GrantSet(context.Background(), KindMySQL, "app_ro", "localhost", "app_db", LevelReadonly); err != nil {
+				t.Fatalf("grant set: %v", err)
+			}
+			log, err := os.ReadFile(logFile) //nolint:gosec // test path
+			if err != nil {
+				t.Fatal(err)
+			}
+			executed := string(log)
+			if !strings.Contains(executed, "GRANT SELECT") {
+				t.Fatalf("GRANT yürütülmeli: %s", executed)
+			}
+			hasRevoke := strings.Contains(executed, "REVOKE ALL PRIVILEGES")
+			if hasRevoke != tc.wantRevoke {
+				t.Fatalf("REVOKE varlığı %v bekleniyordu; log: %s", tc.wantRevoke, executed)
+			}
+			// Probe, kaçışlı grantee biçimiyle sorulmalı.
+			if !strings.Contains(executed, `'''app_ro'@'localhost'''`) {
+				t.Fatalf("probe grantee kaçışı hatalı: %s", executed)
+			}
+		})
+	}
+}

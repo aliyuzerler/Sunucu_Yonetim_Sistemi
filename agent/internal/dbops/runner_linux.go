@@ -539,9 +539,31 @@ func (r *Runner) GrantSet(ctx context.Context, kind, user, host, database, level
 	if !dExists {
 		return nil, fmt.Errorf("%w: veritabanı %q", ErrNotFound, database)
 	}
+	stmts := GrantSetSQL(kind, user, host, database, level)
+	if kind == KindMySQL {
+		// CI-34 (gerçek-host kanıtı): MySQL/MariaDB'de daha önce hiç grant
+		// verilmemiş kullanıcı için REVOKE ... ON db.* ERROR 1141 ("no
+		// such grant") fırlatır — desired-state'in İLK uygulaması bozulur.
+		// Mevcut db-düzeyi yetki var mı sorgulanır; yoksa REVOKE atlanır
+		// ("yetkisiz" istenen durum zaten sağlıdır). PostgreSQL REVOKE'u
+		// no-op'tur — koşulsuz kalır.
+		// grantee sütun biçimi: 'user'@'host' (tek tırnaklar dahil) →
+		// SQL literalinde kaçış: '''user'@'host'''. user/host/database
+		// allowlist RE ile doğrulanmıştır (tırnak içeremez).
+		probe := `SELECT COUNT(*) FROM information_schema.SCHEMA_PRIVILEGES ` +
+			`WHERE table_schema = '` + database + `' ` +
+			`AND grantee = '''` + user + `'@'` + host + `'''`
+		out, err := r.query(ctx, kind, probe)
+		if err != nil {
+			return nil, err
+		}
+		if strings.TrimSpace(string(out)) == "0" {
+			stmts = stmts[1:] // yalnız GRANT (REVOKE istenen durumu bozmaz)
+		}
+	}
 	// One session, ordered statements (psql -c keeps them in one implicit
 	// transaction; mysql -e runs them sequentially as authored).
-	sql := strings.Join(GrantSetSQL(kind, user, host, database, level), " ")
+	sql := strings.Join(stmts, " ")
 	if _, err := r.query(ctx, kind, sql); err != nil {
 		return nil, err
 	}

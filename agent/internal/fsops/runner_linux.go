@@ -207,23 +207,31 @@ func (r *Runner) List(ctx context.Context, root, path string, limit int) (ListRe
 	if err != nil {
 		return res, err
 	}
-	if parentFD != rootFD {
-		defer unix.Close(parentFD)
-	}
 
+	// CI-33 (CI -race gerçek koşusu): fd sahipliği tek yerde. final=="" →
+	// parentFD zaten rootFD'nin dup'idır ve dirFD olarak tek kez
+	// kapatılır; final!="" → parentFD rootFD DEĞİLSE (ara dizin) ayrıca
+	// kapatılır, dirFD walkFinal'ın sahibidir. Çift kapanış, fd-reuse ile
+	// ilgisiz bir fd'yi kapatabilir (EBADF) — CI'da -race altında patladı.
 	var dirFD int
-	if final == "" {
-		// walk returned a dup of rootFD (always ≠ rootFD) — owned here.
+	switch {
+	case final == "":
 		dirFD = parentFD
-	} else {
-		// final must be a directory (O_NOFOLLOW: symlink → typed refusal)
-		fd, err := walkFinal(parentFD, final, canonical, unix.O_RDONLY|unix.O_DIRECTORY, 0)
-		if err != nil {
-			return res, err
+	case parentFD != rootFD:
+		defer unix.Close(parentFD)
+		fd, ferr := walkFinal(parentFD, final, canonical, unix.O_RDONLY|unix.O_DIRECTORY, 0)
+		if ferr != nil {
+			return res, ferr
 		}
 		dirFD = fd
-		defer unix.Close(dirFD)
+	default:
+		fd, ferr := walkFinal(parentFD, final, canonical, unix.O_RDONLY|unix.O_DIRECTORY, 0)
+		if ferr != nil {
+			return res, ferr
+		}
+		dirFD = fd
 	}
+	defer unix.Close(dirFD)
 	if err := scopeProof(dirFD, canonical); err != nil {
 		return res, err
 	}
