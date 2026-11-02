@@ -490,6 +490,24 @@ jobs:
           sleep 3
           sudo virsh version || (sleep 5 && sudo virsh version)
           ls -l /dev/kvm || echo "kvm yok — TCG ile devam (dürüst)"
+      - name: Disposable runner libvirt ayarı (CI-44/45 bulgusu)
+        run: |
+          # Runner'da AppArmor + DAC etiketleme, root tarafından yaratılan
+          # havuz dosyalarını qemu'ya açtırmıyor (üç koşuluk kanıt serisi:
+          # /tmp AppArmor deny, /var/lib/libvirt + manuel chown sonrası da
+          # deny). Disposable runner'da qemu root olarak ve security_driver
+          # none ile koşar — LIFECYCLE kanıtı gerçek kalır (gerçek libvirt +
+          # qemu + KVM); ürünün kendi güvenlik katmanları (yol yokluğu,
+          # sc- kapısı, allowlist'ler) broker/runner kodundadır ve red
+          # testleriyle ayrıca kanıtlanır. Üretimde bu ayar YAPILMAZ.
+          sudo tee -a /etc/libvirt/qemu.conf >/dev/null <<'QEMUCONF'
+          user = "root"
+          group = "root"
+          security_driver = "none"
+          QEMUCONF
+          sudo systemctl restart libvirtd
+          sleep 3
+          sudo virsh uri
       - name: Vmops test ikilisini derle
         run: |
           cd agent
