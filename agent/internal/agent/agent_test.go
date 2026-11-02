@@ -114,8 +114,8 @@ func TestRegistryDefaultDeny(t *testing.T) {
 	// Faz 04+06+07+08+09+10+11+12: echo + 5 systemd + pkg.list + 3 firewall +
 	// 13 docker + 2 compose + 7 web + 3 web.cert + 11 db + 5 fs + 16 mail +
 	// 16 vm = 83.
-	if len(reg.Capabilities()) != 83 {
-		t.Fatalf("83 capability bekleniyordu: %d", len(reg.Capabilities()))
+	if len(reg.Capabilities()) != 84 {
+		t.Fatalf("84 capability bekleniyordu: %d", len(reg.Capabilities()))
 	}
 	for _, name := range []string{"agent.echo", "linux.systemd.service.list", "linux.systemd.service.status",
 		"linux.systemd.service.start", "linux.systemd.service.stop", "linux.systemd.service.restart",

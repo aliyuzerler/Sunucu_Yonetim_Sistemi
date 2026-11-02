@@ -6,7 +6,10 @@ import { ComingSoonPage } from "./pages/ComingSoonPage";
 import { EnrollmentPage } from "./pages/EnrollmentPage";
 import { LoginPage } from "./pages/LoginPage";
 import { DnsPage } from "./pages/DnsPage";
+import { LogsPage } from "./pages/LogsPage";
+import { MonitoringPage } from "./pages/MonitoringPage";
 import { NodesPage } from "./pages/NodesPage";
+import { SecurityPage } from "./pages/SecurityPage";
 import { SslPage } from "./pages/SslPage";
 import { OverviewPage } from "./pages/OverviewPage";
 import { TasksPage } from "./pages/TasksPage";
@@ -43,7 +46,11 @@ export function App() {
           {active === "enrollment" && <EnrollmentPage />}
           {active === "dns" && <DnsPage />}
           {active === "ssl" && <SslPage />}
-          {!["overview", "nodes", "tasks", "audit", "users", "enrollment", "dns", "ssl"].includes(active) && (
+          {/* Faz 13: izleme, log arama ve güvenlik merkezi. */}
+          {active === "monitoring" && <MonitoringPage />}
+          {active === "logs" && <LogsPage />}
+          {active === "security" && <SecurityPage />}
+          {!["overview", "nodes", "tasks", "audit", "users", "enrollment", "dns", "ssl", "monitoring", "logs", "security"].includes(active) && (
             <ComingSoonPage moduleId={active} />
           )}
         </main>

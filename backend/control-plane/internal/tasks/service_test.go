@@ -213,9 +213,9 @@ func TestRegistryValidation(t *testing.T) {
 	}
 	// Faz 04+05+06+07+08+09+10+11+12: echo/noop/tag + 5 systemd + 5 SCM +
 	// eventlog + pkg.list + 3 firewall + 15 docker/compose + 7 web + 5 dns
-	// + 3 cert + 3 web.cert + 11 db + 5 fs + 16 mail + 16 vm = 99.
-	if len(reg.Names()) != 99 {
-		t.Fatalf("99 operasyon bekleniyordu: %v", reg.Names())
+	// + 3 cert + 3 web.cert + 11 db + 5 fs + 16 mail + 16 vm + 1 logs = 100.
+	if len(reg.Names()) != 100 {
+		t.Fatalf("100 operasyon bekleniyordu: %v", reg.Names())
 	}
 	// Faz 05: Windows ailesi RBAC katmanı — SCM okuma service:read,
 	// SCM kontrol service:control, eventlog eventlog:read.

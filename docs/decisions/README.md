@@ -40,3 +40,4 @@ ADR'ler, mimari olarak önemli kararları, bağlamlarını ve sonuçlarını kay
 | [ADR-0014](ADR-0014-db-files-scoped.md) | Node-Local Database Management with Sealed One-Time Passwords and Site-Scoped Race-Free File Manager | Accepted (Phase 10) |
 | [ADR-0015](ADR-0015-mail-module.md) | E-posta Servisi Yönetimi — Opt-in Mail Ailesi, Syntax-Check + Rollback, Sealed Mailbox Passwords | Accepted (Phase 11) |
 | [ADR-0016](ADR-0016-kvm-libvirt-vm.md) | KVM/QEMU/libvirt Sanallaştırma — Opt-in VM Ailesi, Disk Yolu Payload'da Yok, Managed sc- Birimler, qcow2 Snapshot Kapısı | Accepted (Phase 12) |
+| [ADR-0017](ADR-0017-monitoring-logs-alerts-security.md) | İzleme, Log Arama, Alarm Yaşam Döngüsü ve Güvenlik Merkezi — Sınırlı Kardinalite, Dürüst unknown Durumu, Node-tarafı Redaksiyon | Accepted (Phase 13) |

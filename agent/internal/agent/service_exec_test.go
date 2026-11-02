@@ -112,8 +112,8 @@ func TestCapabilityProbing(t *testing.T) {
 	// compose = 11 available; 12 docker op'unun probe'u /var/run/docker.sock
 	// varlığına, 7 web + 3 web.cert + 11 db + 5 fs + 16 mail op'unun probe'u
 	// broker ping'ine bakar (toplam 83).
-	if len(caps) != 83 {
-		t.Fatalf("83 capability: %d", len(caps))
+	if len(caps) != 84 {
+		t.Fatalf("84 capability: %d", len(caps))
 	}
 	avail := map[string]bool{}
 	for _, c := range caps {
@@ -134,6 +134,15 @@ func TestCapabilityProbing(t *testing.T) {
 	}
 	env = capabilityEnvelope(context.Background(), "node-1", dead)
 	for _, c := range env.GetCapabilityReport().GetCapabilities() {
+		if c.GetCapabilityId() == "logs.search" {
+			// Faz 13: agent-local (journalctl) — broker ölümünden
+			// etkilenmez; ortama bağlı dürüst unavailable kabul edilir,
+			// asla broker_unreachable gerekçesi taşımaz.
+			if c.GetReasonUnavailable() == "broker_unreachable" {
+				t.Fatalf("logs.search broker'a bağlı olmamalı: %+v", c)
+			}
+			continue
+		}
 		if c.GetCapabilityId() == "agent.echo" || strings.HasPrefix(c.GetCapabilityId(), "docker.compose.") {
 			// echo yerleşik kanıt; compose saf analiz — ikisi de her zaman available.
 			if !c.GetAvailable() {

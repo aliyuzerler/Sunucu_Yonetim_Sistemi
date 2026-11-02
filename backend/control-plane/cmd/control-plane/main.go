@@ -19,6 +19,7 @@ import (
 
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/acmex"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/agentsrv"
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/alerts"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/audit"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/certmgmt"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/certs"
@@ -30,9 +31,11 @@ import (
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/httpapi"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/identity"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/inventory"
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/monitoring"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/platform"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/rbac"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/secrets"
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/securitycenter"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/tasks"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/telemetry"
 	"google.golang.org/grpc"
@@ -333,6 +336,37 @@ func run() error {
 		// redaksiyon daima kazanır, sadece reveal imkânsızlaşır).
 		dbCredSvc := &dbcred.Service{Store: dbcred.NewStore(p), Key: secretsKey, KeyConfigured: cfg.SecretsKey != ""}
 		opts.DBCreds = dbCredSvc
+
+		// Faz 13: alarm modülü + değerlendirici döngüsü.
+		alertStore := alerts.NewPGStore(p)
+		opts.Alerts = alertStore
+		secSvc := securitycenter.NewService(p, securitycenter.Config{
+			SecretsKeySet: cfg.SecretsKey != "",
+			AgentCASet:    cfg.CACert != "" && cfg.CAKey != "",
+			CookieSecure:  cfg.CookieSecure,
+		})
+		opts.Security = secSvc
+		alertEvaluator := &alerts.Evaluator{
+			Store:     alertStore,
+			Telemetry: telemetrySvc,
+			Nodes:     alerts.PGNodeLister{Pool: p},
+			Interval:  cfg.AlertEvalInterv,
+			Logger:    logger,
+		}
+		go alertEvaluator.Run(workerCtx)
+
+		// Faz 13: Prometheus metrik yüzeyi (süreç + DB serileri).
+		metricsReg := monitoring.NewRegistry()
+		obs, obsErr := monitoring.NewHTTPObserver(metricsReg)
+		if obsErr != nil {
+			return fmt.Errorf("http metrik observer: %w", obsErr)
+		}
+		exporter, expErr := monitoring.NewExporter(p, metricsReg, logger, platform.Version)
+		if expErr != nil {
+			return fmt.Errorf("metrik exporter: %w", expErr)
+		}
+		opts.Metrics = exporter
+		opts.HTTPObserver = obs
 
 		// Agent gRPC sunucusu: yalnızca CA yapılandırıldığında başlar.
 		if ca != nil {

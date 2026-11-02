@@ -83,6 +83,16 @@ const (
 	// izinler, CI-04 dersi).
 	PermVMRead = "vm:read"
 	PermVMCtrl = "vm:control"
+
+	// Faz 13: izleme, log arama, alarm yaşam döngüsü ve güvenlik merkezi.
+	// logs:read → logs.search görevi (journald arama) + audit arama
+	// genişletmesi; alerts:read → alarm/kural listeleri; alerts:control →
+	// kural CRUD + ack/silence/resolve mutasyonları; security:read →
+	// kanıtlanmış güvenlik kontrolü raporu (yalnız okuma, mutasyon yok).
+	PermLogsRead     = "logs:read"
+	PermAlertsRead   = "alerts:read"
+	PermAlertsCtrl   = "alerts:control"
+	PermSecurityRead = "security:read"
 )
 
 // AllPermissions lists the seeded catalog in one place.
@@ -102,6 +112,7 @@ var AllPermissions = []string{
 	PermFilesRead, PermFilesCtrl,
 	PermMailRead, PermMailCtrl,
 	PermVMRead, PermVMCtrl,
+	PermLogsRead, PermAlertsRead, PermAlertsCtrl, PermSecurityRead,
 }
 
 // Scope types.

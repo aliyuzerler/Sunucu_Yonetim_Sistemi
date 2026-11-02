@@ -6,8 +6,10 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"runtime"
 	"strings"
 	"sync"
@@ -19,6 +21,7 @@ import (
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/dockerx"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/fsops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/fwops"
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/logops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/mailops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/tlsops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/vmops"
@@ -1028,4 +1031,68 @@ func (v *VmExecutor) Execute(ctx context.Context, payload []byte) ([]byte, strin
 	default:
 		return nil, res.Output, fmt.Errorf("broker işlemi başarısız: %s", res.ErrorCategory)
 	}
+}
+
+// LogsExecutor executes logs.search IN-PROCESS (Faz 13): journald via
+// journalctl with a fixed argv template. The agent runs unprivileged —
+// readable journal files depend on the systemd-journal group membership
+// (deploy README); permission problems surface as a typed refusal, never
+// as a guess (ADR-0017).
+type LogsExecutor struct {
+	runner *logops.Runner
+}
+
+// NewLogsExecutor builds the log-search executor.
+func NewLogsExecutor() *LogsExecutor { return &LogsExecutor{runner: &logops.Runner{}} }
+
+// Info describes the capability; availability is refined by ProbeAvailable.
+func (l *LogsExecutor) Info() *agentv1.Capability {
+	return &agentv1.Capability{
+		CapabilityId:   logops.OpLogSearch,
+		Version:        "1.0.0",
+		Available:      false,
+		AdapterId:      "journalctl",
+		AdapterVersion: Version,
+	}
+}
+
+// ProbeAvailable checks that journalctl exists and is executable.
+func (l *LogsExecutor) ProbeAvailable(ctx context.Context) (bool, string) {
+	path, err := exec.LookPath("journalctl")
+	if err != nil {
+		return false, "journalctl bulunamadı"
+	}
+	if _, err := l.runner.Search(ctx, logops.SearchParams{Limit: 1}); err != nil {
+		if errors.Is(err, logops.ErrPermission) {
+			// journalctl VAR ama okuma izni yok: yine de "available" —
+			// arama açık bir tipli izin hatası döndürür (dürüst).
+			_ = path
+			return true, "journalctl var; sistem günlüğü okuma izni için systemd-journal grubu gerekir"
+		}
+		if errors.Is(err, logops.ErrTooLarge) || errors.Is(err, logops.ErrInvalidParams) {
+			return true, ""
+		}
+		return false, "journalctl çalıştırılamıyor"
+	}
+	return true, ""
+}
+
+// Execute validates the payload (mirrored schema) and searches.
+func (l *LogsExecutor) Execute(ctx context.Context, payload []byte) ([]byte, string, error) {
+	var p logops.SearchParams
+	if err := decodeStrict(payload, &p); err != nil {
+		return nil, "", err
+	}
+	if err := logops.ValidateParams(p); err != nil {
+		return nil, "", err
+	}
+	entries, err := l.runner.Search(ctx, p)
+	if err != nil {
+		return nil, "", err
+	}
+	body, err := json.Marshal(map[string]any{"entries": entries, "source": "journald"})
+	if err != nil {
+		return nil, "", err
+	}
+	return body, "günlük araması tamamlandı (secret redaction uygulandı)", nil
 }

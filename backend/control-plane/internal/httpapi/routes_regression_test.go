@@ -87,3 +87,41 @@ func TestDBCredentialEndpointsAuthGated(t *testing.T) {
 		t.Fatalf("auth'suz reveal 401 olmalı: %d", resp2.StatusCode)
 	}
 }
+
+// Faz 13: alarm/güvenlik/metrik route'ları kayıtlı olmalı (Faz 09 dersi:
+// kayıtsız route 404 döner ve mock mod e2e bunu maskeler).
+func TestFaz13RoutesRegisteredRegression(t *testing.T) {
+	h := testHandlerFull(t)
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+
+	authPaths := []string{
+		"/api/v1/alert-rules",
+		"/api/v1/alerts",
+		"/api/v1/security/overview",
+	}
+	for _, path := range authPaths {
+		resp, err := srv.Client().Get(srv.URL + path)
+		if err != nil {
+			t.Fatalf("istek başarısız %s: %v", path, err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode == http.StatusNotFound {
+			t.Fatalf("%s 404 — Faz 13 rota kaydı REGRESYONU", path)
+		}
+		if resp.StatusCode != http.StatusUnauthorized {
+			t.Fatalf("%s auth'suz 401 olmalı: %d", path, resp.StatusCode)
+		}
+	}
+
+	// /metrics auth'suzdur (scrape yüzeyi) — 404 DEĞİL, 200 veya 401(token
+	// ayarlıysa) dönmeli; yapılandırmasızsa dürüst 503.
+	resp, err := srv.Client().Get(srv.URL + "/metrics")
+	if err != nil {
+		t.Fatalf("metrics isteği başarısız: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		t.Fatalf("/metrics 404 — Faz 13 rota kaydı REGRESYONU")
+	}
+}

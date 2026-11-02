@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -129,12 +130,25 @@ type Page struct {
 }
 
 // Filter restricts audit queries. Fields are allowlisted; empty means "all".
+// Faz 13 log-arama kriteri: kayıtlar correlation ID, node ID, sonuç
+// (success|failure|denied — severity karşılığı) ve zaman aralığı ile
+// aranabilir.
 type Filter struct {
 	Actor  string
 	Action string
 	Limit  int
 	Cursor string // keyset cursor: last seen event ID
+
+	// Faz 13 arama filtreleri (tümü opsiyonel):
+	CorrelationID string // tam eşleşme; task/request zinciri takibi
+	Result        string // success|failure|denied (kapalı enum)
+	NodeID        string // metadata->>'node_id' tam eşleşme (UUID doğrulanır)
+	Since         time.Time
+	Until         time.Time
 }
+
+// uuidRE accepts canonical UUID forms for the node metadata filter.
+var uuidRE = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
 const (
 	defaultListLimit = 50
@@ -162,6 +176,35 @@ func Query(ctx context.Context, pool *pgxpool.Pool, f Filter) (Page, error) {
 		args = append(args, f.Action)
 		where = append(where, fmt.Sprintf("action = $%d", len(args)))
 	}
+	if f.CorrelationID != "" {
+		args = append(args, f.CorrelationID)
+		where = append(where, fmt.Sprintf("correlation_id = $%d", len(args)))
+	}
+	if f.Result != "" {
+		switch f.Result {
+		case "success", "failure", "denied":
+		default:
+			return Page{}, fmt.Errorf("audit: geçersiz result filtresi %q (success|failure|denied)", f.Result)
+		}
+		args = append(args, f.Result)
+		where = append(where, fmt.Sprintf("result = $%d", len(args)))
+	}
+	if f.NodeID != "" {
+		if !uuidRE.MatchString(f.NodeID) {
+			return Page{}, fmt.Errorf("audit: node_id UUID olmalı")
+		}
+		args = append(args, f.NodeID)
+		where = append(where, fmt.Sprintf("metadata->>'node_id' = $%d", len(args)))
+	}
+	if !f.Since.IsZero() {
+		args = append(args, f.Since)
+		where = append(where, fmt.Sprintf("created_at >= $%d", len(args)))
+	}
+	if !f.Until.IsZero() {
+		args = append(args, f.Until)
+		where = append(where, fmt.Sprintf("created_at < $%d", len(args)))
+	}
+
 	if f.Cursor != "" {
 		cur, err := decodeCursor(f.Cursor)
 		if err != nil {

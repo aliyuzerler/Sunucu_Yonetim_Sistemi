@@ -241,3 +241,66 @@ export interface AuditPage {
   next_cursor?: string;
   has_more: boolean;
 }
+
+// ---- Faz 13: izleme, log arama, alarm ve güvenlik tipleri ----
+
+export interface AlertRule {
+  id: string;
+  name: string;
+  node_id: string;
+  metric: "cpu" | "memory" | "disk" | "metrics_freshness";
+  dimension: string;
+  op: "gt" | "lt";
+  threshold: number;
+  duration_seconds: number;
+  severity: "info" | "warning" | "critical";
+  enabled: boolean;
+  created_at: string;
+}
+
+export type AlertStatus = "open" | "acknowledged" | "silenced" | "resolved";
+
+export interface Alert {
+  id: string;
+  rule_id: string;
+  node_id: string;
+  dimension: string;
+  fingerprint: string;
+  status: AlertStatus;
+  severity: "info" | "warning" | "critical";
+  value: number;
+  occurrences: number;
+  title: string;
+  detail: string;
+  first_seen_at: string;
+  last_seen_at: string;
+  acknowledged_at: string | null;
+  silenced_until: string | null;
+  resolved_at: string | null;
+}
+
+export interface SecurityControl {
+  id: string;
+  state: "ok" | "warn" | "alert" | "unknown";
+  evidence: string;
+  checked_at: string;
+}
+
+export interface SecurityReport {
+  generated_at: string;
+  controls: SecurityControl[];
+}
+
+export interface LogEntry {
+  timestamp: string;
+  severity: number;
+  severity_name: string;
+  unit?: string;
+  identifier?: string;
+  message: string;
+}
+
+export interface LogSearchResult {
+  entries: LogEntry[];
+  source: string;
+}

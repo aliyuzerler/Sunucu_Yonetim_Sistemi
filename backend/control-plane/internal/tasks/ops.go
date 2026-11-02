@@ -341,6 +341,8 @@ func BuildDefaultRegistry(tagSetter TagSetter, faz09 Faz09Services) (*Registry, 
 	// (opt-in --vm-enable; disk yolu payload'da ASLA yoktur; snapshot
 	// qcow2 kapısı node'da — ADR-0016).
 	specs = append(specs, buildFaz12Registry()...)
+	// Faz 13: log arama (journald; salt-okuma — ADR-0017).
+	specs = append(specs, buildFaz13Registry()...)
 	return NewRegistry(specs...)
 }
 

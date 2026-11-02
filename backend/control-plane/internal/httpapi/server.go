@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/certmgmt"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/dbcred"
@@ -13,10 +14,13 @@ import (
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/enroll"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/identity"
 
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/alerts"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/audit"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/config"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/inventory"
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/monitoring"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/rbac"
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/securitycenter"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/tasks"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/backend/control-plane/internal/telemetry"
 	"github.com/go-chi/chi/v5"
@@ -38,6 +42,12 @@ type EnrollmentManager interface {
 	Revoke(ctx context.Context, id string) error
 }
 
+// MetricsExporter renders the Prometheus exposition (implemented by
+// monitoring.Exporter; faked in tests).
+type MetricsExporter interface {
+	Render(ctx context.Context, now time.Time) string
+}
+
 // Options wires the API server to its dependencies.nil services keep the
 // skeleton usable (endpoints degrade with 503 not_configured).
 type Options struct {
@@ -56,6 +66,12 @@ type Options struct {
 	DNS       *dns.Service    // Faz 09: sağlayıcı kayıt CRUD (kimlik bilgileri yaz-amaçlı)
 	Certs     *certmgmt.Store // Faz 09: sertifika durum okuma
 	DBCreds   *dbcred.Service // Faz 10: DB kullanıcı şifreleri (tek-seferlik reveal)
+
+	// Faz 13: izleme/alarm/güvenlik merkezi.
+	Alerts       alerts.Store
+	Security     *securitycenter.Service
+	Metrics      MetricsExporter
+	HTTPObserver *monitoring.HTTPObserver
 }
 
 // api holds handler dependencies.
@@ -74,6 +90,10 @@ type api struct {
 	dns       *dns.Service
 	certs     *certmgmt.Store
 	dbcreds   *dbcred.Service
+
+	alerts   alerts.Store
+	security *securitycenter.Service
+	metrics  MetricsExporter
 }
 
 // New assembles the HTTP handler with the full middleware chain.
@@ -105,10 +125,18 @@ func New(opts Options) http.Handler {
 		dns:       opts.DNS,
 		certs:     opts.Certs,
 		dbcreds:   opts.DBCreds,
+		alerts:    opts.Alerts,
+		security:  opts.Security,
+		metrics:   opts.Metrics,
 	}
 
 	r := chi.NewRouter()
 
+	if opts.HTTPObserver != nil {
+		// Faz 13: HTTP metrikleri — en dış katman (route pattern + durum kodu
+		// görünsün diye); kullanıcı girdisi asla label değeri değildir.
+		r.Use(opts.HTTPObserver.Middleware)
+	}
 	r.Use(requestID)
 	r.Use(securityHeaders)
 	r.Use(limitBody(opts.Cfg.RequestBodyLimit))
@@ -129,6 +157,8 @@ func New(opts Options) http.Handler {
 		)
 	}))
 	r.Get("/api/v1/version", version)
+	// Faz 13: Prometheus scrape yüzeyi (Bearer opsiyonel; handlers_metrics).
+	r.Get("/metrics", a.handleMetrics)
 
 	// Kimlik: bootstrap ve login oturumsuz; kalan uçlar oturum ister.
 	r.Route("/api/v1", func(r chi.Router) {
@@ -194,6 +224,17 @@ func New(opts Options) http.Handler {
 			// Faz 10: DB kullanıcı şifreleri (tek-seferlik reveal).
 			r.With(a.requirePermission(rbac.PermDBRead)).Get("/nodes/{nodeID}/db-credentials", a.handleListDBCredentials)
 			r.With(a.requirePermission(rbac.PermDBCtrl)).With(a.requireCSRF).Post("/db-credentials/{credID}/reveal", a.handleRevealDBCredential)
+
+			// Faz 13: alarm yaşam döngüsü + güvenlik merkezi.
+			r.With(a.requirePermission(rbac.PermAlertsRead)).Get("/alert-rules", a.handleListAlertRules)
+			r.With(a.requirePermission(rbac.PermAlertsCtrl)).With(a.requireCSRF).Post("/alert-rules", a.handleCreateAlertRule)
+			r.With(a.requirePermission(rbac.PermAlertsCtrl)).With(a.requireCSRF).Patch("/alert-rules/{ruleID}", a.handlePatchAlertRule)
+			r.With(a.requirePermission(rbac.PermAlertsCtrl)).With(a.requireCSRF).Delete("/alert-rules/{ruleID}", a.handleDeleteAlertRule)
+			r.With(a.requirePermission(rbac.PermAlertsRead)).Get("/alerts", a.handleListAlerts)
+			r.With(a.requirePermission(rbac.PermAlertsCtrl)).With(a.requireCSRF).Post("/alerts/{alertID}/acknowledge", a.handleAcknowledgeAlert)
+			r.With(a.requirePermission(rbac.PermAlertsCtrl)).With(a.requireCSRF).Post("/alerts/{alertID}/silence", a.handleSilenceAlert)
+			r.With(a.requirePermission(rbac.PermAlertsCtrl)).With(a.requireCSRF).Post("/alerts/{alertID}/resolve", a.handleResolveAlert)
+			r.With(a.requirePermission(rbac.PermSecurityRead)).Get("/security/overview", a.handleSecurityOverview)
 		})
 	})
 

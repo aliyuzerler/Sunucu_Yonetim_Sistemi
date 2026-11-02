@@ -18,6 +18,31 @@ const groups = [];
 const tasks = [];
 const audit = [];
 const enrollmentTokens = [];
+// Faz 13 mock state: alarm kuralları + alarm örnekleri (dedupe parmak izi,
+// açık duruma tek satır). Bir AÇIK alarm tohumlu: UI alarm yaşam döngüsü
+// (acknowledge/silence/resolve) E2E'de gözlemlenebilir olur.
+const alertRules = [];
+const alertList = [
+  {
+    id: "aaaa1111-0000-4000-8000-0000000000a1",
+    rule_id: "rrrr1111-0000-4000-8000-0000000000r1",
+    node_id: null,
+    dimension: "",
+    fingerprint: "cpu|node|",
+    status: "open",
+    severity: "warning",
+    value: 95.4,
+    occurrences: 3,
+    title: "CPU yüksek (düğüm cpu)",
+    detail: "değer 95.4%, eşik 90% (gt), pencere 0s",
+    first_seen_at: new Date(Date.now() - 15 * 60_000).toISOString(),
+    last_seen_at: new Date().toISOString(),
+    acknowledged_at: null,
+    acknowledged_by: null,
+    silenced_until: null,
+    resolved_at: null,
+  },
+];
 // Faz 09 mock state: sağlayıcılar reset ile temizlenir; sertifikalar demo
 // içerikle yeniden tohumlanır (yenileme başarısızlığı + rate_limit görünür
 // örnek — kriter 3'ün mock modda doğrulanması).
@@ -173,6 +198,10 @@ const OPERATIONS = [
   { name: "vm.snapshot.create", version: "1.0.0", class: "idempotent_desired_state", retry_safe: true, timeout_seconds: 300 },
   { name: "vm.snapshot.revert", version: "1.0.0", class: "non_idempotent", retry_safe: false, timeout_seconds: 300 },
   { name: "vm.snapshot.delete", version: "1.0.0", class: "destructive", retry_safe: false, timeout_seconds: 300 },
+  // Faz 13: log arama (agent-local salt-okuma journald; mesajlar node'da
+  // redakte edilir — ADR-0017). Mock, ZATEN redakte edilmiş örnek döner:
+  // gerçek agent'ın redaksiyon sözleşmesinin gözlemlenebilir simülasyonu.
+  { name: "logs.search", version: "1.0.0", class: "read_only", retry_safe: true, timeout_seconds: 60 },
   // Faz 09: DNS + SSL (sağlayıcı kimlik bilgileri şifreli; anahtar node'da — ADR-0013).
   { name: "dns.zone.list", version: "1.0.0", class: "read_only", retry_safe: true, timeout_seconds: 60 },
   { name: "dns.record.list", version: "1.0.0", class: "read_only", retry_safe: true, timeout_seconds: 60 },
@@ -1360,6 +1389,32 @@ setInterval(() => {
           api_path: "/v1.47/" + t.operation.split(".")[1] + "s/" + ((t.payload && t.payload.ref) || "hedef"),
         };
       }
+      // Faz 13: logs.search simülasyonu — gerçek agent mesajı node'da
+      // redakte etmeden dışarı vermez (logops redact); mock da redakte
+      // edilmiş mesaj taşır ve UI redaksiyonun göründüğünü kanıtlar.
+      if (t.operation === "logs.search") {
+        t.result = {
+          entries: [
+            {
+              timestamp: "2026-11-02T10:00:00Z",
+              severity: 3,
+              severity_name: "err",
+              unit: ((t.payload && t.payload.unit) || "nginx.service"),
+              identifier: "nginx",
+              message: "upstream timed out while reading response header password=[REDACTED] api_key=[REDACTED]",
+            },
+            {
+              timestamp: "2026-11-02T09:59:41Z",
+              severity: 6,
+              severity_name: "info",
+              unit: ((t.payload && t.payload.unit) || "nginx.service"),
+              identifier: "nginx",
+              message: "configuration reload succeeded",
+            },
+          ],
+          source: "journald",
+        };
+      }
       logAudit("system", "task.complete", "task", t.id, "success");
     }
   }
@@ -1416,6 +1471,27 @@ const server = createServer(async (req, res) => {
     nodeCapabilities.clear();
     dnsProviders.length = 0;
     mockDbCredentials.length = 0;
+    // Faz 13: alarm durumuna sıfırlanır — tohumlu açık alarm geri gelir.
+    alertRules.length = 0;
+    alertList.splice(0, alertList.length, {
+      id: "aaaa1111-0000-4000-8000-0000000000a1",
+      rule_id: "rrrr1111-0000-4000-8000-0000000000r1",
+      node_id: null,
+      dimension: "",
+      fingerprint: "cpu|node|",
+      status: "open",
+      severity: "warning",
+      value: 95.4,
+      occurrences: 3,
+      title: "CPU yüksek (düğüm cpu)",
+      detail: "değer 95.4%, eşik 90% (gt), pencere 0s",
+      first_seen_at: new Date(Date.now() - 15 * 60_000).toISOString(),
+      last_seen_at: new Date().toISOString(),
+      acknowledged_at: null,
+      acknowledged_by: null,
+      silenced_until: null,
+      resolved_at: null,
+    });
         json(res, 200, { status: "reset", mock: true });
     return;
   }
@@ -1787,6 +1863,125 @@ const server = createServer(async (req, res) => {
     const action = url.searchParams.get("action");
     const filtered = action ? audit.filter((e) => e.action === action) : audit;
     json(res, 200, { entries: filtered.slice(0, 50), has_more: false });
+    return;
+  }
+
+  // ---- Faz 13: alarm kuralları, alarm yaşam döngüsü, güvenlik merkezi ----
+  // Durum makinesi gerçek alerts.Store ile aynı: open→acknowledged/silenced/
+  // resolved; acknowledged→silenced/resolved; silenced→(yalnız evaluator);
+  // resolved terminális. Geçersiz geçiş tipli 409 (invalid_state).
+  if (method === "GET" && path === "/api/v1/alert-rules") {
+    json(res, 200, { rules: alertRules });
+    return;
+  }
+  if (method === "POST" && path === "/api/v1/alert-rules") {
+    const body = await readBody();
+    const validMetric = ["cpu", "memory", "disk", "metrics_freshness"].includes(body.metric);
+    const validOp = ["gt", "lt"].includes(body.op);
+    const validSeverity = ["info", "warning", "critical"].includes(body.severity);
+    if (!body.name || !validMetric || !validOp || !validSeverity || !Number.isFinite(body.threshold)) {
+      json(res, 400, errorBody("invalid_request", "kural doğrulaması başarısız (metric/op/severity kapalı enum; eşik sayısal).", 400));
+      return;
+    }
+    const rule = {
+      id: uuid(),
+      name: body.name,
+      node_id: body.node_id || null,
+      metric: body.metric,
+      dimension: body.dimension || "",
+      op: body.op,
+      threshold: body.threshold,
+      duration_seconds: body.duration_seconds || 0,
+      severity: body.severity,
+      enabled: body.enabled === undefined ? true : !!body.enabled,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    alertRules.push(rule);
+    logAudit(actor, "alert.rule.create", "alert_rule", rule.id, "success");
+    json(res, 201, rule);
+    return;
+  }
+  const rulePatchMatch = /^\/api\/v1\/alert-rules\/([^/]+)$/.exec(path);
+  if ((method === "PATCH" || method === "DELETE") && rulePatchMatch) {
+    const idx = alertRules.findIndex((r) => r.id === rulePatchMatch[1]);
+    if (idx < 0) {
+      json(res, 404, errorBody("not_found", "Alarm kuralı bulunamadı.", 404));
+      return;
+    }
+    if (method === "DELETE") {
+      alertRules.splice(idx, 1);
+      logAudit(actor, "alert.rule.delete", "alert_rule", rulePatchMatch[1], "success");
+      json(res, 200, { deleted: true });
+      return;
+    }
+    const body = await readBody();
+    alertRules[idx].enabled = !!body.enabled;
+    alertRules[idx].updated_at = new Date().toISOString();
+    logAudit(actor, "alert.rule.update", "alert_rule", rulePatchMatch[1], "success");
+    json(res, 200, { updated: true, enabled: alertRules[idx].enabled });
+    return;
+  }
+  if (method === "GET" && path === "/api/v1/alerts") {
+    const status = url.searchParams.get("status");
+    const filtered = status ? alertList.filter((a) => a.status === status) : alertList;
+    json(res, 200, { alerts: filtered });
+    return;
+  }
+  const alertActionMatch = /^\/api\/v1\/alerts\/([^/]+)\/(acknowledge|silence|resolve)$/.exec(path);
+  if (method === "POST" && alertActionMatch) {
+    const a = alertList.find((x) => x.id === alertActionMatch[1]);
+    if (!a) {
+      json(res, 404, errorBody("not_found", "Alarm kaydı bulunamadı.", 404));
+      return;
+    }
+    const action = alertActionMatch[2];
+    const allowed = {
+      acknowledge: ["open"],
+      silence: ["open", "acknowledged"],
+      resolve: ["open", "acknowledged", "silenced"],
+    }[action];
+    if (!allowed.includes(a.status)) {
+      json(res, 409, errorBody("invalid_state", `geçersiz durum geçişi: ${a.status} → ${action}`, 409));
+      return;
+    }
+    a.status = action === "acknowledge" ? "acknowledged" : action === "silence" ? "silenced" : "resolved";
+    if (action === "acknowledge") {
+      a.acknowledged_at = new Date().toISOString();
+      a.acknowledged_by = actor;
+    }
+    if (action === "silence") {
+      const body = await readBody();
+      const minutes = Number(body.duration_minutes ?? 60);
+      if (!Number.isInteger(minutes) || minutes <= 0 || minutes > 43200) {
+        json(res, 400, errorBody("invalid_request", "duration_minutes 1..43200 olmalı", 400));
+        return;
+      }
+      a.silenced_until = new Date(Date.now() + minutes * 60_000).toISOString();
+    }
+    if (action === "resolve") a.resolved_at = new Date().toISOString();
+    a.last_seen_at = new Date().toISOString();
+    a.occurrences += 1;
+    logAudit(actor, `alert.${action}`, "alert", a.id, "success");
+    json(res, 200, a);
+    return;
+  }
+  if (method === "GET" && path === "/api/v1/security/overview") {
+    // Dürüstlük sözleşmesi (kriter 5): bilinmeyen kanıt "unknown" döner,
+    // ASLA ok'a çekilmez. Mock, üç durumu da içeren gerçekçi bir rapor verir.
+    json(res, 200, {
+      generated_at: new Date().toISOString(),
+      controls: [
+        { id: "admin_bootstrapped", state: "ok", evidence: "1 aktif yönetici", checked_at: new Date().toISOString() },
+        { id: "secrets_key_configured", state: "warn", evidence: "CP_SECRETS_KEY ayarlı değil: şifreler saklanamaz (redaksiyon kazanır)", checked_at: new Date().toISOString() },
+        { id: "agent_ca_configured", state: "ok", evidence: "agent CA yüklü (mTLS gRPC)", checked_at: new Date().toISOString() },
+        { id: "agent_cert_expiry", state: "alert", evidence: "1 süresi dolmuş node sertifikası", checked_at: new Date().toISOString() },
+        { id: "node_telemetry_freshness", state: "unknown", evidence: "kayıtlı node yok (kanıt yok)", checked_at: new Date().toISOString() },
+        { id: "failed_logins_24h", state: "ok", evidence: "24 saatte 0 başarısız giriş/reddedilen yetki", checked_at: new Date().toISOString() },
+        { id: "audit_recording_24h", state: "unknown", evidence: "denetim kaydı bulunamadı (kanıt yok)", checked_at: new Date().toISOString() },
+        { id: "broker_optin_gates", state: "ok", evidence: "isteğe bağlı broker ailesi açık değil (db/fs/mail/vm/web/docker yok) — varsayılan-deny", checked_at: new Date().toISOString() },
+      ],
+    });
     return;
   }
 

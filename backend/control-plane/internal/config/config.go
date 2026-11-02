@@ -46,6 +46,12 @@ type Config struct {
 	ACMEAccountKey   string // CP_ACME_ACCOUNT_KEY (dosya yolu)
 	ACMEDirectoryURL string // CP_ACME_DIRECTORY_URL (örn. LE staging)
 	ACMEContact      string // CP_ACME_CONTACT (örn. mailto:ops@example.com)
+
+	// Faz 13: metrik yüzeyi + alarm değerlendirici.
+	// MetricsToken boş → /metrics Bearer'sız açıktır (yalnız gizli-olmayan
+	// agregat seriler; reverse proxy kısıtı önerilir). Dolu → Bearer ZORUNLU.
+	MetricsToken    string        // CP_METRICS_TOKEN
+	AlertEvalInterv time.Duration // CP_ALERT_EVAL_INTERVAL (10s..1h)
 }
 
 // Load reads configuration from process environment variables.
@@ -148,6 +154,20 @@ func FromEnv(env map[string]string) (Config, error) {
 		if _, err := secrets.ParseKey(cfg.SecretsKey); err != nil {
 			return Config{}, fmt.Errorf("CP_SECRETS_KEY geçersiz: base64 32 bayt gerekli")
 		}
+	}
+
+	// Faz 13: metrik token + alarm değerlendirme aralığı.
+	cfg.MetricsToken = strings.TrimSpace(env["CP_METRICS_TOKEN"])
+	if cfg.MetricsToken != "" && len(cfg.MetricsToken) < 16 {
+		return Config{}, fmt.Errorf("CP_METRICS_TOKEN geçersiz: en az 16 karakter gerekli")
+	}
+	cfg.AlertEvalInterv = time.Minute
+	if v, ok := env["CP_ALERT_EVAL_INTERVAL"]; ok && strings.TrimSpace(v) != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil || d < 10*time.Second || d > time.Hour {
+			return Config{}, fmt.Errorf("CP_ALERT_EVAL_INTERVAL geçersiz: %q (10s..1h)", v)
+		}
+		cfg.AlertEvalInterv = d
 	}
 	return cfg, nil
 }

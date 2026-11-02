@@ -86,7 +86,8 @@ TRUNCATE audit_events, outbox_events, task_attempts, tasks,
          node_metrics, node_system_facts,
          nodes, node_groups, sessions, admin_bootstrap_tokens,
          user_role_bindings, users,
-         certificates, dns_providers, db_credentials
+         certificates, dns_providers, db_credentials,
+         alerts, alert_rules
 RESTART IDENTITY CASCADE`)
 	if err != nil {
 		t.Fatalf("test veritabanı sıfırlanamadı: %v", err)

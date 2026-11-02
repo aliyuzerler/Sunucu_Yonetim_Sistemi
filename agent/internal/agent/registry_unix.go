@@ -113,5 +113,7 @@ func DefaultRegistry(brokerPath, dockerSocket string) (*ExecutorRegistry, error)
 		NewVmExecutor(broker.OpVMSnapshotCreate, brokerPath),
 		NewVmExecutor(broker.OpVMSnapshotRevert, brokerPath),
 		NewVmExecutor(broker.OpVMSnapshotDelete, brokerPath),
+		// Faz 13: log arama (agent-local, salt-okuma journald — ADR-0017).
+		NewLogsExecutor(),
 	)
 }
