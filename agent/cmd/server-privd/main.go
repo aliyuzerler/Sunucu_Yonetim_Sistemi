@@ -61,6 +61,7 @@ var platformFlags struct {
 	webEnable    bool   // unix only (Faz 08): web hosting ailesi opt-in
 	dbEnable     bool   // unix only (Faz 10): veritabanı ailesi opt-in
 	fsEnable     bool   // unix only (Faz 10): scoped dosya yöneticisi opt-in
+	mailEnable   bool   // unix only (Faz 11): e-posta ailesi opt-in
 }
 
 func auditSinkOrDie(logger *slog.Logger, path string) (*broker.JSONLSink, error) {

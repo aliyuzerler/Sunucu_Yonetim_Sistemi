@@ -27,10 +27,16 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// Operation names mirrored from dbops/ops_faz10 (scrubber triggers).
+// Operation names mirrored from dbops/ops_faz10 and mailops/ops_faz11
+// (scrubber triggers). Mailbox passwords share the EXACT discipline of DB
+// user passwords (node-generated, sealed, one-time reveal — ADR-0015);
+// they live in the same table with kind="mailbox".
 const (
 	OpDBUserCreate = "db.user.create"
 	OpDBUserDelete = "db.user.delete"
+
+	OpMailBoxCreate = "mail.mailbox.create"
+	OpMailBoxDelete = "mail.mailbox.delete"
 )
 
 // Stable errors.
@@ -259,6 +265,57 @@ func (s *Service) ScrubNodeResult(ctx context.Context, t *tasks.Task, result map
 			return nil
 		}
 		_, _ = s.Store.DeleteForUser(ctx, *t.NodeID, kind, username)
+		result["credentials_removed"] = true
+		return nil
+	case OpMailBoxCreate:
+		// mailbox şifresi: result.credentials.password → seal → strip
+		// (kind="mailbox", username=TAM adres user@domain). Redaksiyon
+		// ÖNCE: her erken-dönüş yolunda düz metin sonuçtan çıkmış olur.
+		cred, _ := result["credentials"].(map[string]any)
+		if cred == nil {
+			return nil
+		}
+		pw, _ := cred["password"].(string)
+		if pw == "" {
+			return nil
+		}
+		delete(cred, "password")
+		cred["password_redacted"] = "true"
+		box, _ := result["mailbox"].(map[string]any)
+		address, _ := box["address"].(string)
+		if t.NodeID == nil || address == "" {
+			cred["redaction_reason"] = "eksik provenance (node/adres) — kimlik saklanamadı"
+			return nil
+		}
+		if !s.KeyConfigured {
+			cred["redaction_reason"] = "CP_SECRETS_KEY yapılandırılmamış — şifre kalıcı saklanamadı; posta kutusunu yeniden oluşturun"
+			return nil
+		}
+		sealed, err := s.Key.Encrypt([]byte(pw))
+		if err != nil {
+			cred["redaction_reason"] = "seal başarısız — şifre kalıcı saklanamadı"
+			return nil
+		}
+		c, err := s.Store.Upsert(ctx, *t.NodeID, "mailbox", address, "", sealed, Fingerprint(pw))
+		if err != nil {
+			cred["redaction_reason"] = "kimlik kaydı yazılamadı — şifre kalıcı saklanamadı"
+			return nil
+		}
+		delete(cred, "password_redacted")
+		cred["credential_id"] = c.ID
+		cred["fingerprint"] = c.Fingerprint
+		cred["one_time_reveal"] = true
+		return nil
+	case OpMailBoxDelete:
+		if t.NodeID == nil {
+			return nil
+		}
+		box, _ := result["mailbox"].(map[string]any)
+		address, _ := box["address"].(string)
+		if address == "" {
+			return nil
+		}
+		_, _ = s.Store.DeleteForUser(ctx, *t.NodeID, "mailbox", address)
 		result["credentials_removed"] = true
 		return nil
 	}

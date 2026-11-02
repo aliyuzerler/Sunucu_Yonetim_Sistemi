@@ -19,6 +19,7 @@ import (
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/dockerx"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/fsops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/fwops"
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/mailops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/tlsops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/webops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/winops"
@@ -907,6 +908,60 @@ func (f *FsExecutor) Execute(ctx context.Context, payload []byte) ([]byte, strin
 	}
 	req := &broker.Request{Operation: f.op, Params: payload}
 	res, err := broker.NewClient(f.brokerPath).Call(ctx, req)
+	if err != nil {
+		return nil, "", fmt.Errorf("broker erişilemiyor: %w", err)
+	}
+	switch res.Status {
+	case broker.StatusSucceeded:
+		return res.Result, "broker işlemi tamamlandı", nil
+	case broker.StatusRejected:
+		return nil, res.Output, fmt.Errorf("broker reddetti: %s", res.ErrorCategory)
+	default:
+		return nil, res.Output, fmt.Errorf("broker işlemi başarısız: %s", res.ErrorCategory)
+	}
+}
+
+// MailExecutor relays one mail.* operation (Faz 11 e-mail family) to the
+// privileged broker. The relay adds NO mail logic — validation is enforced
+// by the control-plane validator AND the broker; the byte cap keeps the
+// transport honest (ADR-0015).
+type MailExecutor struct {
+	op         string
+	brokerPath string
+}
+
+// NewMailExecutor builds one broker-backed mail executor.
+func NewMailExecutor(op, brokerPath string) *MailExecutor {
+	return &MailExecutor{op: op, brokerPath: brokerPath}
+}
+
+// Info describes the capability; availability refined by ProbeAvailable.
+func (m *MailExecutor) Info() *agentv1.Capability {
+	return &agentv1.Capability{
+		CapabilityId:   m.op,
+		Version:        "1.0.0",
+		Available:      false,
+		AdapterId:      "mail-broker",
+		AdapterVersion: Version,
+	}
+}
+
+// ProbeAvailable: broker ayakta mı (varlık kanıtı; posta bileşenlerinin
+// kurulu olup olmadığı mail.preflight'ın KENDİ işidir — tahmin yok).
+func (m *MailExecutor) ProbeAvailable(ctx context.Context) (bool, string) {
+	cli := broker.NewClient(m.brokerPath)
+	probeCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	return cli.Ping(probeCtx)
+}
+
+// Execute relays the payload (byte-capped) to the broker.
+func (m *MailExecutor) Execute(ctx context.Context, payload []byte) ([]byte, string, error) {
+	if len(payload) > mailops.MaxPayloadBytes {
+		return nil, "", fmt.Errorf("payload %d bayt > %d sınırı", len(payload), mailops.MaxPayloadBytes)
+	}
+	req := &broker.Request{Operation: m.op, Params: payload}
+	res, err := broker.NewClient(m.brokerPath).Call(ctx, req)
 	if err != nil {
 		return nil, "", fmt.Errorf("broker erişilemiyor: %w", err)
 	}

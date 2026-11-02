@@ -21,6 +21,7 @@ import (
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/dockerx"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/fsops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/fwops"
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/mailops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/pkgops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/svcops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/tlsops"
@@ -44,6 +45,7 @@ func registerPlatformFlags() {
 	flag.BoolVar(&platformFlags.webEnable, "web-enable", false, "Faz 08 web hosting ailesini etkinleştir (nginx/PHP-FPM site yaşam döngüsü; VARSAYILAN KAPALI)")
 	flag.BoolVar(&platformFlags.dbEnable, "db-enable", false, "Faz 10 veritabanı ailesini etkinleştir (node-local PostgreSQL/MariaDB-MySQL yönetimi; VARSAYILAN KAPALI)")
 	flag.BoolVar(&platformFlags.fsEnable, "fs-enable", false, "Faz 10 scoped dosya yöneticisini etkinleştir (yalnız site docroot'ları; VARSAYILAN KAPALI)")
+	flag.BoolVar(&platformFlags.mailEnable, "mail-enable", false, "Faz 11 e-posta ailesini etkinleştir (Postfix/Dovecot/Rspamd yönetimi; VARSAYILAN KAPALI)")
 }
 
 func run(logger *slog.Logger, cfg daemonConfig) error {
@@ -89,6 +91,7 @@ func run(logger *slog.Logger, cfg daemonConfig) error {
 		TLS:           tlsRunnerOrZero(platformFlags.webEnable),       // Faz 09: sertifika yaşam döngüsü (aynı opt-in; ADR-0013)
 		DB:            dbRunnerOrZero(platformFlags.dbEnable),         // Faz 10: DB yönetimi (opt-in; ADR-0014)
 		Fs:            fsRunnerOrZero(platformFlags.fsEnable),         // Faz 10: dosya yöneticisi (opt-in; ADR-0014)
+		Mail:          mailRunnerOrZero(platformFlags.mailEnable),     // Faz 11: e-posta yönetimi (opt-in; ADR-0015)
 		Audit:         sink,
 		Logger:        logger,
 	})
@@ -153,6 +156,16 @@ func fsRunnerOrZero(enabled bool) broker.FsRunner {
 		return nil
 	}
 	return &fsops.Runner{}
+}
+
+// mailRunnerOrZero wires the Faz 11 mail runner; OPT-IN (default OFF) —
+// real config mutations with reloads (ADR-0015). The module never installs
+// packages; mail.preflight only reports.
+func mailRunnerOrZero(enabled bool) broker.MailRunner {
+	if !enabled {
+		return nil
+	}
+	return &mailops.Runner{}
 }
 
 func parseUIDs(s string) ([]uint32, error) {

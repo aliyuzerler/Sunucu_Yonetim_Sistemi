@@ -14,6 +14,7 @@ import (
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/dockerx"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/fsops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/fwops"
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/mailops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/pkgops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/svcops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/tlsops"
@@ -99,6 +100,14 @@ func (s *Server) execute(req *Request, call validatedCall) *Response {
 		res.Status = StatusRejected
 		res.ErrorCategory = CatUnsupportedOp
 		res.Output = "dosya yöneticisi ailesi kapalı (--fs-enable)"
+		return res
+	}
+	// Faz 11: mail ailesi kendi opt-in kapısında (VARSAYILAN KAPALI —
+	// ADR-0015). Kapalıyken dürüst unsupported; sessiz kalabalık yok.
+	if isMailOp(req.Operation) && s.cfg.Mail == nil {
+		res.Status = StatusRejected
+		res.ErrorCategory = CatUnsupportedOp
+		res.Output = "e-posta ailesi kapalı (--mail-enable)"
 		return res
 	}
 	select {
@@ -334,6 +343,72 @@ func (s *Server) execute(req *Request, call validatedCall) *Response {
 		cw, err = s.cfg.Fs.Chown(ctx, call.fs.root, call.fs.path)
 		result = map[string]any{"result": cw}
 
+	// ---- Faz 11: e-posta servisi ailesi ----
+	case OpMailPreflight:
+		var pf mailops.PreflightResult
+		pf, err = s.cfg.Mail.Preflight(ctx)
+		result = map[string]any{"preflight": pf}
+	case OpMailStatus:
+		var st mailops.StatusResult
+		st, err = s.cfg.Mail.Status(ctx)
+		result = map[string]any{"status": st}
+	case OpMailDomainList:
+		var rows []mailops.DomainInfo
+		rows, err = s.cfg.Mail.DomainList(ctx, call.mail.limit)
+		result = map[string]any{"domains": rows}
+	case OpMailDomainCreate:
+		var mr mailops.MutateResult
+		mr, err = s.cfg.Mail.DomainCreate(ctx, call.mail.domain)
+		result = map[string]any{"result": mr, "domain": call.mail.domain}
+	case OpMailDomainDelete:
+		var mr mailops.MutateResult
+		mr, err = s.cfg.Mail.DomainDelete(ctx, call.mail.domain)
+		result = map[string]any{"result": mr, "domain": call.mail.domain}
+	case OpMailBoxList:
+		var rows []mailops.MailboxInfo
+		rows, err = s.cfg.Mail.MailboxList(ctx, call.mail.domain, call.mail.limit)
+		result = map[string]any{"mailboxes": rows}
+	case OpMailBoxCreate:
+		var mc map[string]any
+		mc, err = s.cfg.Mail.MailboxCreate(ctx, call.mail.domain, call.mail.local)
+		result = mc
+	case OpMailBoxDelete:
+		var md map[string]any
+		md, err = s.cfg.Mail.MailboxDelete(ctx, call.mail.mailbox)
+		result = md
+	case OpMailAliasList:
+		var rows []mailops.AliasInfo
+		rows, err = s.cfg.Mail.AliasList(ctx, call.mail.domain, call.mail.limit)
+		result = map[string]any{"aliases": rows}
+	case OpMailAliasCreate:
+		var mr mailops.MutateResult
+		mr, err = s.cfg.Mail.AliasCreate(ctx, call.mail.alias, call.mail.target)
+		result = map[string]any{"result": mr, "alias": call.mail.alias}
+	case OpMailAliasDelete:
+		var mr mailops.MutateResult
+		mr, err = s.cfg.Mail.AliasDelete(ctx, call.mail.alias)
+		result = map[string]any{"result": mr, "alias": call.mail.alias}
+	case OpMailQuotaSet:
+		var mr mailops.MutateResult
+		mr, err = s.cfg.Mail.QuotaSet(ctx, call.mail.mailbox, call.mail.quota)
+		result = map[string]any{"result": mr, "mailbox": call.mail.mailbox}
+	case OpMailConfigCheck:
+		var cc mailops.ConfigCheckResult
+		cc, err = s.cfg.Mail.ConfigCheck(ctx)
+		result = map[string]any{"config_check": cc}
+	case OpMailQueueList:
+		var rows []mailops.QueueEntry
+		rows, err = s.cfg.Mail.QueueList(ctx, call.mail.limit)
+		result = map[string]any{"queue": rows}
+	case OpMailLimitsGet:
+		var lg mailops.LimitsGetResult
+		lg, err = s.cfg.Mail.LimitsGet(ctx)
+		result = map[string]any{"limits": lg.Limits}
+	case OpMailLimitsSet:
+		var ls mailops.LimitsSetResult
+		ls, err = s.cfg.Mail.LimitsSet(ctx, call.mail.limits)
+		result = map[string]any{"result": ls}
+
 	case OpServiceList:
 		var units []svcops.UnitInfo
 		units, err = sysd.List(ctx)
@@ -383,7 +458,8 @@ func (s *Server) execute(req *Request, call validatedCall) *Response {
 			res.ErrorCategory = CatInvalidParams
 		case errors.Is(err, webops.ErrSyntaxCheck), errors.Is(err, webops.ErrNotIncluded),
 			errors.Is(err, webops.ErrPortConflict), errors.Is(err, webops.ErrConflict),
-			errors.Is(err, webops.ErrForeignConfig):
+			errors.Is(err, webops.ErrForeignConfig),
+			errors.Is(err, mailops.ErrSyntaxCheck), errors.Is(err, mailops.ErrExists):
 			// Ortam-durum redleri: istek geçerli, durum uygunsuz.
 			res.Status = StatusFailed
 			res.ErrorCategory = CatExecutorFailed
@@ -396,7 +472,8 @@ func (s *Server) execute(req *Request, call validatedCall) *Response {
 			res.ErrorCategory = CatUnsupportedOp
 		case errors.Is(err, webops.ErrUnavailable),
 			errors.Is(err, dbops.ErrUnavailable),
-			errors.Is(err, fsops.ErrUnavailable):
+			errors.Is(err, fsops.ErrUnavailable),
+			errors.Is(err, mailops.ErrUnavailable):
 			res.Status = StatusRejected
 			res.ErrorCategory = CatUnsupportedOp
 		case errors.Is(err, dbops.ErrInvalidKind), errors.Is(err, dbops.ErrInvalidName),
@@ -409,12 +486,17 @@ func (s *Server) execute(req *Request, call validatedCall) *Response {
 			errors.Is(err, fsops.ErrForbiddenMime), errors.Is(err, fsops.ErrInvalidMode),
 			errors.Is(err, fsops.ErrNoSiteUser), errors.Is(err, fsops.ErrInvalidPayload),
 			errors.Is(err, fsops.ErrSymlink), errors.Is(err, fsops.ErrScope),
-			errors.Is(err, fsops.ErrTooLarge):
+			errors.Is(err, fsops.ErrTooLarge),
+			errors.Is(err, mailops.ErrInvalidDomain), errors.Is(err, mailops.ErrInvalidLocal),
+			errors.Is(err, mailops.ErrInvalidAddress), errors.Is(err, mailops.ErrInvalidQuota),
+			errors.Is(err, mailops.ErrInvalidLimit), errors.Is(err, mailops.ErrNotFound),
+			errors.Is(err, mailops.ErrLimit):
 			res.Status = StatusRejected
 			res.ErrorCategory = CatInvalidParams
 		case errors.Is(err, dbops.ErrProtected), errors.Is(err, dbops.ErrNoSpace),
 			errors.Is(err, dbops.ErrConflict), errors.Is(err, dbops.ErrForeignBackup),
-			errors.Is(err, fsops.ErrNotSiteRoot):
+			errors.Is(err, fsops.ErrNotSiteRoot),
+			errors.Is(err, mailops.ErrConflict), errors.Is(err, mailops.ErrNoVmailUser):
 			res.Status = StatusFailed
 			res.ErrorCategory = CatExecutorFailed
 		default:
@@ -464,6 +546,18 @@ func isDbOp(op string) bool {
 func isFsOp(op string) bool {
 	switch op {
 	case OpFSList, OpFSDownload, OpFSUpload, OpFSChmod, OpFSChown:
+		return true
+	}
+	return false
+}
+
+// isMailOp reports whether an operation belongs to the Faz 11 mail family.
+func isMailOp(op string) bool {
+	switch op {
+	case OpMailPreflight, OpMailStatus, OpMailDomainList, OpMailDomainCreate,
+		OpMailDomainDelete, OpMailBoxList, OpMailBoxCreate, OpMailBoxDelete,
+		OpMailAliasList, OpMailAliasCreate, OpMailAliasDelete, OpMailQuotaSet,
+		OpMailConfigCheck, OpMailQueueList, OpMailLimitsGet, OpMailLimitsSet:
 		return true
 	}
 	return false

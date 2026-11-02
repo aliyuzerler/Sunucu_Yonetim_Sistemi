@@ -135,7 +135,9 @@ export function DbFsPanel(props: {
     apiFetch<{ credentials: CredentialRow[] }>(
       `/api/v1/nodes/${encodeURIComponent(nodeId)}/db-credentials`,
     )
-      .then((res) => setCreds(res.credentials ?? []))
+      // Faz 11: mailbox şifreleri (kind="mailbox") E-posta panelinde gösterilir;
+      // veritabanı paneli yalnız gerçek DB credential'larını listeler (ADR-0015).
+      .then((res) => setCreds((res.credentials ?? []).filter((c) => c.kind !== "mailbox")))
       .catch(() => setCreds([]));
   };
   useEffect(loadCreds, [nodeId]);

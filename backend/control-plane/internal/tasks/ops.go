@@ -333,6 +333,10 @@ func BuildDefaultRegistry(tagSetter TagSetter, faz09 Faz09Services) (*Registry, 
 	// ops_faz10.go (şifre node'da üretilir ve seal edilir; dosya kökleri
 	// site docroot'ları — ADR-0014).
 	specs = append(specs, buildFaz10Registry()...)
+	// Faz 11: e-posta servisi yönetimi ayrı dosyada: ops_faz11.go
+	// (opt-in --mail-enable; şifre node'da üretilir ve seal edilir;
+	// syntax check + rollback kapısı node'da — ADR-0015).
+	specs = append(specs, buildFaz11Registry()...)
 	return NewRegistry(specs...)
 }
 

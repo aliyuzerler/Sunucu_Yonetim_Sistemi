@@ -66,6 +66,14 @@ const (
 	PermDBCtrl    = "db:control"
 	PermFilesRead = "files:read"
 	PermFilesCtrl = "files:control"
+
+	// Faz 11: e-posta servisi yönetimi. mail:read → preflight/status/
+	// domain-mailbox-alias listeleri + queue/limits okuma; mail:control →
+	// domain/mailbox/alias/quota mutasyonları + limits.set (ADR-0015).
+	// aile --mail-enable ile node'da opt-in'dir; izinler burada rollere
+	// seed edilir (migration 0015 — yalnız YENİ izinler).
+	PermMailRead = "mail:read"
+	PermMailCtrl = "mail:control"
 )
 
 // AllPermissions lists the seeded catalog in one place.
@@ -83,6 +91,7 @@ var AllPermissions = []string{
 	PermCertRead, PermCertCtrl,
 	PermDBRead, PermDBCtrl,
 	PermFilesRead, PermFilesCtrl,
+	PermMailRead, PermMailCtrl,
 }
 
 // Scope types.

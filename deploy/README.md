@@ -52,11 +52,13 @@ server-privd --web-enable ...   # VARSAYILAN KAPALI — her iki aile için tek k
 ```
 server-privd --db-enable   # VARSAYILAN KAPALI — node-local PostgreSQL/MariaDB-MySQL yönetimi
 server-privd --fs-enable   # VARSAYILAN KAPALI — scoped dosya yöneticisi (yalnız site docroot'ları)
+server-privd --mail-enable # VARSAYILAN KAPALI — e-posta servisi yönetimi (Postfix/Dovecot/Rspamd; Faz 11)
 ```
 
 - db ailesi yalnız node-local unix soketlerine dokunur; panelin kendi PostgreSQL'i yapısal olarak erişilemez (ADR-0014). Korumalı adlar (sistem + panel DB'leri) tipli red ile korunur.
 - DB kullanıcı şifresi node'da üretilir, control-plane'de AES-256-GCM seal edilir ve TEK SEFERLİK reveal edilir — `CP_SECRETS_KEY` ayarlı OLMALI (ayarsızsa şifre kalıcı saklanmaz ve dürüstçe redakte edilir).
 - Dosya yöneticisi kökleri yalnız web hosting site docroot'larıdır (`/var/www/server-control/<site>/html`); upload/indirme 512 KiB ile sınırlıdır.
+- E-posta ailesi (Faz 11, ADR-0015): `--mail-enable` verilmeden tüm mail.* işlemleri tipli red döner. Modül paket KURMAZ; `mail.preflight` yalnız rapor verir. Yönetilen yollar: `/etc/server-control/mail/` (map + userdb, 0600), marker-blokle `/etc/postfix/main.cf` ve `/etc/dovecot/conf.d/99-server-control.conf`, Maildir kökü `/var/vmail` (vmail kullanıcısı 5000:5000 ZORUNLU — yoksa mailbox işlemleri tipli red döner). Her mutasyon `postfix check`/`doveconf -n` kapısından geçer; başarısızlıkta byte-düzeyi rollback. Mailbox şifreleri db.user.create disiplinindedir (node'da üretilir, kind="mailbox" ile seal edilir, TEK SEFERLİK reveal — `CP_SECRETS_KEY` gerekir). Deliverability (SPF/DKIM/DMARC/PTR) dış DNS bağımlılığıdır ve UI'da açıklanır.
 ```
 
 Kapalıyken ilgili operasyonlar tipli `unsupported_operation` döndürür (sessiz

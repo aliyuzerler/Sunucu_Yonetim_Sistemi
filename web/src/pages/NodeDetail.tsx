@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { apiFetch, isApiError } from "../api/client";
 import { DbFsPanel } from "../components/DbFsPanel";
+import { MailPanel } from "../components/MailPanel";
 import type {
   CapabilityRecord,
   MetricsSnapshot,
@@ -471,6 +472,8 @@ export function NodeDetail({ node, onBack }: { node: NodeRecord; onBack: () => v
   // Faz 10: veritabanı + scoped dosya yöneticisi capability tespiti.
   const isDb = capabilities.some((c) => c.capability_id.startsWith("db."));
   const isFs = capabilities.some((c) => c.capability_id.startsWith("fs."));
+  // Faz 11: e-posta ailesi (--mail-enable ile opt-in; ADR-0015).
+  const isMail = capabilities.some((c) => c.capability_id.startsWith("mail."));
 
   async function submitTask(op: string, payload: Record<string, unknown>): Promise<TaskRecord | null> {
     try {
@@ -1770,6 +1773,21 @@ export function NodeDetail({ node, onBack }: { node: NodeRecord; onBack: () => v
           nodeId={node.id}
           isDb={isDb}
           isFs={isFs}
+          submitTask={async (op, payload) => {
+            const created = await submitTask(op, payload);
+            return created as unknown as { id: string; status: string; result?: unknown; error_category?: string } | null;
+          }}
+          t={(k) => t(k as Parameters<typeof t>[0])}
+        />
+      )}
+
+      {/* Faz 11: E-posta servisi yönetimi (yalnız mail.* capability'li
+          node'lar). Preflight kurulum yapmaz (kriter 1); deliverability
+          gereksinimleri burada açıklanır (kriter 3); kuyruk içeriksizdir
+          (kriter 5). */}
+      {isMail && (
+        <MailPanel
+          nodeId={node.id}
           submitTask={async (op, payload) => {
             const created = await submitTask(op, payload);
             return created as unknown as { id: string; status: string; result?: unknown; error_category?: string } | null;

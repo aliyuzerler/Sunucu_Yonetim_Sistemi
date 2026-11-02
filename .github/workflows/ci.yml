@@ -417,6 +417,52 @@ jobs:
           sudo userdel sc-web-citest 2>/dev/null || true
           sudo rm -rf /var/www/server-control/citest || true
 
+  agent-mail:
+    name: "Agent (gerçek Postfix + Dovecot — mail lifecycle + kontrollü teslim)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Faz 11: GERÇEK mail stack kanıtı — runner'da gerçek Postfix + Dovecot
+    # ile tam mail lifecycle (domain → mailbox → KONTROLLÜ TESLİM: sendmail
+    # → virtual transport → Maildir dosyası → alias → quota → config check
+    # → queue → delete) ve GERÇEK syntax-check rollback kanıtı.
+    # EXPECTED_MAIL=1 gate'i CI-17 dersi gereği SESSİZ ATLANMAZ: ortam
+    # eksikse test BAŞARISIZ olur. Runner disposable'dır; yalnız citest.
+    # önekli adlar kullanılır.
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Setup Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: agent/go.mod
+          cache-dependency-path: agent/go.sum
+      - name: Postfix + Dovecot kur ve vmail kullanıcısını oluştur
+        run: |
+          sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq postfix dovecot-core
+          sudo groupadd -g 5000 vmail || true
+          sudo useradd -r -u 5000 -g 5000 -d /var/vmail -s /usr/sbin/nologin vmail || true
+          sudo mkdir -p /var/vmail && sudo chown vmail:vmail /var/vmail
+          postfix --version 2>/dev/null || postconf mail_version
+          doveconf --version 2>/dev/null || dovecot --version
+      - name: Postfix'i başlat (kontrollü teslim için)
+        run: |
+          sudo systemctl start postfix || sudo postfix start
+          sleep 2
+          sudo postfix status || true
+      - name: Mailops test ikilisini derle
+        run: |
+          cd agent
+          go test -c -buildvcs=false -o /tmp/mailops.test ./internal/mailops/
+      - name: Mail adapter gerçek lifecycle + kontrollü teslim kanıtı
+        run: |
+          sudo -E env EXPECTED_MAIL=1 /tmp/mailops.test -test.run 'TestRealMailLifecycle|TestRealMailSyntaxRollback' -test.v
+      - name: Temizlik
+        if: always()
+        run: |
+          sudo rm -rf /etc/server-control/mail /var/vmail/citest.example || true
+          sudo systemctl stop postfix || true
+
   agent-windows:
     name: Agent (Go, windows-2025)
     runs-on: windows-2025

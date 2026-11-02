@@ -64,4 +64,13 @@ Standart kütüphane tercih edilir (slog, net/http, crypto/rand, embed); başka 
   fixed argv exec + /proc/net.tcp parse + atomic rename). nginx/php-fpm
   çalışma zamanı bağımlılığı node tarafında opsöneldir (CI'da `apt-get`
   nginx + php8.3-fpm; sürüm kilitleri node'un kendi paket yöneticisindedir).
+- Faz 11 (2026-11-02): **yeni harici Go bağımlılığı YOK** — mail adaptörü
+  (`agent/internal/mailops`) tamamen stdlib'tir (fixed argv exec, atomic
+  rename, {SSHA} hashing). Postfix (SPDX: IPL-1.0), Dovecot-core
+  (SPDX: LGPL-2.1-or-later) ve Rspamd (SPDX: Apache-2.0) ÇALIŞMA-ZAMANI
+  sistem bağımlılıklarıdır ve node paket yöneticisiyle kurulur (modül
+  kurulum YAPMAZ — `mail.preflight` yalnız rapor verir); sürüm kilitleri
+  node'un kendisindedir. Kaynaklar: postfix.org, dovecot.org, rspamd.com
+  (kit `open-source-references.md` ile uyumlu). CI agent-mail job'ı
+  gerçek lifecycle kanıtını Postfix+Dovecot ile üretir.
 - Otomatik SBOM üretimi Faz 15 paketleme fazında eklenir; bu dosya her fazda elle güncel tutulur.

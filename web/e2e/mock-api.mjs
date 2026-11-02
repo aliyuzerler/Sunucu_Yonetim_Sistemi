@@ -139,6 +139,23 @@ const OPERATIONS = [
   { name: "fs.upload", version: "1.0.0", class: "idempotent_desired_state", retry_safe: true, timeout_seconds: 120 },
   { name: "fs.chmod", version: "1.0.0", class: "idempotent_desired_state", retry_safe: true, timeout_seconds: 60 },
   { name: "fs.chown", version: "1.0.0", class: "idempotent_desired_state", retry_safe: true, timeout_seconds: 60 },
+  // Faz 11: e-posta servisi (Postfix/Dovecot/Rspamd — ADR-0015).
+  { name: "mail.preflight", version: "1.0.0", class: "read_only", retry_safe: true, timeout_seconds: 60 },
+  { name: "mail.status", version: "1.0.0", class: "read_only", retry_safe: true, timeout_seconds: 60 },
+  { name: "mail.domain.list", version: "1.0.0", class: "read_only", retry_safe: true, timeout_seconds: 60 },
+  { name: "mail.domain.create", version: "1.0.0", class: "idempotent_desired_state", retry_safe: true, timeout_seconds: 60 },
+  { name: "mail.domain.delete", version: "1.0.0", class: "destructive", retry_safe: false, timeout_seconds: 60 },
+  { name: "mail.mailbox.list", version: "1.0.0", class: "read_only", retry_safe: true, timeout_seconds: 60 },
+  { name: "mail.mailbox.create", version: "1.0.0", class: "idempotent_desired_state", retry_safe: true, timeout_seconds: 120 },
+  { name: "mail.mailbox.delete", version: "1.0.0", class: "destructive", retry_safe: false, timeout_seconds: 120 },
+  { name: "mail.alias.list", version: "1.0.0", class: "read_only", retry_safe: true, timeout_seconds: 60 },
+  { name: "mail.alias.create", version: "1.0.0", class: "idempotent_desired_state", retry_safe: true, timeout_seconds: 60 },
+  { name: "mail.alias.delete", version: "1.0.0", class: "destructive", retry_safe: false, timeout_seconds: 60 },
+  { name: "mail.quota.set", version: "1.0.0", class: "idempotent_desired_state", retry_safe: true, timeout_seconds: 60 },
+  { name: "mail.config.check", version: "1.0.0", class: "read_only", retry_safe: true, timeout_seconds: 60 },
+  { name: "mail.queue.list", version: "1.0.0", class: "read_only", retry_safe: true, timeout_seconds: 60 },
+  { name: "mail.limits.get", version: "1.0.0", class: "read_only", retry_safe: true, timeout_seconds: 60 },
+  { name: "mail.limits.set", version: "1.0.0", class: "idempotent_desired_state", retry_safe: true, timeout_seconds: 120 },
   // Faz 09: DNS + SSL (sağlayıcı kimlik bilgileri şifreli; anahtar node'da — ADR-0013).
   { name: "dns.zone.list", version: "1.0.0", class: "read_only", retry_safe: true, timeout_seconds: 60 },
   { name: "dns.record.list", version: "1.0.0", class: "read_only", retry_safe: true, timeout_seconds: 60 },
@@ -411,6 +428,79 @@ function attachDbFsTelemetry(node) {
     fingerprint: "demo1234demo1234",
     revealed_at: null,
   });
+}
+
+// Faz 11: e-posta servisi şablonu — "mail-" önekli node'lar (E2E).
+// 16 mail.* capability'si raporlanır (gerçek yürütme broker'da --mail-enable;
+// ADR-0015). Demo mailbox credential'ı (kind="mailbox") tek-seferlik reveal
+// mock'uyla birlikte seed edilir.
+const mockMailDomains = []; // mail- node'una göre değil, tek demo alanı
+const mockMailMailboxes = []; // {domain, local, quota_bytes}
+const mockMailAliases = []; // {alias, target}
+// Kuyruk demosu: alıcı adresi ve gövde YOK (kriter 5).
+const mockMailQueue = [
+  {
+    queue_id: "3F1A2B4C5D",
+    queue_name: "deferred",
+    size_bytes: 2048,
+    age_seconds: 900,
+    sender: "bounce@mail.example.com",
+    reason: "connect to remote.example: Connection refused",
+  },
+];
+
+function attachMailTelemetry(node) {
+  const now = new Date().toISOString();
+  nodeFacts.set(node.id, {
+    node_id: node.id,
+    os_id: "debian",
+    os_version_id: "13",
+    os_pretty_name: "Debian 13 (mail host)",
+    os_home_url: "https://www.debian.org/",
+    kernel_release: "6.12.0-1-amd64",
+    arch: "amd64",
+    systemd_version: "257",
+    package_manager: "apt",
+    systemd_available: true,
+    source: "os-release+procfs+systemctl",
+    collected_at: now,
+  });
+  nodeMetrics.set(node.id, {
+    collected_at: now,
+    source: "procfs+statfs",
+    cpu: { percent: 12.5, logical_cores: 4, load_1m: 0.4, load_5m: 0.3, load_15m: 0.2 },
+    memory: { total_bytes: 8 * 1024 ** 3, available_bytes: 5 * 1024 ** 3, used_bytes: 3 * 1024 ** 3, used_percent: 37.5 },
+    disks: [{ device: "/dev/vda1", mount_point: "/", fs_type: "ext4", total_bytes: 80 * 1024 ** 3, used_bytes: 22 * 1024 ** 3, available_bytes: 58 * 1024 ** 3 }],
+    networks: [{ interface: "eth0", rx_bytes: 999999, tx_bytes: 888888 }],
+    uptime_seconds: 123456,
+  });
+  const caps = [];
+  for (const c of [
+    "mail.preflight", "mail.status",
+    "mail.domain.list", "mail.domain.create", "mail.domain.delete",
+    "mail.mailbox.list", "mail.mailbox.create", "mail.mailbox.delete",
+    "mail.alias.list", "mail.alias.create", "mail.alias.delete",
+    "mail.quota.set", "mail.config.check", "mail.queue.list",
+    "mail.limits.get", "mail.limits.set",
+  ]) {
+    caps.push({ node_id: node.id, capability_id: c, version: "1.0.0", available: true, adapter_id: "mail-broker" });
+  }
+  nodeCapabilities.set(node.id, caps);
+  // Demo domain + mailbox + kimlik (yalnız İLK mail node'unda bir kez).
+  if (mockMailDomains.length === 0) {
+    mockMailDomains.push("mail.example.com");
+    mockMailMailboxes.push({ domain: "mail.example.com", local: "ali", quota_bytes: 1024 ** 3 });
+    mockMailAliases.push({ alias: "info@mail.example.com", target: "ali@mail.example.com" });
+    mockDbCredentials.push({
+      id: "bbbbbbbb-cccc-4ddd-8eee-ffffffffff01",
+      node_id: node.id,
+      kind: "mailbox",
+      username: "ali@mail.example.com",
+      host: "",
+      fingerprint: "maildemo0000mail",
+      revealed_at: null,
+    });
+  }
 }
 
 function attachWebHost(node) {
@@ -730,6 +820,168 @@ setInterval(() => {
           duration: "2.02s",
         };
       }
+      // Faz 11: mail.* simülasyonları. queue.list alıcı adresi/gövde
+      // TAŞIMAZ (kriter 5); preflight kurulum yapmaz, yalnız raporlar
+      // (kriter 1); mailbox.create şifre DÖNDÜRMEZ — scrub edilmiş şekil
+      // (credential_id + fingerprint, kriter 2).
+      if (t.operation === "mail.preflight") {
+        t.result = {
+          preflight: {
+            postfix_installed: true,
+            dovecot_installed: true,
+            rspamd_installed: false,
+            binaries: [
+              { name: "postfix", found: true, version: "" },
+              { name: "postmap", found: true, version: "" },
+              { name: "postqueue", found: true, version: "" },
+              { name: "postconf", found: true, version: "" },
+              { name: "doveconf", found: true, version: "" },
+              { name: "doveadm", found: true, version: "" },
+              { name: "rspamadm", found: false, version: "" },
+            ],
+            ports: [
+              { port: 25, occupied: true, state: "occupied" },
+              { port: 465, occupied: false, state: "free" },
+              { port: 587, occupied: false, state: "free" },
+              { port: 143, occupied: false, state: "free" },
+              { port: 993, occupied: false, state: "free" },
+            ],
+            vmail_user: true,
+            managed_dir_ready: true,
+            postfix_wired: true,
+            dovecot_wired: true,
+            hostname: "mail-01",
+            ptr: { ip: "203.0.113.10", state: "unknown" },
+            notes: ["PTR/reverse DNS dış DNS bağımlılığıdır — panel buradan doğrulayamaz (UI'daki deliverability rehberine bakın)"],
+          },
+        };
+      }
+      if (t.operation === "mail.status") {
+        t.result = {
+          status: {
+            services: { postfix: "active", dovecot: "active", rspamd: "inactive" },
+            queue: { total: mockMailQueue.length, bytes: 2048, deferred: mockMailQueue.length, probe_mode: "postqueue" },
+            domains: mockMailDomains.length,
+            mailboxes: mockMailMailboxes.length,
+            aliases: mockMailAliases.length,
+            postfix_wired: true,
+            dovecot_wired: true,
+          },
+        };
+      }
+      if (t.operation === "mail.domain.list") {
+        t.result = { domains: mockMailDomains.map((d) => ({ name: d })) };
+      }
+      if (t.operation === "mail.domain.create") {
+        const d = (t.payload && t.payload.domain) || "";
+        if (!mockMailDomains.includes(d)) mockMailDomains.push(d);
+        t.result = { result: { applied: true, reloaded: true }, domain: d };
+      }
+      if (t.operation === "mail.domain.delete") {
+        const d = (t.payload && t.payload.domain) || "";
+        const idx = mockMailDomains.indexOf(d);
+        if (idx >= 0) mockMailDomains.splice(idx, 1);
+        t.result = { result: { applied: true, reloaded: true }, domain: d };
+      }
+      if (t.operation === "mail.mailbox.list") {
+        const d = (t.payload && t.payload.domain) || "";
+        t.result = {
+          mailboxes: mockMailMailboxes
+            .filter((m) => !d || m.domain === d)
+            .map((m) => ({ address: m.local + "@" + m.domain, maildir: "/var/vmail/" + m.domain + "/" + m.local + "/Maildir", quota_bytes: m.quota_bytes })),
+        };
+      }
+      if (t.operation === "mail.mailbox.create") {
+        const domain = (t.payload && t.payload.domain) || "";
+        const local = (t.payload && t.payload.local) || "";
+        const fp = "m1" + Math.random().toString(16).slice(2, 14);
+        const address = local + "@" + domain;
+        if (!mockMailMailboxes.some((m) => m.local + "@" + m.domain === address)) {
+          mockMailMailboxes.push({ domain, local, quota_bytes: 1024 ** 3 });
+          mockDbCredentials.push({
+            id: uuid(),
+            node_id: t.node_id,
+            kind: "mailbox",
+            username: address,
+            host: "",
+            fingerprint: fp,
+            revealed_at: null,
+          });
+        }
+        t.result = {
+          applied: true,
+          reloaded: true,
+          domain,
+          mailbox: { address, maildir: "/var/vmail/" + domain + "/" + local + "/Maildir", quota_bytes: 1024 ** 3 },
+          credentials: { credential_id: mockDbCredentials[mockDbCredentials.length - 1].id, fingerprint: fp, one_time_reveal: true },
+        };
+      }
+      if (t.operation === "mail.mailbox.delete") {
+        const address = (t.payload && t.payload.mailbox) || "";
+        const at = address.indexOf("@");
+        if (at > 0) {
+          const local = address.slice(0, at);
+          const domain = address.slice(at + 1);
+          const idx = mockMailMailboxes.findIndex((m) => m.local === local && m.domain === domain);
+          if (idx >= 0) mockMailMailboxes.splice(idx, 1);
+        }
+        t.result = { applied: true, reloaded: true, mailbox: { address }, maildir_removed: true, credentials_removed: true };
+      }
+      if (t.operation === "mail.alias.list") {
+        const d = (t.payload && t.payload.domain) || "";
+        t.result = { aliases: mockMailAliases.filter((a) => !d || a.alias.endsWith("@" + d)) };
+      }
+      if (t.operation === "mail.alias.create") {
+        const alias = (t.payload && t.payload.alias) || "";
+        const target = (t.payload && t.payload.target) || "";
+        if (!mockMailAliases.some((a) => a.alias === alias)) mockMailAliases.push({ alias, target });
+        t.result = { result: { applied: true, reloaded: true }, alias };
+      }
+      if (t.operation === "mail.alias.delete") {
+        const alias = (t.payload && t.payload.alias) || "";
+        const idx = mockMailAliases.findIndex((a) => a.alias === alias);
+        if (idx >= 0) mockMailAliases.splice(idx, 1);
+        t.result = { result: { applied: true, reloaded: true }, alias };
+      }
+      if (t.operation === "mail.quota.set") {
+        const mailbox = (t.payload && t.payload.mailbox) || "";
+        const bytes = Number((t.payload && t.payload.bytes) || 0);
+        const at = mailbox.indexOf("@");
+        if (at > 0) {
+          const m = mockMailMailboxes.find(
+            (mm) => mm.local === mailbox.slice(0, at) && mm.domain === mailbox.slice(at + 1),
+          );
+          if (m && bytes > 0) m.quota_bytes = bytes;
+        }
+        t.result = { result: { applied: true, reloaded: true }, mailbox };
+      }
+      if (t.operation === "mail.config.check") {
+        t.result = {
+          config_check: {
+            postfix: { state: "pass" },
+            dovecot: { state: "pass" },
+            rspamd: { state: "absent", detail: "rspamadm kurulu değil" },
+          },
+        };
+      }
+      if (t.operation === "mail.queue.list") {
+        t.result = { queue: mockMailQueue };
+      }
+      if (t.operation === "mail.limits.get") {
+        t.result = {
+          limits: {
+            message_size_limit: "10240000",
+            mailbox_size_limit: "10240000",
+            smtpd_client_message_rate_limit: "0",
+            smtpd_client_recipient_rate_limit: "0",
+            smtpd_client_connection_count_limit: "0",
+            anvil_rate_time_unit: "60",
+          },
+        };
+      }
+      if (t.operation === "mail.limits.set") {
+        t.result = { result: { applied: true, reloaded: true }, keys: Object.keys((t.payload && t.payload.limits) || {}) };
+      }
       // Faz 10: fs.* simülasyonları (kök = site docroot; symlink'ler listede
       // görünür ama işlem kabul etmez — broker O_NOFOLLOW disiplini).
       if (t.operation === "fs.list") {
@@ -1026,6 +1278,8 @@ const server = createServer(async (req, res) => {
       attachWebHost(node);
     } else if (String(body.display_name || "").startsWith("dbfs-") || body.os_family === "dbfs") {
       attachDbFsTelemetry(node);
+    } else if (String(body.display_name || "").startsWith("mail-") || body.os_family === "mail") {
+      attachMailTelemetry(node);
     } else {
       attachMockTelemetry(node);
     }

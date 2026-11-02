@@ -11,6 +11,7 @@ import (
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/dockerx"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/fsops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/fwops"
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/mailops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/pkgops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/svcops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/tlsops"
@@ -49,6 +50,10 @@ type Config struct {
 	// Faz 10: scoped dosya yöneticisi runner'ı (nil = fs ailesi tipli red;
 	// --fs-enable ile seçilir, VARSAYILAN KAPALI — ADR-0014).
 	Fs FsRunner
+
+	// Faz 11: e-posta servisi runner'ı (nil = mail ailesi tipli red;
+	// --mail-enable ile seçilir, VARSAYILAN KAPALI — ADR-0015).
+	Mail MailRunner
 
 	// Audit receives one entry per handled request (incl. rejections).
 	Audit  AuditSink
@@ -162,3 +167,29 @@ type FsRunner interface {
 
 // compile-time: the real runner satisfies the interface.
 var _ FsRunner = (*fsops.Runner)(nil)
+
+// MailRunner executes the Faz 11 e-mail service operations (Postfix +
+// Dovecot + Rspamd). *mailops.Runner implements it. Every mutation is
+// syntax-gated with rollback inside the runner (ADR-0015 criterion 4);
+// the interface keeps broker tests hermetic.
+type MailRunner interface {
+	Preflight(ctx context.Context) (mailops.PreflightResult, error)
+	Status(ctx context.Context) (mailops.StatusResult, error)
+	DomainList(ctx context.Context, limit int) ([]mailops.DomainInfo, error)
+	DomainCreate(ctx context.Context, domain string) (mailops.MutateResult, error)
+	DomainDelete(ctx context.Context, domain string) (mailops.MutateResult, error)
+	MailboxList(ctx context.Context, domain string, limit int) ([]mailops.MailboxInfo, error)
+	MailboxCreate(ctx context.Context, domain, local string) (map[string]any, error)
+	MailboxDelete(ctx context.Context, address string) (map[string]any, error)
+	AliasList(ctx context.Context, domain string, limit int) ([]mailops.AliasInfo, error)
+	AliasCreate(ctx context.Context, alias, target string) (mailops.MutateResult, error)
+	AliasDelete(ctx context.Context, alias string) (mailops.MutateResult, error)
+	QuotaSet(ctx context.Context, address string, quotaBytes int64) (mailops.MutateResult, error)
+	ConfigCheck(ctx context.Context) (mailops.ConfigCheckResult, error)
+	QueueList(ctx context.Context, limit int) ([]mailops.QueueEntry, error)
+	LimitsGet(ctx context.Context) (mailops.LimitsGetResult, error)
+	LimitsSet(ctx context.Context, limits map[string]int64) (mailops.LimitsSetResult, error)
+}
+
+// compile-time: the real runner satisfies the interface.
+var _ MailRunner = (*mailops.Runner)(nil)

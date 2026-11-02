@@ -24,6 +24,7 @@ import (
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/dockerx"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/fsops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/fwops"
+	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/mailops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/pkgops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/tlsops"
 	"github.com/aliyuzerler/Sunucu_Yonetim_Sistemi/agent/internal/webops"
@@ -110,6 +111,24 @@ const (
 	OpFSUpload   = fsops.OpFSUpload
 	OpFSChmod    = fsops.OpFSChmod
 	OpFSChown    = fsops.OpFSChown
+
+	// Faz 11: e-posta servisi ailesi (--mail-enable opt-in — ADR-0015).
+	OpMailPreflight    = mailops.OpMailPreflight
+	OpMailStatus       = mailops.OpMailStatus
+	OpMailDomainList   = mailops.OpMailDomainList
+	OpMailDomainCreate = mailops.OpMailDomainCreate
+	OpMailDomainDelete = mailops.OpMailDomainDelete
+	OpMailBoxList      = mailops.OpMailBoxList
+	OpMailBoxCreate    = mailops.OpMailBoxCreate
+	OpMailBoxDelete    = mailops.OpMailBoxDelete
+	OpMailAliasList    = mailops.OpMailAliasList
+	OpMailAliasCreate  = mailops.OpMailAliasCreate
+	OpMailAliasDelete  = mailops.OpMailAliasDelete
+	OpMailQuotaSet     = mailops.OpMailQuotaSet
+	OpMailConfigCheck  = mailops.OpMailConfigCheck
+	OpMailQueueList    = mailops.OpMailQueueList
+	OpMailLimitsGet    = mailops.OpMailLimitsGet
+	OpMailLimitsSet    = mailops.OpMailLimitsSet
 
 	OpWinServiceList    = winops.OpWinServiceList
 	OpWinServiceStatus  = winops.OpWinServiceStatus
@@ -237,6 +256,19 @@ type fsCall struct {
 	limit     int
 }
 
+// mailCall carries the Faz 11 mail-family parameters extracted at
+// validation time (every field is RE-validated — the broker trusts nothing).
+type mailCall struct {
+	domain  string
+	local   string
+	mailbox string // full address (user@domain)
+	alias   string // full alias address
+	target  string
+	quota   int64
+	limit   int
+	limits  map[string]int64
+}
+
 // validatedCall is the typed outcome of request validation.
 type validatedCall struct {
 	target    string              // unit/service name (service families)
@@ -246,6 +278,7 @@ type validatedCall struct {
 	web       webCall             // web hosting family payload
 	db        dbCall              // Faz 10 database family payload
 	fs        fsCall              // Faz 10 file-manager payload
+	mail      mailCall            // Faz 11 mail family payload
 }
 
 // validateRequest enforces the allowlist + payload schema for one request.
@@ -665,6 +698,130 @@ func validateRequest(req *Request) (validatedCall, error) {
 			return empty, reject(CatInvalidParams, err.Error())
 		}
 		return validatedCall{fs: fsCall{root: p.Root, path: p.Path, mode: p.Mode}, target: p.Root}, nil
+
+	// ---- Faz 11: e-posta servisi ailesi (ADR-0015) ----
+	case OpMailPreflight, OpMailStatus, OpMailConfigCheck, OpMailLimitsGet:
+		if err := emptyObject(req.Params); err != nil {
+			return empty, reject(CatInvalidParams, "mail şeması uyumsuz (boş obje beklenir)")
+		}
+		return empty, nil
+	case OpMailDomainList:
+		var p struct {
+			Limit int `json:"limit,omitempty"`
+		}
+		if err := strictDecode(orEmpty(req.Params), &p); err != nil || p.Limit < 0 || p.Limit > mailops.MaxList {
+			return empty, reject(CatInvalidParams, "domain list şeması uyumsuz")
+		}
+		return validatedCall{mail: mailCall{limit: p.Limit}}, nil
+	case OpMailDomainCreate, OpMailDomainDelete:
+		var p struct {
+			Domain string `json:"domain"`
+		}
+		if err := strictDecode(orEmpty(req.Params), &p); err != nil {
+			return empty, reject(CatInvalidParams, "domain şeması uyumsuz")
+		}
+		if !mailops.ValidDomain(p.Domain) {
+			return empty, reject(CatInvalidParams, "domain allowlist dışı")
+		}
+		return validatedCall{mail: mailCall{domain: p.Domain}, target: p.Domain}, nil
+	case OpMailBoxList, OpMailAliasList:
+		var p struct {
+			Domain string `json:"domain,omitempty"`
+			Limit  int    `json:"limit,omitempty"`
+		}
+		if err := strictDecode(orEmpty(req.Params), &p); err != nil ||
+			p.Limit < 0 || p.Limit > mailops.MaxList {
+			return empty, reject(CatInvalidParams, "mail list şeması uyumsuz")
+		}
+		if p.Domain != "" && !mailops.ValidDomain(p.Domain) {
+			return empty, reject(CatInvalidParams, "domain allowlist dışı")
+		}
+		return validatedCall{mail: mailCall{domain: p.Domain, limit: p.Limit}, target: p.Domain}, nil
+	case OpMailBoxCreate:
+		var p struct {
+			Domain string `json:"domain"`
+			Local  string `json:"local"`
+		}
+		if err := strictDecode(orEmpty(req.Params), &p); err != nil {
+			return empty, reject(CatInvalidParams, "mailbox create şeması uyumsuz")
+		}
+		if !mailops.ValidDomain(p.Domain) || !mailops.ValidLocal(p.Local) {
+			return empty, reject(CatInvalidParams, "domain/local allowlist dışı")
+		}
+		return validatedCall{mail: mailCall{domain: p.Domain, local: p.Local}, target: p.Local + "@" + p.Domain}, nil
+	case OpMailBoxDelete:
+		var p struct {
+			Mailbox string `json:"mailbox"`
+		}
+		if err := strictDecode(orEmpty(req.Params), &p); err != nil {
+			return empty, reject(CatInvalidParams, "mailbox delete şeması uyumsuz")
+		}
+		if !mailops.ValidAddress(p.Mailbox) {
+			return empty, reject(CatInvalidParams, "mailbox adresi allowlist dışı")
+		}
+		return validatedCall{mail: mailCall{mailbox: p.Mailbox}, target: p.Mailbox}, nil
+	case OpMailAliasCreate:
+		var p struct {
+			Alias  string `json:"alias"`
+			Target string `json:"target"`
+		}
+		if err := strictDecode(orEmpty(req.Params), &p); err != nil {
+			return empty, reject(CatInvalidParams, "alias create şeması uyumsuz")
+		}
+		if !mailops.ValidAddress(p.Alias) || !mailops.ValidAddress(p.Target) || p.Alias == p.Target {
+			return empty, reject(CatInvalidParams, "alias/target allowlist dışı")
+		}
+		return validatedCall{mail: mailCall{alias: p.Alias, target: p.Target}, target: p.Alias}, nil
+	case OpMailAliasDelete:
+		var p struct {
+			Alias string `json:"alias"`
+		}
+		if err := strictDecode(orEmpty(req.Params), &p); err != nil {
+			return empty, reject(CatInvalidParams, "alias delete şeması uyumsuz")
+		}
+		if !mailops.ValidAddress(p.Alias) {
+			return empty, reject(CatInvalidParams, "alias adresi allowlist dışı")
+		}
+		return validatedCall{mail: mailCall{alias: p.Alias}, target: p.Alias}, nil
+	case OpMailQuotaSet:
+		var p struct {
+			Mailbox string `json:"mailbox"`
+			Bytes   int64  `json:"bytes"`
+		}
+		if err := strictDecode(orEmpty(req.Params), &p); err != nil {
+			return empty, reject(CatInvalidParams, "quota şeması uyumsuz")
+		}
+		if !mailops.ValidAddress(p.Mailbox) || !mailops.ValidQuota(p.Bytes) {
+			return empty, reject(CatInvalidParams, "mailbox/quota geçersiz")
+		}
+		return validatedCall{mail: mailCall{mailbox: p.Mailbox, quota: p.Bytes}, target: p.Mailbox}, nil
+	case OpMailQueueList:
+		var p struct {
+			Limit int `json:"limit,omitempty"`
+		}
+		if err := strictDecode(orEmpty(req.Params), &p); err != nil || p.Limit < 0 || p.Limit > mailops.MaxQueue {
+			return empty, reject(CatInvalidParams, "queue list şeması uyumsuz")
+		}
+		return validatedCall{mail: mailCall{limit: p.Limit}}, nil
+	case OpMailLimitsSet:
+		if len(req.Params) > mailops.MaxPayloadBytes {
+			return empty, reject(CatInvalidParams, "payload çok büyük")
+		}
+		var p struct {
+			Limits map[string]int64 `json:"limits"`
+		}
+		if err := strictDecode(orEmpty(req.Params), &p); err != nil {
+			return empty, reject(CatInvalidParams, "limits şeması uyumsuz")
+		}
+		if len(p.Limits) == 0 || len(p.Limits) > len(mailops.LimitKeyNames()) {
+			return empty, reject(CatInvalidParams, "limits kümesi boş veya aşırı")
+		}
+		for k, v := range p.Limits {
+			if !mailops.ValidLimitKey(k, v) {
+				return empty, reject(CatInvalidParams, "limit anahtarı/değeri allowlist dışı: "+k)
+			}
+		}
+		return validatedCall{mail: mailCall{limits: p.Limits}}, nil
 
 	case "":
 		return empty, reject(CatInvalidRequest, "operasyon boş")

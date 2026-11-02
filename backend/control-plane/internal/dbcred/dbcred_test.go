@@ -213,6 +213,89 @@ func TestScrubIgnoresOtherOperations(t *testing.T) {
 }
 
 // Fingerprint: 16 hex, tekrar üretilebilir.
+// ---- Faz 11: mailbox şifreleri aynı disiplinde (kind="mailbox") ----
+
+func mailBoxCreateTask() *tasks.Task {
+	return &tasks.Task{ID: "t2", Operation: OpMailBoxCreate, NodeID: nodeID()}
+}
+
+func mailBoxDeleteTask() *tasks.Task {
+	return &tasks.Task{ID: "t3", Operation: OpMailBoxDelete, NodeID: nodeID()}
+}
+
+// Normal yol: mailbox şifresi sonuçtan ayrışır, kind="mailbox" + TAM adres
+// ile seal edilir; sonuçta yalnız credential referansı kalır.
+func TestScrubMailBoxCreateSealsAndStrips(t *testing.T) {
+	fs := &fakeStore{}
+	svc := &Service{Store: fs, Key: testKey(t), KeyConfigured: true}
+	result := map[string]any{
+		"domain": "example.com",
+		"mailbox": map[string]any{
+			"address": "user@example.com",
+			"maildir": "/var/vmail/example.com/user/Maildir",
+		},
+		"credentials": map[string]any{
+			"username": "user@example.com",
+			"password": "mail-secret-ABCDEF",
+		},
+	}
+	if err := svc.ScrubNodeResult(context.Background(), mailBoxCreateTask(), result); err != nil {
+		t.Fatalf("scrub: %v", err)
+	}
+	cred := result["credentials"].(map[string]any)
+	if _, leak := cred["password"]; leak {
+		t.Fatal("mailbox şifresi sonuçta kalmamalı")
+	}
+	if fs.upserted != 1 || fs.lastUser != "user@example.com" {
+		t.Fatalf("upsert bekleniyordu: %d %q", fs.upserted, fs.lastUser)
+	}
+	if len(fs.lastSealed) == 0 || strings.Contains(string(fs.lastSealed), "mail-secret") {
+		t.Fatal("sealed blob GCM ciphertext olmalı (düz metin değil)")
+	}
+	if cred["one_time_reveal"] != true || cred["credential_id"] == nil {
+		t.Fatalf("reveal referansları eksik: %v", cred)
+	}
+}
+
+// Anahtar yapılandırılmamışsa mailbox şifresi dürüstçe redakte edilir.
+func TestScrubMailBoxCreateWithoutKeyRedacts(t *testing.T) {
+	fs := &fakeStore{}
+	svc := &Service{Store: fs, KeyConfigured: false}
+	result := map[string]any{
+		"mailbox":     map[string]any{"address": "user@example.com"},
+		"credentials": map[string]any{"password": "pw"},
+	}
+	if err := svc.ScrubNodeResult(context.Background(), mailBoxCreateTask(), result); err != nil {
+		t.Fatal(err)
+	}
+	cred := result["credentials"].(map[string]any)
+	if _, leak := cred["password"]; leak {
+		t.Fatal("şifre sonuçta kalmamalı")
+	}
+	if fs.upserted != 0 {
+		t.Fatal("anahtarsız seal YAPILMAMALI")
+	}
+	if cred["redaction_reason"] == nil {
+		t.Fatal("dürüst redaksiyon gerekçesi bekleniyordu")
+	}
+}
+
+// Mailbox delete: credential satırı kaldırılır.
+func TestScrubMailBoxDeleteRemovesCredential(t *testing.T) {
+	fs := &fakeStore{}
+	svc := &Service{Store: fs, Key: testKey(t), KeyConfigured: true}
+	result := map[string]any{"mailbox": map[string]any{"address": "user@example.com"}}
+	if err := svc.ScrubNodeResult(context.Background(), mailBoxDeleteTask(), result); err != nil {
+		t.Fatal(err)
+	}
+	if fs.deleted != 1 {
+		t.Fatalf("delete bekleniyordu: %d", fs.deleted)
+	}
+	if result["credentials_removed"] != true {
+		t.Fatal("credentials_removed işareti bekleniyordu")
+	}
+}
+
 func TestFingerprint(t *testing.T) {
 	a := Fingerprint("password123")
 	b := Fingerprint("password123")

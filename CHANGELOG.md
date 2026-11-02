@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+## [0.12.0] — 2026-11-02 — Faz 11: E-posta servisi yönetimi
+
+### Added
+- **Mail adaptörü (`agent/internal/mailops`, yalnız stdlib):** Postfix + Dovecot + Rspamd tabanlı isteğe bağlı modül — 16 typed işlem: `mail.preflight` (ikili/sürüm/port/vmail/wiring taraması; KURULUM YAPMAZ — kriter 1), `mail.status`, `mail.domain.list/create/delete`, `mail.mailbox.list/create/delete`, `mail.alias.list/create/delete`, `mail.quota.set`, `mail.config.check` (postfix check + doveconf -n + rspamadm configtest), `mail.queue.list` (postqueue -j; gövde ve alıcı adresleri ayrıştırmada DÜŞÜRÜLÜR — kriter 5), `mail.limits.get/set` (6 kapalı-enum Postfix tunable, aralık doğrulamalı).
+- **Opt-in kapı:** `--mail-enable` (VARSAYILAN KAPALI; kapalıyken tipli unsupported) — ADR-0012/0014 genelleştirmesi; broker Config.Mail + MailRunner hermetik arayüz; agent MailExecutor relay-only (MaxPayload 8 KiB); unix capability 51→67.
+- **Syntax check + rollback değişmezi (kriter 4):** her mutasyon atomic write → postmap → `postfix check`/`doveconf -n` kapısı → başarısızlıkta byte-düzeyi geri alma → tipli ErrSyntaxCheck; reload best-effort ve dürüst `reloaded` bayrağı. Yönetilen yollar: `/etc/server-control/mail/` (domains/vmailbox/valias hash map'leri + dovecot-users 0600), marker-blok `/etc/postfix/main.cf`, marker parça `/etc/dovecot/conf.d/99-server-control.conf`, Maildir kökü `/var/vmail` (vmail 5000:5000 — yoksa tipli red).
+- **Şifre disiplini:** mailbox şifresi node'da üretilir (crypto/rand 32 alnum), userdb'de YALNIZ {SSHA} hash; düz metin görev sonucunda bir kez döner ve agentsrv ResultScrubber AES-256-GCM seal edip db_credentials'e kind="mailbox" olarak ayırır (migration 0015 CHECK genişletmesi); TEK SEFERLİK reveal mevcut REST ucundan; CP_SECRETS_KEY ayarsızsa dürüst redaksiyon (kriter 2 — typed domain/mailbox/alias/quota işlemleri görev motoru + broker audit izinde).
+- **Deliverability rehberi (kriter 3):** MailPanel'de SPF/DKIM/DMARC/PTR açıklama kartları + örnek DNS kayıtları + "panel dış DNS yönetmez" dürüst notu; DKIM imzalama yönetimi ve Rspamd politika düzenlemesi bu fazda dürüstçe kapsam dışı.
+- **UI:** NodeDetail E-posta bölümü (MailPanel: preflight rozetleri + notlar, servis özeti, domain/mailbox/alias yönetimi, kota formu, tek-seferlik şifre reveal, içeriksiz kuyruk tablosu, kapalı-enum limit formu, config check rozetleri); TR/EN sözlük (+67 anahtar); DbFsPanel credential listesi kind="mailbox" filtresiyle mail paneline bırakıldı.
+- **Testler:** mailops 22 hermetik birim test (sahte ikililerle tüm akışlar: apply/rollback/replay/izin/port/maskeli şifre; gofmt+vet temiz) + realhost kanıt testleri (EXPECTED_MAIL=1); CP ops_faz11 validator testleri + 83-op registry testi + mailbox scrubber birimleri; vitest MailPanel süiti (5 test); Playwright `mail.spec.ts` (4 test) + 4 ekran görüntüsü `docs/reviews/screenshots/phase-11/`.
+- **CI:** yeni `agent-mail` job — runner'da GERÇEK Postfix+Dovecot ile tam lifecycle + sendmail→virtual→Maildir KONTROLLÜ TESLİM kanıtı + gerçek syntax-rollback kanıtı (EXPECTED_MAIL=1 sessiz atlanamaz — CI-17 dersi); 14 job.
+- **Dokümanlar:** ADR-0015 + `docs/architecture/mail.md` (yönetilen yollar, satır biçimi, güvenlik değişmezleri, dürüst sınırlar) + deploy README (--mail-enable semantiği) + dependency-registry (yeni harici Go bağımlılığı YOK; Postfix IPL-1.0 / Dovecot LGPL-2.1 / Rspamd Apache-2.0 çalışma-zamanı sistem bağımlılığı olarak kaydedildi).
+
+
 ## [0.11.0] — 2026-11-02 — Faz 10: Veritabanları ve güvenli dosya yöneticisi
 
 ### Added

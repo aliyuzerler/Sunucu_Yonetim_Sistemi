@@ -77,5 +77,23 @@ func DefaultRegistry(brokerPath, dockerSocket string) (*ExecutorRegistry, error)
 		NewFsExecutor(broker.OpFSUpload, brokerPath),
 		NewFsExecutor(broker.OpFSChmod, brokerPath),
 		NewFsExecutor(broker.OpFSChown, brokerPath),
+		// Faz 11: e-posta servisi ailesi (16 op — gerçek yürütme yalnız
+		// broker'da --mail-enable ile; ADR-0015).
+		NewMailExecutor(broker.OpMailPreflight, brokerPath),
+		NewMailExecutor(broker.OpMailStatus, brokerPath),
+		NewMailExecutor(broker.OpMailDomainList, brokerPath),
+		NewMailExecutor(broker.OpMailDomainCreate, brokerPath),
+		NewMailExecutor(broker.OpMailDomainDelete, brokerPath),
+		NewMailExecutor(broker.OpMailBoxList, brokerPath),
+		NewMailExecutor(broker.OpMailBoxCreate, brokerPath),
+		NewMailExecutor(broker.OpMailBoxDelete, brokerPath),
+		NewMailExecutor(broker.OpMailAliasList, brokerPath),
+		NewMailExecutor(broker.OpMailAliasCreate, brokerPath),
+		NewMailExecutor(broker.OpMailAliasDelete, brokerPath),
+		NewMailExecutor(broker.OpMailQuotaSet, brokerPath),
+		NewMailExecutor(broker.OpMailConfigCheck, brokerPath),
+		NewMailExecutor(broker.OpMailQueueList, brokerPath),
+		NewMailExecutor(broker.OpMailLimitsGet, brokerPath),
+		NewMailExecutor(broker.OpMailLimitsSet, brokerPath),
 	)
 }
