@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { apiFetch, isApiError } from "../api/client";
+import { CopyButton } from "./CopyButton";
 
 // Faz 11: E-posta servisi paneli (NodeDetail bölümü).
 //
@@ -545,9 +546,11 @@ export function MailPanel(props: {
               ))}
             </ul>
             {revealed && (
-              <p className="mt-1 rounded border border-amber-300 bg-amber-50 p-1.5 font-mono text-ink" data-testid="mail-revealed-password">
-                {revealed.password}
-                <span className="ml-2 font-sans text-[10px] text-ink-soft">{t("nodedetail.mail.credentials.onceWarning")}</span>
+              <p className="mt-1 flex flex-wrap items-center gap-2 rounded border border-amber-300 bg-amber-50 p-1.5 font-mono text-ink" data-testid="mail-revealed-password">
+                <span>{revealed.password}</span>
+                {/* UX denetimi m.4.4: tek seferlik şifre tek tıkla kopyalanır. */}
+                <CopyButton value={revealed.password} />
+                <span className="font-sans text-[10px] text-ink-soft">{t("nodedetail.mail.credentials.onceWarning")}</span>
               </p>
             )}
           </div>

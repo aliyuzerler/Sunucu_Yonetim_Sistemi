@@ -49,9 +49,13 @@ test("eklentiler: izin onayı → Onaylı rozeti + audit", async ({ page }) => {
   await page.getByRole("button", { name: "Modüller" }).click();
   await expect(page.getByText("Site Audit Helper")).toBeVisible({ timeout: 15000 });
 
-  page.on("dialog", (d) => d.accept());
+  // UX denetimi m.4.3: onay artık uygulama içi dialog ile yapılır
+  // (window.confirm kaldırıldı — dialog listener'ı gereksiz).
   const row = page.getByRole("listitem").filter({ hasText: "Site Audit Helper" }).last();
   await row.getByRole("button", { name: "Onayla" }).first().click();
+  const dialog = page.getByRole("dialog", { name: "Onay bekleniyor" });
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole("button", { name: "Onayla" }).click();
   await expect(page.getByText("İşlem tamamlandı.")).toBeVisible({ timeout: 15000 });
   await page.screenshot({ path: path.join(shotDir, "02-extension-approve.png"), fullPage: true });
 });

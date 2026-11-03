@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+### UX kullanılabilirlik denetimi — P1 maddeleri (m.4.1–m.4.5, ADR-0022)
+
+Rapor: `Server-Control-Kullanilabilirlik-Denetim-Raporu.pdf` (20 bulgu; bu blok P1'in tamamı).
+
+#### Added
+- **Hash tabanlı URL yönlendirme (m.4.1, ADR-0022):** gezinme `useState` yerine URL hash'inden türetilir (`web/src/navigation/router.ts` — saf `parseHash`/`buildHash`; `App.tsx` `hashchange` dinleyicisi + iyimser senkron `navigate`). Biçim `#/<sayfa>`; boş/bilinmeyen → `#/overview`; bilinmeyen sayfa ComingSoon'u korur. **Yeni harici bağımlılık YOK.** Geri/ileri tuşları, yer imi ve yenileme artık doğru çalışır.
+- **NodeDetail adreslenebilirliği (m.4.2):** `#/nodes/<id>` derin bağlantısı doğrudan detay görünümünü açar; node ilk sayfada (limit=100) yoksa tekil `GET /api/v1/nodes/{id}` ucundan çekilir, bulunamazsa dürüstçe liste kalır. Satır "Detay" → `#/nodes/<id>`, "Node listesine dön" → `#/nodes`.
+- **ConfirmDialog (`components/ConfirmDialog.tsx`, m.4.3):** `window.confirm` kaldırıldı (Extensions ×2, Dns ×1, Updates ×2) — temalı `role="dialog"` + `aria-modal` + `aria-labelledby/describedby`, Escape ile iptal, arka plan tıklaması iptal, odak HER ZAMAN güvenli seçenekte (Vazgeç) açılır, `busy` sırasında kilitli.
+- **ToastProvider (`components/ToastProvider.tsx`, m.4.3):** sağ alt köşede `role="status"` + `aria-live="polite"` bildirimler; 5 sn otomatik kaybolma, elle kapatma butonu, en fazla 4 görünür. İlk gerçek kullanım: DNS sağlayıcı silme sonucu ("DNS sağlayıcısı silindi." — ok).
+- **CopyButton (`components/CopyButton.tsx`, m.4.4):** tek-gösterim değerler tek tıkla panoya alınır — Clipboard API + (güvenli olmayan bağlam için) geçici textarea+execCommand yedeği; "Kopyalandı/Kopyalanamadı" dürüst geri bildirimi (`aria-live="polite"`). Entegrasyonlar: Agent kayıt tokenı (EnrollmentPage reveal), db credential şifresi (DbFsPanel), mailbox şifresi (MailPanel).
+- **Dil tercihi kalıcılığı (m.4.5):** `LocaleProvider` sırayla localStorage (`servercontrol.locale`) → tarayıcı dili (tr öneki) → `"tr"`; tercih değişimi localStorage'a yazılır ve `<html lang>` güncellenir; depolama hatalarında sessiz oturumluk düşüş.
+
+#### Changed
+- `NodesPage` seçimi kontrollü tasarıma geçti: seçim URL'den türetilir (yerel `selectedNodeID` state'i kaldırıldı — react-hooks `set-state-in-effect` ihlali de kalmaz); tekil çekme sonucu id eşleşmesiyle türetilir (cascading render yok).
+- vitest **55 → 82** (+27: router saf testleri, App derin bağlantı/geri tuşu, `#/nodes/<id>` tekil-çekme, CopyButton 3 yol, ConfirmDialog 4, Toast 2, Locale kalıcılık 4; Extensions/Updates onay testleri artık gerçek dialog ile). Playwright **47 → 53** (+6: `e2e/ux-p1.spec.ts` — derin bağlantı+yenileme, geri/ileri hash senkronu, dil kalıcılığı, node derin bağlantı, token kopyalama, dialog+toast; extensions e2e dialog'a uyarlandı).
+- i18n: TR/EN +12 ortak anahtar (`common.copy.*`, `common.confirm.*`, `common.toast.*`, `dns.providers.deleted`).
+- Dokümanlar: ADR-0022 + ADR dizini; `docs/ui-ux/navigation.md` hash şeması bölümü; `docs/project-status.md` UX-P1 bloğu.
+
 ## [0.17.0-dev] — 2026-11-03 — Faz 16: Cloudflare DNS sağlayıcı entegrasyonu (ADR-0021)
 
 ### Added

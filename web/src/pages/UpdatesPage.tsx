@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch, isApiError } from "../api/client";
 import type { NodePage, TaskRecord, UpdateArtifact } from "../api/client";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import { EmptyState } from "../components/EmptyState";
 import { StatusBadge } from "../components/StatusBadge";
 import type { BadgeVariant } from "../components/StatusBadge";
@@ -53,6 +54,11 @@ export function UpdatesPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
+  // UX denetimi m.4.3: window.confirm yerine dialog — bekleyen yıkıcı eylem.
+  const [pendingConfirm, setPendingConfirm] = useState<{
+    description: string;
+    action: () => void;
+  } | null>(null);
 
   const reload = useCallback(() => setReloadKey((k) => k + 1), []);
 
@@ -225,9 +231,10 @@ export function UpdatesPage() {
                     type="button"
                     disabled={busy !== null}
                     onClick={() => {
-                      if (window.confirm(t("updates.revokeConfirm"))) {
-                        void revoke(a.id);
-                      }
+                      setPendingConfirm({
+                        description: t("updates.revokeConfirm"),
+                        action: () => void revoke(a.id),
+                      });
                     }}
                     className="ml-auto rounded-lg border border-err/40 bg-panel px-2.5 py-1 text-[11px] font-medium text-err hover:bg-err-soft focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-50"
                   >
@@ -271,9 +278,10 @@ export function UpdatesPage() {
             type="button"
             disabled={busy !== null || !selectedNode}
             onClick={() => {
-              if (window.confirm(t("updates.rollbackConfirm"))) {
-                void runUpdateTask("update.rollback", {}, "rollback");
-              }
+              setPendingConfirm({
+                description: t("updates.rollbackConfirm"),
+                action: () => void runUpdateTask("update.rollback", {}, "rollback"),
+              });
             }}
             className="rounded-lg border border-border bg-panel px-2.5 py-1 text-xs font-medium text-ink hover:bg-neutral-soft focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-50"
           >
@@ -282,6 +290,22 @@ export function UpdatesPage() {
         </div>
         <p className="mt-2 text-[11px] text-ink-soft">{t("updates.stageNote")}</p>
       </section>
+
+      <ConfirmDialog
+        open={pendingConfirm !== null}
+        title={t("common.confirm.title")}
+        description={pendingConfirm?.description ?? ""}
+        confirmLabel={t("common.confirm.confirm")}
+        cancelLabel={t("common.cancel")}
+        danger
+        busy={busy !== null}
+        onConfirm={() => {
+          const action = pendingConfirm?.action;
+          setPendingConfirm(null);
+          action?.();
+        }}
+        onCancel={() => setPendingConfirm(null)}
+      />
     </div>
   );
 }

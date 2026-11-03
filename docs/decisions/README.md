@@ -45,3 +45,4 @@ ADR'ler, mimari olarak önemli kararları, bağlamlarını ve sonuçlarını kay
 | [ADR-0019](ADR-0019-extension-contract.md) | Eklenti Sözleşmesi — İmzalı Manifest, Varsayılan İzinsiz Onay Modeli, Tip İş Delegasyonu | Accepted (Phase 15) |
 | [ADR-0020](ADR-0020-signed-updates.md) | İmzalı Güncelleme Hattı — Staging, Zorunlu İmza+Hash Doğrulaması, Health-Check ve Rollback | Accepted (Phase 15) |
 | [ADR-0021](ADR-0021-cloudflare-dns-provider.md) | Cloudflare DNS Sağlayıcısı — Faz 09 Sözleşmesinde Gerçek Sağlayıcı Adaptörü (yalnız stdlib, token mühürlü) | Accepted (Phase 16) |
+| [ADR-0022](ADR-0022-hash-url-routing.md) | Hash Tabanlı URL Yönlendirme — Paylaşılabilir Görünüm Adresleri ve NodeDetail Derin Bağlantısı | Accepted (UX Denetimi P1) |

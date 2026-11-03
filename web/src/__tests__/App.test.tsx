@@ -52,6 +52,9 @@ function renderApp() {
 
 beforeEach(() => {
   mockFetch.mockReset();
+  // m.4.5: Dil tercihi artık kalıcı — testler arası sızıntıyı önle.
+  window.localStorage.clear();
+  window.location.hash = "";
 });
 
 describe("App kabuğu", () => {

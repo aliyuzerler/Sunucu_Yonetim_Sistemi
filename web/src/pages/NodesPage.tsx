@@ -15,14 +15,29 @@ const statusVariant: Record<NodeRecord["status"], BadgeVariant> = {
   retired: "neutral",
 };
 
-export function NodesPage() {
+export function NodesPage({
+  routeNodeId,
+  onOpenNode,
+  onNodeClosed,
+}: {
+  /** UX denetimi m.4.2: #/nodes/<id> derin bağlantısından gelen node kimliği. */
+  routeNodeId?: string | null;
+  /** Satır detail tıklamasında URL'i güncelleyen geri çağrı (App → hash). */
+  onOpenNode?: (id: string) => void;
+  /** Detay kapatıldığında URL'i #/nodes'a döndüren geri çağrı. */
+  onNodeClosed?: () => void;
+}) {
   const { t } = useI18n();
   const [page, setPage] = useState<NodePage | null>(null);
   const [groups, setGroups] = useState<GroupRecord[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
-  const [selectedNodeID, setSelectedNodeID] = useState<string | null>(null);
+  const [fetchedNode, setFetchedNode] = useState<NodeRecord | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
+
+  // m.4.2: URL tek doğruluk kaynağıdır — seçim, derin bağlantıdan
+  // türetilir; geri/ileri ve elle hash düzenlemesi otomatik çalışır.
+  const selectedNodeID = routeNodeId ?? null;
 
   const reload = useCallback(() => setReloadKey((k) => k + 1), []);
 
@@ -50,6 +65,29 @@ export function NodesPage() {
   }, [reloadKey, t]);
 
   const loading = page === null && error === null;
+
+  // m.4.2: Derin bağlantıdaki node ilk sayfada (limit=100) yoksa tekil
+  // uç noktadan çekilir. Bulunamazsa dürüstçe liste görünümünde kalınır.
+  // setFetchedNode yalnız ASYNC geri çağrıda çağrılır (cascading render yok);
+  // eski sonuç, id eşleşmesiyle türetilerek doğal olarak geçersizleşir.
+  useEffect(() => {
+    if (!selectedNodeID || !page) return;
+    if (page.nodes.some((n) => n.id === selectedNodeID)) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const n = await apiFetch<NodeRecord>(
+          `/api/v1/nodes/${encodeURIComponent(selectedNodeID)}`,
+        );
+        if (!cancelled) setFetchedNode(n);
+      } catch {
+        if (!cancelled) setFetchedNode(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedNodeID, page]);
 
   async function createGroup(name: string): Promise<boolean> {
     try {
@@ -82,7 +120,9 @@ export function NodesPage() {
     }
   }
 
-  const selectedNode = page?.nodes.find((n) => n.id === selectedNodeID) ?? null;
+  const selectedNode =
+    page?.nodes.find((n) => n.id === selectedNodeID) ??
+    (fetchedNode && fetchedNode.id === selectedNodeID ? fetchedNode : null);
 
   return (
     <div className="flex flex-col gap-4 p-6">
@@ -107,7 +147,14 @@ export function NodesPage() {
         </p>
       )}
 
-      {selectedNode && <NodeDetail node={selectedNode} onBack={() => setSelectedNodeID(null)} />}
+      {selectedNode && (
+        <NodeDetail
+          node={selectedNode}
+          onBack={() => {
+            onNodeClosed?.();
+          }}
+        />
+      )}
 
       {!selectedNode && showForm && (
         <NodeCreateForm
@@ -171,7 +218,7 @@ export function NodesPage() {
                   <td className="px-4 py-2.5">
                     <button
                       type="button"
-                      onClick={() => setSelectedNodeID(n.id)}
+                      onClick={() => onOpenNode?.(n.id)}
                       className="rounded-lg border border-border px-2.5 py-1 text-[11px] text-ink hover:bg-neutral-soft focus-visible:outline-2 focus-visible:outline-accent"
                     >
                       {t("nodes.detail")}

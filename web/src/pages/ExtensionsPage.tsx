@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch, isApiError } from "../api/client";
 import type { ExtensionRow } from "../api/client";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import { EmptyState } from "../components/EmptyState";
 import { StatusBadge } from "../components/StatusBadge";
 import type { BadgeVariant } from "../components/StatusBadge";
@@ -36,6 +37,13 @@ export function ExtensionsPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
+  // UX denetimi m.4.3: window.confirm yerine dialog durumu — bekleyen
+  // onay, açıklaması ve yıkıcılık derecesiyle birlikte tutulur.
+  const [pendingConfirm, setPendingConfirm] = useState<{
+    description: string;
+    danger: boolean;
+    action: () => void;
+  } | null>(null);
 
   const reload = useCallback(() => setReloadKey((k) => k + 1), []);
 
@@ -210,9 +218,11 @@ export function ExtensionsPage() {
                               type="button"
                               disabled={busy || e.state === "revoked"}
                               onClick={() => {
-                                if (window.confirm(t("extensions.approveConfirm"))) {
-                                  void post(`/api/v1/extensions/${encodeURIComponent(e.id)}/permissions/approve`, { action: p.action, confirm: true });
-                                }
+                                setPendingConfirm({
+                                  description: t("extensions.approveConfirm"),
+                                  danger: false,
+                                  action: () => void post(`/api/v1/extensions/${encodeURIComponent(e.id)}/permissions/approve`, { action: p.action, confirm: true }),
+                                });
                               }}
                               className="ml-auto rounded-lg bg-accent px-2.5 py-1 text-[11px] font-semibold text-white hover:opacity-90 focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-50"
                             >
@@ -236,9 +246,11 @@ export function ExtensionsPage() {
                     type="button"
                     disabled={busy}
                     onClick={() => {
-                      if (window.confirm(t("extensions.revokeConfirm"))) {
-                        void post(`/api/v1/extensions/${encodeURIComponent(e.id)}/revoke`, {});
-                      }
+                      setPendingConfirm({
+                        description: t("extensions.revokeConfirm"),
+                        danger: true,
+                        action: () => void post(`/api/v1/extensions/${encodeURIComponent(e.id)}/revoke`, {}),
+                      });
                     }}
                     className="mt-2 rounded-lg border border-err/40 bg-panel px-2.5 py-1 text-[11px] font-medium text-err hover:bg-err-soft focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-50"
                   >
@@ -253,6 +265,22 @@ export function ExtensionsPage() {
           </ul>
         )}
       </section>
+
+      <ConfirmDialog
+        open={pendingConfirm !== null}
+        title={t("common.confirm.title")}
+        description={pendingConfirm?.description ?? ""}
+        confirmLabel={t("common.confirm.confirm")}
+        cancelLabel={t("common.cancel")}
+        danger={pendingConfirm?.danger ?? false}
+        busy={busy}
+        onConfirm={() => {
+          const action = pendingConfirm?.action;
+          setPendingConfirm(null);
+          action?.();
+        }}
+        onCancel={() => setPendingConfirm(null)}
+      />
     </div>
   );
 }

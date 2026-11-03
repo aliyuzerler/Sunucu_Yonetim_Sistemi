@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ExtensionsPage } from "../pages/ExtensionsPage";
 import { UpdatesPage } from "../pages/UpdatesPage";
@@ -104,11 +104,38 @@ describe("ExtensionsPage", () => {
         },
       }) as never,
     );
-    window.confirm = () => true;
+    // UX denetimi m.4.3: onay artık gerçek dialog üzerinden yapılır
+    // (window.confirm mock'u YOK). Sayfa butonu dialog'u açar;
+    // POST, dialog içindeki Onayla ile gönderilir.
     await user.click(screen.getByRole("button", { name: "Onayla" }));
+    const dialog = screen.getByRole("dialog", { name: "Onay bekleniyor" });
+    expect(dialog).toHaveTextContent("Bu izni onaylıyor musunuz?");
+    await user.click(within(dialog).getByTestId("confirm-dialog-confirm"));
     await waitFor(() => {
       expect(screen.getByText("İşlem tamamlandı.")).toBeInTheDocument();
     });
+  });
+
+  it("onay dialogunda vazgeçmek POST atmaz (m.4.3)", async () => {
+    mockFetch.mockImplementation(
+      routeJson({ "/api/v1/extensions": { extensions: [ext], trust_enabled: true } }) as never,
+    );
+    const user = userEvent.setup();
+
+    render(
+      <LocaleProvider>
+        <ExtensionsPage />
+      </LocaleProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Demo Extension")).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: "Onayla" }));
+    const dialog = screen.getByRole("dialog", { name: "Onay bekleniyor" });
+    await user.click(within(dialog).getByRole("button", { name: "Vazgeç" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.queryByText("İşlem tamamlandı.")).not.toBeInTheDocument();
   });
 
   it("güven kökü kapalıyken dürüst uyarı gösterir", async () => {
@@ -156,8 +183,11 @@ describe("UpdatesPage", () => {
         "/api/v1/update-artifacts/77777777-7777-4777-8777-777777777777/revoke": { revoked: true },
       }) as never,
     );
-    window.confirm = () => true;
+    // İptal artık dialog üzerinden: İptal et → dialog → Onayla → POST.
     await user.click(screen.getByRole("button", { name: "İptal et" }));
+    const dialog = screen.getByRole("dialog", { name: "Onay bekleniyor" });
+    expect(dialog).toHaveTextContent("Bu artifact iptal edilecek");
+    await user.click(within(dialog).getByTestId("confirm-dialog-confirm"));
     await waitFor(() => {
       expect(screen.getByText("Artifact iptal edildi.")).toBeInTheDocument();
     });

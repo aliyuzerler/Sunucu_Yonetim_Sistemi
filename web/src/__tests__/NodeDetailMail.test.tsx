@@ -1,6 +1,7 @@
 import { describe, expect, it, beforeEach, vi } from "vitest";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { MailPanel } from "../components/MailPanel";
+import { LocaleProvider } from "../i18n/LocaleProvider";
 import type { TaskLike } from "../components/MailPanel";
 
 // Faz 11 vitest: MailPanel — preflight raporu, deliverability açıklaması
@@ -67,7 +68,7 @@ beforeEach(() => {
 describe("MailPanel", () => {
   it("deliverability kartı SPF/DKIM/DMARC/PTR gereksinimlerini açıklar (kriter 3)", () => {
     setup();
-    render(<MailPanel nodeId="n1" submitTask={async () => null} t={t} />);
+    render(<LocaleProvider><MailPanel nodeId="n1" submitTask={async () => null} t={t} /></LocaleProvider>);
     expect(screen.getByTestId("mail-deliverability")).toBeInTheDocument();
     expect(screen.getByText("SPF")).toBeInTheDocument();
     expect(screen.getByText("DKIM")).toBeInTheDocument();
@@ -106,7 +107,7 @@ describe("MailPanel", () => {
       }
       return new Response("{}", { status: 200 });
     });
-    render(<MailPanel nodeId="n1" submitTask={submit} t={t} />);
+    render(<LocaleProvider><MailPanel nodeId="n1" submitTask={submit} t={t} /></LocaleProvider>);
     fireEvent.click(screen.getByText("nodedetail.mail.queue.refresh"));
     return waitFor(() => {
       const table = screen.getByTestId("mail-queue");
@@ -120,7 +121,7 @@ describe("MailPanel", () => {
 
   it("mailbox credential'ları (kind=mailbox) listeler, DB credential'larını filtreler ve tek seferlik reveal eder", async () => {
     const { fetchMock } = setup();
-    render(<MailPanel nodeId="n1" submitTask={async () => null} t={t} />);
+    render(<LocaleProvider><MailPanel nodeId="n1" submitTask={async () => null} t={t} /></LocaleProvider>);
     await waitFor(() => {
       expect(screen.getByText(/ali@mail\.example\.com/)).toBeInTheDocument();
     });
@@ -172,7 +173,7 @@ describe("MailPanel", () => {
       }
       return new Response("{}", { status: 200 });
     });
-    render(<MailPanel nodeId="n1" submitTask={submit} t={t} />);
+    render(<LocaleProvider><MailPanel nodeId="n1" submitTask={submit} t={t} /></LocaleProvider>);
     fireEvent.click(screen.getByText("nodedetail.mail.preflight.run"));
     return waitFor(() => {
       const pf = screen.getByTestId("mail-preflight");
@@ -205,7 +206,7 @@ describe("MailPanel", () => {
       }
       return new Response("{}", { status: 200 });
     });
-    render(<MailPanel nodeId="n1" submitTask={submit} t={t} />);
+    render(<LocaleProvider><MailPanel nodeId="n1" submitTask={submit} t={t} /></LocaleProvider>);
     fireEvent.click(screen.getByText("nodedetail.mail.configcheck.run"));
     return waitFor(() => {
       const cc = screen.getByTestId("mail-configcheck");

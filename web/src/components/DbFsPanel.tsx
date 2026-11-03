@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { apiFetch, isApiError } from "../api/client";
+import { CopyButton } from "./CopyButton";
 
 // Faz 10: Veritabanı + scoped dosya yöneticisi paneli (NodeDetail bölümü).
 //
@@ -470,7 +471,11 @@ export function DbFsPanel(props: {
                       <td className="py-1 pr-2 font-mono text-ink-soft">{c.fingerprint}</td>
                       <td className="py-1">
                         {revealed && revealed.id === c.id ? (
-                          <span className="font-mono text-ink" data-testid="revealed-password">{revealed.password}</span>
+                          <span className="flex items-center gap-1.5">
+                            <span className="font-mono text-ink" data-testid="revealed-password">{revealed.password}</span>
+                            {/* UX denetimi m.4.4: tek seferlik şifre tek tıkla kopyalanır. */}
+                            <CopyButton value={revealed.password} />
+                          </span>
                         ) : c.revealed_at ? (
                           <span className="text-ink-soft">{t("nodedetail.db.revealed")}</span>
                         ) : (

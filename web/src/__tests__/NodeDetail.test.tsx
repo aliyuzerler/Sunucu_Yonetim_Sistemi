@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -198,9 +199,21 @@ describe("NodesPage detail navigation", () => {
     );
 
     const user = userEvent.setup();
+    // m.4.2: Seçim URL'den türetilir (kontrollü tasarım). Bu test, App'in
+    // yapacağını simülerler: onOpenNode → routeNodeId güncellenir.
+    function NodesPageHarness() {
+      const [routeNodeId, setRouteNodeId] = useState<string | null>(null);
+      return (
+        <NodesPage
+          routeNodeId={routeNodeId}
+          onOpenNode={setRouteNodeId}
+          onNodeClosed={() => setRouteNodeId(null)}
+        />
+      );
+    }
     render(
       <LocaleProvider>
-        <NodesPage />
+        <NodesPageHarness />
       </LocaleProvider>,
     );
     await waitFor(() => {

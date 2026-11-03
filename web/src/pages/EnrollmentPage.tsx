@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { apiFetch, isApiError } from "../api/client";
 import type { GroupRecord, NodePage } from "../api/client";
+import { CopyButton } from "../components/CopyButton";
 import { EmptyState } from "../components/EmptyState";
 import { StatusBadge } from "../components/StatusBadge";
 import type { BadgeVariant } from "../components/StatusBadge";
@@ -117,9 +118,12 @@ export function EnrollmentPage() {
         >
           <h2 className="text-sm font-semibold text-ink">{t("enrollment.reveal.title")}</h2>
           <p className="mt-1 text-xs text-ink-soft">{t("enrollment.reveal.description")}</p>
-          <code className="mt-2 block overflow-x-auto rounded-lg bg-surface px-3 py-2 text-xs text-ink">
-            {revealed.plaintext}
-          </code>
+          <div className="mt-2 flex items-stretch gap-2">
+            <code className="min-w-0 flex-1 overflow-x-auto rounded-lg bg-surface px-3 py-2 text-xs text-ink">
+              {revealed.plaintext}
+            </code>
+            <CopyButton value={revealed.plaintext} className="shrink-0 self-center" />
+          </div>
           <p className="mt-2 text-[11px] text-ink-soft">
             {t("enrollment.reveal.command", {
               expires: new Date(revealed.expires_at).toLocaleString(),

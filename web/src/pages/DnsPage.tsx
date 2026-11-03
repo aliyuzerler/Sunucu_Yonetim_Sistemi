@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch, isApiError } from "../api/client";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import { EmptyState } from "../components/EmptyState";
+import { ToastProvider, useToast } from "../components/ToastProvider";
 import { useI18n } from "../i18n/LocaleProvider";
 import type { TaskRecord } from "../api/client";
 
@@ -66,11 +68,24 @@ async function runTask(
   throw new Error(fallback);
 }
 
+// Sayfa kendi ToastProvider'ını taşır: hem App kabuğundan hem izole
+// render'dan (testler) bağımsız çalışır; iç içe sağlayıcı zararsızdır.
 export function DnsPage() {
+  return (
+    <ToastProvider>
+      <DnsPageInner />
+    </ToastProvider>
+  );
+}
+
+function DnsPageInner() {
   const { t } = useI18n();
+  const { showToast } = useToast();
   const [providers, setProviders] = useState<ProviderRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
+  // UX denetimi m.4.3: window.confirm yerine erişilebilir dialog.
+  const [pendingDelete, setPendingDelete] = useState<ProviderRow | null>(null);
 
   // add-provider form
   const [newName, setNewName] = useState("");
@@ -157,7 +172,6 @@ export function DnsPage() {
   }
 
   async function deleteProvider(id: string) {
-    if (!window.confirm(t("dns.providers.deleteConfirm"))) return;
     try {
       await apiFetch(`/api/v1/dns-providers/${encodeURIComponent(id)}`, { method: "DELETE" });
       if (selectedProvider === id) {
@@ -167,6 +181,7 @@ export function DnsPage() {
         setRecords(null);
         setReport(null);
       }
+      showToast(t("dns.providers.deleted"), "ok");
       await reloadProviders();
     } catch (err) {
       setError(isApiError(err) ? err.message : t("common.error.generic"));
@@ -351,7 +366,7 @@ export function DnsPage() {
                     </button>{" "}
                     <button
                       type="button"
-                      onClick={() => void deleteProvider(p.id)}
+                      onClick={() => setPendingDelete(p)}
                       className="rounded-md border border-border px-2 py-1 text-xs text-err hover:bg-err-soft focus-visible:outline-2 focus-visible:outline-accent"
                     >
                       {t("dns.providers.delete")}
@@ -588,6 +603,21 @@ export function DnsPage() {
           )}
         </section>
       )}
+
+      <ConfirmDialog
+        open={pendingDelete !== null}
+        title={t("common.confirm.title")}
+        description={t("dns.providers.deleteConfirm")}
+        confirmLabel={t("common.confirm.confirm")}
+        cancelLabel={t("common.cancel")}
+        danger
+        onConfirm={() => {
+          const id = pendingDelete?.id;
+          setPendingDelete(null);
+          if (id) void deleteProvider(id);
+        }}
+        onCancel={() => setPendingDelete(null)}
+      />
     </div>
   );
 }
