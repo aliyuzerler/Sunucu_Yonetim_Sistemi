@@ -5,6 +5,8 @@ Tarih: 2026-11-02
 Faz: 09 (Domain, DNS, reverse proxy ve SSL)
 İlgili: ADR-0003 (typed operations), ADR-0008 (agent mTLS), ADR-0012 (web hosting broker-tekil)
 
+> **Update (Faz 16):** Bu ADR'nin 'yalnız mock' kapsam kararı, Faz 16'da **ADR-0021** ile kısmen aşildi: Cloudflare sağlayıcısı bu ADR'nin arayüz sözleşmesi DEĞİŞTİRİLMEDEN uygulandı (yalnız stdlib, mühürlü api_token, aynı doğrulama/diff/audit katmanı). Aşağıdaki bağlam Faz 09 tarihsel kaydı olarak korunur.
+
 ## Bağlam
 
 Faz 09; domain envanteri, DNS sağlayıcı entegrasyonu ve ACME sertifika yaşam döngüsünü ekler. Kabul kriterleri şunları zorunlu kılar: sağlayıcı adaptörü kayıt CRUD + kabiliyet bildirimi; bölge/kayıt değişikliklerinde diff önizleme + TTL doğrulama + denetim; ACME issue/renew/revoke/expiry durum yönetimi ve rate limit/challenge hatalarının görünürlüğü; web sunucu config'inin sertifika yüklenmeden doğrulanması ve başarısız yenilemenin canlı sertifikayı bozmaması; dış entegrasyon kimlik bilgilerinin şifreli saklanması ve UI'da tekrar gösterilmemesi.

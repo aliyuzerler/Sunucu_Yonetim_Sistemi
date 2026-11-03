@@ -46,7 +46,7 @@ Bu belge, domain/DNS sağlayıcı adaptörü ve ACME sertifika yaşam döngüsü
 
 | Yetenek | Durum |
 |---|---|
-| DNS sağlayıcı türleri | **yalnız `mock`** (in-memory). Cloudflare/Route53/... → sonraki iş (hesap gerektirir; tahminle açılmaz) |
+| DNS sağlayıcı türleri | `mock` (in-memory) + **`cloudflare`** (gerçek sağlayıcı, API v4 — Faz 16, ADR-0021). Route53/Google DNS/... → sonraki iş (aynı şablon: BuildX + httptest sahte süit + ADR) |
 | Kayıt türleri | A, AAAA, CNAME, TXT, MX (kapalı küme) |
 | TTL aralığı | 60–86400 (sağlayıcı capability beyanıyla doğrulanır) |
 | Wildcard kayıt (*.sub) | destekli (capability: wildcard) |
@@ -88,7 +88,7 @@ issued ──revoke──▶ revoked
 
 ## 7. Sonraki işler (dürüst liste)
 
-- Gerçek sağlayıcı adaptörleri (Cloudflare/Route53/...) — Provider arayüzü hazır; her biri kendi kabul testiyle gelir.
+- ~~Gerçek sağlayıcı adaptörleri (Cloudflare/...)~~ → **Cloudflare TAMAMLANDI (Faz 16, ADR-0021)**. Route53/Google DNS/... aynı şablonla eklenir; her biri kendi kabul testiyle gelir.
 - Yenilemede anahtar rotasyonu (yeni CSR zinciri + eski anahtarın imhası).
 - Gerçek ACME staging uçtan uca koşusu (disposable domain + CI secret'ı).
 - SSL listener'lı site config entegrasyonu (web.site.create'e ssl bloğu — Faz 08 şablonunun uzantısı).

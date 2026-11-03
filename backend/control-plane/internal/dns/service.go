@@ -24,7 +24,7 @@ type Service struct {
 var ErrKeyMissing = errors.New("dns: şifreleme anahtarı yapılandırılmadı (CP_SECRETS_KEY)")
 
 // ErrKindUnknown marks a provider kind outside the closed supported set.
-var ErrKindUnknown = errors.New("dns: sağlayıcı türü desteklenmiyor (desteklenen: mock)")
+var ErrKindUnknown = errors.New("dns: sağlayıcı türü desteklenmiyor (desteklenen: mock, cloudflare)")
 
 var uuidRE = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 
@@ -37,23 +37,36 @@ func (s *Service) CreateProvider(ctx context.Context, name, kind string, credent
 	if name == "" || len(name) > 100 {
 		return ProviderRow{}, errors.New("dns: sağlayıcı adı 1..100 karakter olmalı")
 	}
-	if strings.TrimSpace(kind) != ProviderKindMock {
-		// Dürüst kapsam: gerçek sağlayıcı entegrasyonları (Cloudflare,
-		// Route53, ...) bu fazda YOK — bilinmeyen tür tahminle açılmaz.
+	var caps Capabilities
+	var credKeys []string
+	switch kind {
+	case ProviderKindMock:
+		if _, err := BuildMock(credentials); err != nil {
+			return ProviderRow{}, err
+		}
+		caps = NewMock().Capabilities()
+		credKeys = []string{"api_key"}
+	case ProviderKindCloudflare:
+		// Faz 16: gerçek sağlayıcı — kimlik bilgisi burada DOĞRULANIR
+		// (BuildCloudflare, API çağrısı yok) ve yalnız mühürlü saklanır.
+		p, err := BuildCloudflare(credentials)
+		if err != nil {
+			return ProviderRow{}, err
+		}
+		caps = p.Capabilities()
+		credKeys = []string{"api_token"}
+	default:
+		// Dürüst kapsam: Route53 vb. bilinmeyen tür tahminle açılmaz.
 		return ProviderRow{}, fmt.Errorf("%w: %q", ErrKindUnknown, kind)
 	}
 	if !s.hasKey() {
 		return ProviderRow{}, ErrKeyMissing
 	}
-	if _, err := BuildMock(credentials); err != nil {
-		return ProviderRow{}, err
-	}
 	sealed, err := s.Key.Encrypt(credentials)
 	if err != nil {
 		return ProviderRow{}, fmt.Errorf("dns: kimlik bilgisi şifrelenemedi: %w", err)
 	}
-	caps := NewMock().Capabilities()
-	return s.Store.Create(ctx, name, kind, caps, sealed, []string{"api_key"})
+	return s.Store.Create(ctx, name, kind, caps, sealed, credKeys)
 }
 
 // DeleteProvider removes a registration (credential blob dies with it).
@@ -87,6 +100,8 @@ func (s *Service) buildProvider(ctx context.Context, id string) (Provider, error
 	switch row.Kind {
 	case ProviderKindMock:
 		return BuildMock(plain)
+	case ProviderKindCloudflare:
+		return BuildCloudflare(plain)
 	default:
 		return nil, fmt.Errorf("%w: %q", ErrKindUnknown, row.Kind)
 	}

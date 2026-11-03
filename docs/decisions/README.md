@@ -44,3 +44,4 @@ ADR'ler, mimari olarak önemli kararları, bağlamlarını ve sonuçlarını kay
 | [ADR-0018](ADR-0018-backup-cloud.md) | Yedekleme/Geri Yükleme ve Bulut Sağlayıcı Bağdaştırıcıları — Ayrık Kapsamlar, Zorunlu Doğrulama, Anahtar Ayrımı, Onay Kapılı Silme | Accepted (Phase 14) |
 | [ADR-0019](ADR-0019-extension-contract.md) | Eklenti Sözleşmesi — İmzalı Manifest, Varsayılan İzinsiz Onay Modeli, Tip İş Delegasyonu | Accepted (Phase 15) |
 | [ADR-0020](ADR-0020-signed-updates.md) | İmzalı Güncelleme Hattı — Staging, Zorunlu İmza+Hash Doğrulaması, Health-Check ve Rollback | Accepted (Phase 15) |
+| [ADR-0021](ADR-0021-cloudflare-dns-provider.md) | Cloudflare DNS Sağlayıcısı — Faz 09 Sözleşmesinde Gerçek Sağlayıcı Adaptörü (yalnız stdlib, token mühürlü) | Accepted (Phase 16) |

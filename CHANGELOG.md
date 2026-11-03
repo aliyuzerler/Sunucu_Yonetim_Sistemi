@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## [0.17.0-dev] — 2026-11-03 — Faz 16: Cloudflare DNS sağlayıcı entegrasyonu (ADR-0021)
+
+### Added
+- **Cloudflare DNS sağlayıcısı (`internal/dns/cloudflare.go` — yalnız stdlib):** Faz 09 Provider sözleşmesi (Capabilities/Zones/Records/ApplyChange) birebir korunarak Cloudflare API v4 istemcisi (net/http + encoding/json; **yeni harici Go bağımlılığı YOK**). Kimlik bilgisi sözleşmesi `{"api_token": ...}` — CreateProvider anında doğrulanır (şema + boşluk + 512 sınır; API çağrısı yok), AES-256-GCM mühürlü saklanır, yalnız Authorization başlığında taşınır; hata mesajı/log/görev sonucuna ASLA yazılmaz (sızma negatifi testli). Dürüst kapsam: bölge oluşturma arayüzde yok (bölgeler Cloudflare hesabında açılır — alan adı satın alma panel dışıdır), kapalı tür kümesi (A/AAAA/CNAME/TXT/MX — NS/SOA/SRV/CAA listelerde filtrelenir), Cloudflare auto-TTL (ttl=1) → 60 beyanlı, sayfalama tavanı 40×50=2000, retry YOK (tipli `dns.ErrAPI` dürüst döner). FQDN↔göreli ad eşlemesi (apex "@", wildcard "*.sub" korunur), MX "öncelik hedef" ↔ ayrı priority alanı, CNAME sondaki nokta temizliği. Aynı doğrulama katmanı + diff önizleme + executor yolları + ACME DNS-01 köprüsü: **wildcard sertifika artık gerçek bölgelerde üretilebilir**. Registry 111 ve capability 92 değişmedi (sağlayıcı CRUD REST yüzeyi; yeni typed op yok).
+- **UI:** DnsPage tür seçimine `cloudflare` + api_token alanı (etiket türe göre döner) + token kapsam ipucu (Zone.DNS Edit + Zone.Read önerisi) — TR/EN.
+- **Testler:** dns hermetik sahte-Cloudflare süiti (httptest API v4: sayfalama, FQDN eşleme, MX/CNAME/auto-TTL dönüşümü, create/update/delete yolları, 403/success=false/şema-uyumsuz tipli hatalar, token sızma negatifi) + PG yuvarlama turu (cloudflare türü kalıcılığı, mock ile yan yana) + service doğrulama negatifleri (boş token, api_key↔api_token sözleşmesi, bilinmeyen tür red); vitest +1 (cloudflare api_token POST, form sıfırlama) — 55/55.
+
+### Changed
+- `dns.ErrKindUnknown` mesajı "(desteklenen: mock, cloudflare)"; `Service.CreateProvider`/`buildProvider` cloudflare türünü destekler (bilinmeyen tür hâlâ tahminle açılmaz).
+
+### Docs
+- ADR-0021 + ADR dizini; ADR-0013'e Faz 16 update notu; `docs/architecture/dns-ssl.md` destek matrisi + sonraki işler; `docs/project-status.md` Faz 16 bloğu.
+
 ## [0.16.0-rc1] — 2026-11-03 — Faz 15: Eklenti sistemi, güncelleme, paketleme ve üretim sertleştirmesi (RC)
 
 ### Added

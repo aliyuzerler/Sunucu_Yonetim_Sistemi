@@ -24,9 +24,17 @@ func TestServiceCreateProviderValidates(t *testing.T) {
 	svc := testService(t)
 	ctx := context.Background()
 
-	// Bilinmeyen tür: dürüst red (tahmin yok).
-	if _, err := svc.CreateProvider(ctx, "cf", "cloudflare", json.RawMessage(`{"api_token":"x"}`)); err == nil {
-		t.Fatal("cloudflare bu fazda desteklenmiyor — reddedilmeli")
+	// Faz 16: Cloudflare artık desteklenen tür — ancak kimlik bilgisi
+	// doğrulaması yine de eksiksiz uygulanır (boş token; API çağrısı yok).
+	if _, err := svc.CreateProvider(ctx, "cf", "cloudflare", json.RawMessage(`{"api_token":""}`)); err == nil {
+		t.Fatal("boş api_token reddedilmeli")
+	}
+	if _, err := svc.CreateProvider(ctx, "cf", "cloudflare", json.RawMessage(`{"api_key":"x"}`)); err == nil {
+		t.Fatal("cloudflare sözleşmesi api_token'dır — api_key reddedilmeli")
+	}
+	// Bilinmeyen tür hâlâ dürüstçe reddedilir (tahmin yok).
+	if _, err := svc.CreateProvider(ctx, "r", "route53", json.RawMessage(`{}`)); err == nil {
+		t.Fatal("route53 desteklenmiyor — reddedilmeli")
 	}
 	// Mock + boş kimlik bilgisi.
 	if _, err := svc.CreateProvider(ctx, "m", "mock", json.RawMessage(`{"api_key":""}`)); err == nil {

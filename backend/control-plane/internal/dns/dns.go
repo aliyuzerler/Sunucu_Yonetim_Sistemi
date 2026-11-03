@@ -79,6 +79,7 @@ var (
 	ErrTypeUnsupport = errors.New("dns: kayıt türü desteklenmiyor")
 	ErrLimit         = errors.New("dns: sınır aşıldı")
 	ErrUnknownKind   = errors.New("dns: bilinmeyen sağlayıcı türü")
+	ErrAPI           = errors.New("dns: sağlayıcı API hatası")
 )
 
 // Limits (mirrored in tasks/ops_faz09.go).

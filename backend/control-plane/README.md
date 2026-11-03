@@ -67,7 +67,7 @@ Hata zarfı: `{code, message, details, correlation_id, retryable}` —
 - `internal/inventory` · `internal/telemetry` — node envanteri ve telemetri kabulü
 - `internal/tasks` — görev motoru (outbox, idempotency, retry/cancellation) + aile operasyonları (`ops_faz05`–`ops_faz15`)
 - `internal/audit` — audit olayları + log redaksiyonu
-- `internal/dns` · `internal/certmgmt` · `internal/acmex` · `internal/certs` — DNS sağlayıcı adaptörleri, sertifika yönetimi, ACME DNS-01 orkestrasyonu
+- `internal/dns` · `internal/certmgmt` · `internal/acmex` · `internal/certs` — DNS sağlayıcı adaptörleri (yerleşik `mock` + **`cloudflare`** API v4 gerçek sağlayıcı — Faz 16/ADR-0021), sertifika yönetimi, ACME DNS-01 orkestrasyonu
 - `internal/secrets` — AES-256-GCM sealed secret deposu (`CP_SECRETS_KEY` zorunlu)
 - `internal/dbcred` · `internal/backup` · `internal/cloud` — DB kimlik bilgileri (tek seferlik reveal), yedekleme/geri yükleme, bulut sağlayıcı adaptörleri
 - `internal/extensions` · `internal/updates` · `internal/signpkg` — eklenti sözleşmesi (SCP-EXT-MANIFEST-V1), imzalı güncelleme hattı (ADR-0020), imza şeması

@@ -94,6 +94,35 @@ describe("DnsPage", () => {
     expect((screen.getByLabelText("API anahtarı (yalnız yazılır)") as HTMLInputElement).value).toBe("");
   });
 
+  it("cloudflare türü sağlayıcı api_token ile POST edilir (Faz 16, ADR-0021)", async () => {
+    const user = userEvent.setup();
+    let posted: unknown;
+    mockFetch
+      .mockImplementationOnce(async () => ({ providers: [] }))
+      .mockImplementationOnce(async (_path, init) => {
+        posted = JSON.parse(String(init?.body));
+        return { id: "new", name: "cf", kind: "cloudflare", capabilities: PROVIDER.capabilities, has_credentials: true, credential_keys: ["api_token"], created_at: "" };
+      })
+      .mockImplementationOnce(async () => ({ providers: [PROVIDER] }));
+
+    render(
+      <LocaleProvider>
+        <DnsPage />
+      </LocaleProvider>,
+    );
+    await waitFor(() => expect(screen.getByRole("button", { name: "Sağlayıcı Ekle" })).toBeEnabled());
+    await user.type(screen.getByLabelText("Sağlayıcı adı"), "cf");
+    await user.selectOptions(screen.getByLabelText("Tür"), "cloudflare");
+    // Tür cloudflare seçilince etiket api_token'a döner.
+    await user.type(screen.getByLabelText("Cloudflare API Token (yalnız yazılır)"), "cf-token-123");
+    await user.click(screen.getByRole("button", { name: "Sağlayıcı Ekle" }));
+
+    await waitFor(() => expect(posted).toBeTruthy());
+    expect(posted).toMatchObject({ name: "cf", kind: "cloudflare", credentials: { api_token: "cf-token-123" } });
+    // Form sıfırlandı: token değeri artık DOM'da değil.
+    expect((screen.getByLabelText("Cloudflare API Token (yalnız yazılır)") as HTMLInputElement).value).toBe("");
+  });
+
   it("diff önizlemesi olmadan apply engellenir (kriter 2 disiplini)", async () => {
     const user = userEvent.setup();
     const calls: string[] = [];

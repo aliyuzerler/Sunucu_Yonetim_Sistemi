@@ -132,13 +132,17 @@ export function DnsPage() {
     }
     setCreating(true);
     try {
+      // Kimlik bilgisi sözleşmesi türe göre değişir: mock → api_key,
+      // cloudflare → api_token (ADR-0021). Her ikisi de YALNIZ YAZILIR.
+      const credentials =
+        newKind === "cloudflare" ? { api_token: newApiKey } : { api_key: newApiKey };
       await apiFetch("/api/v1/dns-providers", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: newName.trim(),
           kind: newKind,
-          credentials: { api_key: newApiKey },
+          credentials,
         }),
       });
       // Başarı sonrası form sıfırlanır — kimlik bilgisi asla geri okunmaz.
@@ -375,10 +379,11 @@ export function DnsPage() {
               className="mt-1 block w-56 rounded-md border border-border bg-surface px-2 py-1.5 text-sm text-ink"
             >
               <option value="mock">{t("dns.providers.kindMock")}</option>
+              <option value="cloudflare">{t("dns.providers.kindCloudflare")}</option>
             </select>
           </label>
           <label className="text-xs text-ink-soft">
-            {t("dns.providers.apiKey")}
+            {newKind === "cloudflare" ? t("dns.providers.apiToken") : t("dns.providers.apiKey")}
             <input
               type="password"
               value={newApiKey}
@@ -397,6 +402,9 @@ export function DnsPage() {
             <p role="alert" className="text-xs text-err">
               {formError}
             </p>
+          )}
+          {newKind === "cloudflare" && !formError && (
+            <p className="w-full text-xs text-ink-soft">{t("dns.providers.cloudflareHint")}</p>
           )}
         </form>
       </section>

@@ -56,7 +56,7 @@ deploy/              PostgreSQL 18 compose + .env.example + agent kurulum rehber
 5. Her faz sonunda `docs/project-status.md`, `CHANGELOG.md` ve ilgili ADR'ler güncellenir; rapor GitHub'a push'lanır.
 6. Çelişki durumunda öncelik sırası `agents.md` §1'dedir; çelişki sessizce çözülmez, ADR önerisi yazılır.
 
-16 fazın tamamı bu süreçle tamamlandı; sonraki değişiklikler için de aynı disiplin (plan → küçük test edilebilir adımlar → kalite kapıları → bağımsız doğrulama → rapor) geçerlidir (`prompts/workflow/`).
+16 fazın tamamı bu süreçle tamamlandı (ardından Faz 16: Cloudflare DNS sağlayıcı entegrasyonu eklendi); sonraki değişiklikler için de aynı disiplin (plan → küçük test edilebilir adımlar → kalite kapıları → bağımsız doğrulama → rapor) geçerlidir (`prompts/workflow/`).
 
 | Faz | Konu |
 |---|---|
@@ -76,6 +76,7 @@ deploy/              PostgreSQL 18 compose + .env.example + agent kurulum rehber
 | 13 | İzleme, log, alarm ve güvenlik merkezi ✅ |
 | 14 | Yedekleme, geri yükleme, bulut ve çoklu sunucu ölçekleme ✅ |
 | 15 | Eklenti sistemi, güncelleme, paketleme ve üretim sertleştirmesi ✅ |
+| 16 | Cloudflare DNS sağlayıcı entegrasyonu (gerçek sağlayıcı adaptörü, ADR-0021) ✅ |
 
 ## Bileşen durumu
 
